@@ -717,6 +717,60 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
    and the value column stay nowrap; they're always short. */
 .lb-table-wrap td:nth-child(2) { white-space: normal; word-break: break-word; }
 
+/* ===================== desktop (>900px) =====================
+   Everything above is tuned mobile-first: small type, tight padding, and rows built to just
+   barely fit a phone's width. On an actual desktop monitor, viewed from further away with a
+   mouse instead of a fingertip, that same sizing reads as too small, and anything sized to
+   hug a narrow phone screen (the Today page's one-line student rows especially) just stretches
+   edge-to-edge on a wide window instead, stranding a student's name at the left and their
+   marking controls off at the right with a dead gap in between. This block turns the type
+   scale and touch targets up and gives list-like content a sane reading width once there's
+   room to spare -- it doesn't change what anything shows, only how big and how it's laid out.
+   Nothing here overlaps the max-width:880px phone block below (900px+ vs. under 880px). */
+@media (min-width: 901px) {
+  :root { font-size: 18px; }
+  body { font-size: 1rem; }
+
+  /* The bigger type below made a staff/student name in the sidebar's account chip
+     ("Example Admin") wide enough to hit the old 236px sidebar's ellipsis -- widening it
+     keeps a real name (or a longer school-staff name) from doing the same. */
+  .sidebar { width: 264px; }
+
+  main.view { padding: 40px 48px 72px; }
+  h1 { font-size: 2.1rem; }
+  h2 { font-size: 1.5rem; }
+  h3 { font-size: 1.15rem; }
+
+  .btn { padding: 10px 18px; font-size: 0.92rem; }
+  .btn-sm { padding: 6px 13px; font-size: 0.82rem; }
+  label { font-size: 0.83rem; }
+  input[type="text"], input[type="date"], input[type="number"], input[type="password"], input[type="tel"], select, textarea {
+    padding: 10px 13px;
+  }
+  .card-pad { padding: 26px 28px; }
+  .stat-tile { padding: 18px 20px; }
+  .stat-tile .value { font-size: 1.9rem; }
+
+  /* Compact Today rows and the class-marking cards are a name-plus-controls list, not a
+     table that benefits from every extra pixel of a wide monitor -- capping the measure
+     keeps a row's contents together instead of pulled apart across the full window width.
+     "Today at a glance" and the other data tables elsewhere are untouched and still use the
+     full page width, where more columns genuinely benefit from it. */
+  .student-rows { max-width: 900px; }
+  .student-card.student-row-compact { padding: 11px 18px; gap: 14px; }
+  .student-row-compact .src-name { font-size: 1rem; }
+  /* Cards view: the bigger type below no longer fits a card's name+note+Present+Excused
+     header at the old 228px minimum column width -- "Excused" was clipping to "Excu...". */
+  .student-grid { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+
+  /* Bigger, easier click targets for a mouse instead of a fingertip. */
+  .src-circle { width: 32px; height: 32px; }
+  .src-circle-label { font-size: 0.68rem; }
+  .btn-icon-sm { width: 32px; height: 32px; font-size: 0.85rem; }
+  .student-row-compact .src-actions .note-toggle-btn { width: 32px; height: 32px; }
+  .marked-by { min-width: 22px; height: 22px; font-size: 0.68rem; }
+}
+
 /* ===================== mobile ===================== */
 @media (max-width: 880px) {
   #app { flex-direction: column; }
@@ -1155,6 +1209,25 @@ document.addEventListener("click", (evt) => {
     if (!wrap.contains(evt.target)) wrap.classList.remove("is-open");
   });
   flushDeferredRefresh();
+});
+// The Hebrew date picker (Today page) is the one popover that isn't just a CSS class toggle --
+// showHebrewCal controls whether renderToday even puts the popover's HTML on the page at all,
+// so closing it here means flipping that flag and re-rendering, the same as the "Cancel"-style
+// paths (picking a day, changing the Gregorian date) already do. Without this, the Hebrew
+// calendar was the only one of the three popovers on this page that stayed open until you
+// picked a date or explicitly closed it, instead of dismissing like a normal dropdown.
+// Deliberately uses composedPath() instead of `.hcal-field`.contains(evt.target): several
+// buttons inside the popover (prev/next month) call renderAll() themselves while leaving it
+// open, which replaces the popover's DOM mid-bubble -- by the time this listener runs,
+// evt.target would be a node render already tore out, and .contains() on a detached node
+// always reads as "outside," slamming the popover shut right after a month-navigation click.
+// composedPath() is captured at dispatch time, before any handler had a chance to re-render,
+// so it still reflects what was actually clicked regardless of what happened afterward.
+document.addEventListener("click", (evt) => {
+  if (!showHebrewCal) return;
+  const path = typeof evt.composedPath === "function" ? evt.composedPath() : [];
+  const insideField = path.some((el) => el.classList && el.classList.contains("hcal-field"));
+  if (!insideField) { showHebrewCal = false; renderAll(); }
 });
 
 /* ---------- refresh-vs-interrupt: with autosave and live updates, a re-render can now be
@@ -1923,7 +1996,13 @@ function periodMarkedCount(date, period, roster) {
   return roster.filter((s) => {
     const r = attendanceRecord(date, s.id);
     const pair = r && r.scores && r.scores[period];
-    return pair && pair[0] !== null && pair[0] !== undefined;
+    if (!pair) return false;
+    // Excused (pair[4]) deliberately has no attendance score (pair[0] is null -- see
+    // buildTodayPatch/setExcused) since it's not counted toward attendance %, but it IS a
+    // real, deliberate entry for this student/period, so it still counts as "marked" here --
+    // otherwise the class/period dropdown's "N/roster marked" undercounts a fully-marked
+    // class that includes an excused student.
+    return (pair[0] !== null && pair[0] !== undefined) || pair[4] === true;
   }).length;
 }
 
@@ -3172,7 +3251,7 @@ function renderAdminSchedule(root) {
     '<div class="field" style="flex:1;"><label for="np-name">New class name</label><input type="text" id="np-name" placeholder="e.g. Chavrusa"></div>' +
     '<div class="field" style="flex-shrink:0;"><button class="btn btn-ghost btn-sm" id="np-add" type="button">Add class</button></div></div>';
   html += '<p class="help-text" style="margin-top:-6px;">The order below is the order classes appear in every dropdown (Today’s Class/period picker, reports, etc.) — drag the handle to reorder. Category controls which Leaderboard(s) a class counts toward — Torah, Avoda, or Gemilas Chassidim classes are combined into one score there; “Other” classes still count toward the overall Attendance/Participation boards.</p>';
-  html += '<div class="table-wrap"><table><thead><tr><th style="width:36px;">Order</th><th style="min-width:150px;">Period</th><th style="min-width:130px;">Category</th>' + DAY_NAMES.map((d) => "<th>" + d.slice(0, 3) + "</th>").join("") + "<th></th></tr></thead><tbody>";
+  html += '<div class="table-wrap"><table><thead><tr><th style="width:36px;">Order</th><th style="min-width:150px;">Period</th><th style="min-width:212px;">Category</th>' + DAY_NAMES.map((d) => "<th>" + d.slice(0, 3) + "</th>").join("") + "<th></th></tr></thead><tbody>";
   state.settings.periods.forEach((p, i) => {
     html += '<tr data-period-row="' + escapeHtml(p) + '"><td style="white-space:nowrap;">' +
       '<button class="btn btn-ghost btn-sm drag-handle" type="button" data-drag-handle title="Drag to reorder">⠿</button>' +
