@@ -672,6 +672,13 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
 .lb-medal.lb-gold { background: var(--gold-soft); color: var(--gold); }
 .lb-medal.lb-silver { background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--line-strong); }
 .lb-medal.lb-bronze { background: var(--caution-soft); color: var(--caution); }
+/* Every other table in the app keeps its cells on one line (tbody td { white-space: nowrap }
+   above) since their content is always short. The leaderboard's Student column is the one
+   place that isn't -- a two-word combined name easily runs past a phone's width -- so letting
+   just that column wrap keeps the whole table inside the viewport instead of forcing the
+   table-wrap div (or, without this, the page itself) to scroll sideways to read a name. Rank
+   and the value column stay nowrap; they're always short. */
+.lb-table-wrap td:nth-child(2) { white-space: normal; word-break: break-word; }
 
 /* ===================== mobile ===================== */
 @media (max-width: 880px) {
@@ -2826,7 +2833,7 @@ function renderLeaderboard(root, session) {
   if (!ranked.length) {
     html += '<p class="help-text" style="margin:0;">Nobody has data for ' + escapeHtml(cat.label) + (lbAgeBand !== "all" ? " in the ages " + escapeHtml(lbAgeBand) + " group" : "") + " yet.</p>";
   } else {
-    html += '<div class="table-wrap"><table><thead><tr><th style="width:56px;">Rank</th><th>Student</th><th class="num">' + escapeHtml(cat.label) + "</th></tr></thead><tbody>";
+    html += '<div class="table-wrap lb-table-wrap"><table><thead><tr><th style="width:44px;">Rank</th><th>Student</th><th class="num">' + escapeHtml(cat.label) + "</th></tr></thead><tbody>";
     ranked.forEach((e, i) => {
       const rank = i + 1;
       const nameHtml = (role === "admin" || role === "teacher") ? studentLink(e.student) : fullName(e.student);
