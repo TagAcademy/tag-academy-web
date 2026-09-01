@@ -214,15 +214,25 @@ main.view {
    (rather than wrapping to the far right of a single flex row) so nothing needs a
    horizontal scroll to reach on a phone. */
 .today-head-controls { margin: 14px 0 18px; display: flex; flex-direction: column; gap: 10px; max-width: 560px; }
+.today-parsha-line {
+  font-family: var(--font-display); font-size: 1.05rem; font-weight: 700; color: var(--gold);
+  text-align: right;
+}
 .thc-row { display: flex; gap: 10px; flex-wrap: wrap; }
 .thc-row > .field { flex: 1 1 150px; min-width: 130px; }
 .today-head-controls > .field { width: 100%; }
 .hcal-field { position: relative; }
+/* Gregorian date is a native <input type="date">, Hebrew date is a <button> standing in for
+   one -- browsers give date inputs their own UA chrome (calendar icon, internal padding) that
+   a plain button doesn't get for free, so without matching height/alignment explicitly the
+   two boxes end up visibly different sizes even though the CSS "looks" the same. */
+.thc-row input[type="date"], .hcal-trigger { height: 40px; box-sizing: border-box; }
 .hcal-trigger {
-  width: 100%; text-align: left; padding: 9px 11px; border-radius: var(--radius-sm);
+  width: 100%; text-align: left; padding: 0 11px; border-radius: var(--radius-sm);
   border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink);
   font-size: 0.85rem; cursor: pointer; font-family: inherit;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: flex; align-items: center;
 }
 .hcal-trigger:hover { border-color: var(--brand); }
 .hcal-pop {
@@ -282,18 +292,51 @@ main.view {
   font-size: 0.85rem; overflow: hidden; white-space: nowrap;
 }
 .student-row-compact .src-name .student-link { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-/* Plain-text A/P values (not the draggable bar from Cards) -- this, not a narrower track,
-   is what actually keeps every row to one line: no slider is anywhere near as narrow as a
-   couple of digits. The real draggable inputs still exist off-screen (see .src-hidden-inputs
-   in the markup) purely so Save/Present/Fill-all keep working unchanged. */
-.student-row-compact .src-vals { flex: 0 0 auto; display: flex; align-items: center; gap: 3px; font-family: var(--font-mono); font-size: 0.82rem; }
-.student-row-compact .src-val-tag { font-size: 0.62rem; color: var(--muted); font-weight: 700; margin-left: 6px; }
-.student-row-compact .src-val-tag:first-child { margin-left: 0; }
-.student-row-compact .src-val { min-width: 2.4em; text-align: right; color: var(--ink); }
+/* Small tap-to-edit dials (not the full-width draggable bar from Cards) -- this, not a
+   narrower track, is what keeps every row to one line: a dial is barely wider than a letter.
+   Tapping one reveals its own slider inline (see .src-slot/.src-slider-pop below), so the
+   real draggable input lives right there instead of off-screen. */
+.student-row-compact .src-vals { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
+.src-val-normal { display: flex; align-items: center; gap: 6px; }
+.src-slot { position: relative; display: inline-flex; align-items: center; }
+.src-circle {
+  position: relative; width: 26px; height: 26px; flex-shrink: 0; border-radius: 50%; border: none;
+  padding: 0; cursor: pointer; background: transparent;
+}
+.src-circle-ring {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: conic-gradient(var(--brand) var(--fill, 0%), var(--surface-2) 0);
+  border: 1px solid var(--line-strong);
+}
+.src-circle-part .src-circle-ring { background: conic-gradient(var(--gold) var(--fill, 0%), var(--surface-2) 0); }
+.src-circle-label {
+  position: absolute; inset: 3px; border-radius: 50%; background: var(--surface);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.6rem; font-weight: 700; color: var(--ink);
+}
+.src-circle:hover .src-circle-ring { border-color: var(--brand); }
+.src-circle-disabled { cursor: default; opacity: 0.55; }
+.src-slot.is-open .src-circle-ring { border-color: var(--brand); border-width: 2px; }
+/* The "tube": collapsed to nothing until its dial is tapped, then slides open. Lives inline
+   in the row (not a floating popover), so the row's own overflow-x: auto is what keeps it
+   from ever breaking the page layout on a narrow phone. */
+.src-slider-pop {
+  max-width: 0; opacity: 0; overflow: hidden; transition: max-width 0.18s ease, opacity 0.12s ease;
+}
+.src-slot.is-open .src-slider-pop { max-width: 170px; opacity: 1; margin-left: 6px; }
+.src-slider-pop .score-pill-wrap { width: 160px; }
+.src-slider-pop .score-pill-track { height: 26px; }
 .student-row-compact .src-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
 .student-row-compact .src-actions .note-toggle-btn { width: 26px; height: 26px; }
 .student-row-compact .src-actions .btn-sm { padding: 4px 9px; font-size: 0.74rem; }
 .student-row-compact .src-actions .btn { white-space: nowrap; }
+/* Excused: both representations stay in the DOM always (see the markup comment in app.js) so
+   this toggle is the only thing that needs to change, live, with no re-render. */
+.src-val-excused { display: none; font-size: 0.8rem; font-weight: 600; color: var(--gold); white-space: nowrap; }
+.student-row-compact.is-excused .src-val-normal { display: none; }
+.student-row-compact.is-excused .src-val-excused { display: inline; }
+/* .row-excuse.active is styled once, below, near the Cards-view excused rules -- it's shared
+   by both views' Excused/Exc buttons. */
 
 /* ===================== cards / surfaces ===================== */
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
@@ -357,6 +400,13 @@ textarea { resize: vertical; min-height: 60px; }
 .sc-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .sc-head .student-link { font-size: 0.95rem; }
 .sc-head-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+/* Excused: the score pills and the excused note both stay in the card's DOM always, and
+   .is-excused (toggled live in JS, no re-render needed) picks which one shows. */
+.excused-note { display: none; }
+.student-card.is-excused .excused-note { display: inline-block; margin: -4px 0 0; }
+.student-card.is-excused .score-pill-row { display: none; }
+.row-excuse.active { background: var(--gold-soft); border-color: var(--gold); color: var(--gold); }
 
 /* the pill: tap or slide anywhere along the bar to set 0–1 in one motion. */
 .score-pill-row { display: flex; flex-direction: column; gap: 5px; }
@@ -470,6 +520,46 @@ td.num, th.num { font-family: var(--font-mono); text-align: right; }
 .att-glance-att { font-weight: 600; }
 .att-glance-sep { color: var(--muted); margin: 0 1px; }
 .att-glance-part { color: var(--gold); }
+.att-glance-excused { color: var(--gold); font-weight: 600; font-size: 0.76rem; }
+
+/* ===================== Admin "view as" preview banner ===================== */
+.preview-banner-bar {
+  background: var(--gold-soft); color: var(--gold); border-bottom: 1px solid var(--gold);
+  padding: 8px 16px; font-size: 0.82rem; font-weight: 600; text-align: center;
+  display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap;
+}
+.preview-banner-bar .btn { font-weight: 700; }
+
+/* ===================== Coin ledger: tap-to-buy price list ===================== */
+.link-btn {
+  background: none; border: none; padding: 0; color: var(--brand); font-size: 0.78rem;
+  font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 2px;
+}
+.price-chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.price-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 999px;
+  border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink);
+  font-size: 0.82rem; cursor: pointer; font-family: inherit;
+}
+.price-chip:hover { border-color: var(--brand); }
+.price-chip.active { background: var(--brand-soft); border-color: var(--brand); color: var(--brand-ink); }
+.price-chip-cost { font-family: var(--font-mono); color: var(--muted); font-size: 0.76rem; }
+.price-chip.active .price-chip-cost { color: inherit; opacity: 0.75; }
+.cart-list { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 10px 0; }
+.cart-chip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 5px 6px 5px 10px; border-radius: 999px;
+  background: var(--gold-soft); color: var(--gold); font-size: 0.78rem; font-weight: 600;
+}
+.cart-remove {
+  background: none; border: none; color: inherit; cursor: pointer; font-size: 0.95rem; line-height: 1;
+  padding: 2px 4px; opacity: 0.7;
+}
+.cart-remove:hover { opacity: 1; }
+
+/* schedule table: drag-to-reorder handle */
+.drag-handle { cursor: grab; touch-action: none; padding: 4px 10px; font-size: 1rem; line-height: 1; }
+.drag-handle:active { cursor: grabbing; }
+tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
 .note-dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--gold); margin-left: 2px; vertical-align: super; }
 .att-grid thead .period-name { font-size: 0.66rem; font-weight: 800; color: var(--ink-2); text-transform: none; letter-spacing: 0; white-space: normal; line-height: 1.15; }
 .att-grid thead .sub { font-size: 0.6rem; color: var(--muted); font-weight: 600; }
@@ -571,6 +661,10 @@ td.num, th.num { font-family: var(--font-mono); text-align: right; }
      the right edge of a phone screen, so on phone widths it drops into normal flow (full
      width, below the date row) instead of floating. */
   .hcal-pop { position: static; width: 100%; max-width: none; margin-top: 8px; }
+  /* Page titles ("Attendance & Participation" etc.) and their description line read as
+     oversized on a phone-width column -- scale them down a step, desktop is unaffected. */
+  .page-head h1 { font-size: 1.35rem; }
+  .page-head p { font-size: 0.8rem; }
   /* Compact view stays one line per student even on phones -- shrink the name's minimum
      width a bit further and let the row itself scroll sideways as the last resort instead
      of wrapping, which would make it as tall as Cards again (the exact complaint it fixes). */
@@ -596,6 +690,7 @@ td.num, th.num { font-family: var(--font-mono); text-align: right; }
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-app-compat.js"></script><script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-auth-compat.js"></script><script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-firestore-compat.js"></script>
 <div id="login-root"></div>
 <div id="shell" style="display:none;">
+  <div id="preview-banner"></div>
   <div id="app">
     <aside class="sidebar" id="sidebar"></aside>
     <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
@@ -692,6 +787,35 @@ function parshaFor(dateStr) {
     return r.chag ? "" : "Parshas " + r.parsha.join("-");
   } catch (e) { return ""; }
 }
+/* Hebrew names for the 54 weekly parshiot, keyed by the exact English spelling the vendored
+   hebcal bundle returns (sedra.lookup(...).parsha) -- these keys must match those spellings
+   verbatim (apostrophes and all) or the lookup below silently falls back to the English. */
+const PARSHA_HE = {
+  "Bereshit": "בראשית", "Noach": "נח", "Lech-Lecha": "לך לך", "Vayera": "וירא",
+  "Chayei Sara": "חיי שרה", "Toldot": "תולדות", "Vayetzei": "ויצא", "Vayishlach": "וישלח",
+  "Vayeshev": "וישב", "Miketz": "מקץ", "Vayigash": "ויגש", "Vayechi": "ויחי",
+  "Shemot": "שמות", "Vaera": "וארא", "Bo": "בא", "Beshalach": "בשלח", "Yitro": "יתרו",
+  "Mishpatim": "משפטים", "Terumah": "תרומה", "Tetzaveh": "תצוה", "Ki Tisa": "כי תשא",
+  "Vayakhel": "ויקהל", "Pekudei": "פקודי", "Vayikra": "ויקרא", "Tzav": "צו", "Shmini": "שמיני",
+  "Tazria": "תזריע", "Metzora": "מצורע", "Achrei Mot": "אחרי מות", "Kedoshim": "קדושים",
+  "Emor": "אמור", "Behar": "בהר", "Bechukotai": "בחוקותי", "Bamidbar": "במדבר", "Nasso": "נשא",
+  "Beha'alotcha": "בהעלותך", "Sh'lach": "שלח", "Korach": "קרח", "Chukat": "חוקת", "Balak": "בלק",
+  "Pinchas": "פינחס", "Matot": "מטות", "Masei": "מסעי", "Devarim": "דברים", "Vaetchanan": "ואתחנן",
+  "Eikev": "עקב", "Re'eh": "ראה", "Shoftim": "שופטים", "Ki Teitzei": "כי תצא", "Ki Tavo": "כי תבוא",
+  "Nitzavim": "נצבים", "Vayeilech": "וילך", "Ha'azinu": "האזינו", "Vezot Haberakhah": "וזאת הברכה",
+};
+/* Today page shows the parsha as plain text (no picker) -- it just reflects whatever date is
+   already selected, in Hebrew, exactly like the Hebrew date next to it. */
+function parshaHebrewFor(dateStr) {
+  if (!HebcalMini || !dateStr) return "";
+  try {
+    const hd = new HebcalMini.HDate(jsDateFor(dateStr));
+    const sedra = HebcalMini.getSedra(hd.getFullYear(), false);
+    const r = sedra.lookup(hd);
+    if (r.chag) return "";
+    return "פרשת " + r.parsha.map((p) => PARSHA_HE[p] || p).join("־");
+  } catch (e) { return ""; }
+}
 /* Drop the gershayim/geresh punctuation (״ ׳) that renderGematriya() adds -- fine to lose
    for the compact mobile-width spots below (a picker trigger button, calendar-grid cells);
    "כ״ח" -> "כח" reads the same and takes noticeably less width. */
@@ -738,14 +862,14 @@ function clampScore(v) {
    slide to set a value 0–1 in one seamless motion, snapped to the nearest
    1/20th (0.05) for a clean number. The small field beside it shows the
    exact value and stays directly editable for odd partial-credit numbers. ---------- */
-function scorePillHtml(slot, value, label, disabled, extraAttrs) {
+function scorePillHtml(slot, value, label, disabled, extraAttrs, step) {
   const v = (value === null || value === undefined) ? "" : value;
   const pct = v === "" ? 0 : Math.max(0, Math.min(1, Number(v))) * 100;
   const core = '<div class="score-pill-wrap">' +
     '<div class="score-pill-track' + (disabled ? " score-pill-disabled" : "") + '" data-slot="' + slot + '">' +
     '<div class="score-pill-fill" style="width:' + pct + '%"></div>' +
     "</div>" +
-    '<input class="score-input" type="number" min="0" max="1" step="0.05" data-slot="' + slot + '" value="' + v + '" ' + (extraAttrs || "") + (disabled ? " disabled" : "") + ">" +
+    '<input class="score-input" type="number" min="0" max="1" step="' + (step || "0.05") + '" data-slot="' + slot + '" value="' + v + '" ' + (extraAttrs || "") + (disabled ? " disabled" : "") + ">" +
     "</div>";
   // label === null skips the label/row wrapper entirely -- used by the Compact view, where
   // every student is one line and there's no room for "ATTENDANCE" / "PARTICIPATION" headers.
@@ -754,11 +878,28 @@ function scorePillHtml(slot, value, label, disabled, extraAttrs) {
 }
 function refreshPillForInput(input) {
   if (!input) return;
-  const row = input.closest(".score-pill-row");
-  const fill = row ? row.querySelector(".score-pill-fill") : null;
+  // .score-pill-wrap (not .score-pill-row): the row wrapper only exists when scorePillHtml
+  // was called with a real label. Anchoring on the wrap instead means this also works for
+  // label:null pills (Compact view's tap-to-reveal slider), which have no row wrapper.
+  const wrap = input.closest(".score-pill-wrap");
+  const fill = wrap ? wrap.querySelector(".score-pill-fill") : null;
   if (!fill) return;
   const v = input.value === "" ? 0 : Math.max(0, Math.min(1, Number(input.value) || 0));
   fill.style.width = v * 100 + "%";
+}
+/* ---------- Compact view's tap-to-edit dial: a small circle showing the value as a
+   partly/fully filled ring (donut), with the slot's letter in the middle. Tapping it reveals
+   a slide-out tube (the same tap-or-drag pill from Cards, just narrower and in 0.1 steps,
+   which is coarse enough to still be quick with a thumb but fine enough for real marking). ---------- */
+function compactSlotHtml(slot, value, disabled, extraAttrs) {
+  const v = (value === null || value === undefined) ? "" : value;
+  const pct = v === "" ? 0 : Math.max(0, Math.min(1, Number(v))) * 100;
+  const label = slot === "att" ? "A" : "P";
+  return '<span class="src-slot" data-slot-wrap="' + slot + '">' +
+    '<button type="button" class="src-circle src-circle-' + slot + (disabled ? " src-circle-disabled" : "") + '" data-slot-toggle="' + slot + '" style="--fill:' + pct + '%"' + (disabled ? " disabled" : "") + '>' +
+    '<span class="src-circle-ring"></span><span class="src-circle-label">' + label + "</span></button>" +
+    '<span class="src-slider-pop">' + scorePillHtml(slot, value, null, disabled, extraAttrs, "0.1") + "</span>" +
+    "</span>";
 }
 function pillValueFromEvent(evt, trackEl) {
   const rect = trackEl.getBoundingClientRect();
@@ -831,6 +972,13 @@ document.addEventListener("click", (evt) => {
   document.querySelectorAll(".note-popover:not([hidden])").forEach((p) => {
     const wrap = p.closest(".note-pop-wrap");
     if (wrap && !wrap.contains(evt.target)) p.hidden = true;
+  });
+});
+// Same pattern for Compact view's tap-to-edit dials -- an open slider closes on any click
+// outside it, so at most one is open at a time and it never lingers after a tap elsewhere.
+document.addEventListener("click", (evt) => {
+  document.querySelectorAll(".src-slot.is-open").forEach((wrap) => {
+    if (!wrap.contains(evt.target)) wrap.classList.remove("is-open");
   });
 });
 function fullName(person) { return escapeHtml(person.last) + ", " + escapeHtml(person.first); }
@@ -1084,20 +1232,6 @@ function hebrewDayOptionsFor(anchorDate) {
   }
   return opts;
 }
-/* Every week's parsha across the current Hebrew year, for the Today page's parsha picker.
-   Weeks with no regular reading (chag) are skipped, same as parshaFor's own "" for those. */
-function parshaOptionsFor(anchorDate) {
-  const r = hebrewYearRangeFor(anchorDate);
-  if (!r) return [];
-  const opts = [];
-  let wk = weekRangeFor(r.from).from;
-  while (wk <= r.to) {
-    const label = parshaFor(wk);
-    if (label) opts.push({ date: wk, label: label });
-    wk = shiftDate(wk, 7);
-  }
-  return opts;
-}
 function hebrewYearRangeFor(dateStr) {
   if (!HebcalMini) return null;
   const hd = new HebcalMini.HDate(jsDateFor(dateStr));
@@ -1274,6 +1408,14 @@ function currentSession() {
   } catch (e) { return null; }
 }
 function setSession(type, id) { localStorage.setItem(SESSION_KEY, JSON.stringify({ type, id })); }
+// Admin "view as": temporarily render the app as a specific staff member or student, without
+// actually logging out of the admin account (the real login in localStorage never changes).
+// Not persisted anywhere -- a reload always comes back as the real admin, which is the safer
+// default for something meant to be a quick preview. It's also read-only by design (see
+// renderAll(), which forces canWrite off while previewing) -- this is for seeing what someone
+// else sees, not for taking real actions under their name.
+let viewAsSession = null; // { type: "staff" | "student", id }
+function exitViewAs() { viewAsSession = null; renderAll(); }
 function logout() {
   localStorage.removeItem(SESSION_KEY);
   viewingStudentId = null;
@@ -1359,22 +1501,24 @@ function icon(name) { return '<svg viewBox="0 0 18 18">' + (ICONS[name] || "") +
 /* ================================================================
    SHELL
    ================================================================ */
-function renderShell(session) {
+function renderShell(session, previewing) {
   const route = currentRoute(session);
   const navHtml = routesFor(session).map((r) =>
     '<button class="nav-item' + (r.id === route ? " active" : "") + '" data-nav="' + r.id + '">' + icon(r.icon) + "<span>" + r.label + "</span></button>"
   ).join("");
-  const modePill = canWrite
+  const modePill = previewing
+    ? '<div class="mode-pill"><span class="dot"></span>Previewing — read-only</div>'
+    : canWrite
     ? '<div class="mode-pill writer"><span class="dot"></span>Live &amp; editable</div>'
     : '<div class="mode-pill"><span class="dot"></span>Read-only view</div>';
   const person = session.type === "staff" ? session.record.name : (session.record.first + " " + session.record.last);
   const roleLabel = session.type === "staff" ? (session.record.role === "admin" ? "Admin" : "Teacher") : "Student";
   const staffBlock = '<div class="staff-chip"><div class="avatar">' + escapeHtml(person.slice(0, 1).toUpperCase()) + '</div>' +
     '<div class="info"><div class="name">' + escapeHtml(person) + '</div><div style="font-size:0.68rem;color:var(--muted);">' + roleLabel + '</div></div>' +
-    '<button class="switch btn-logout-action" type="button">Log out</button></div>';
+    (previewing ? "" : '<button class="switch btn-logout-action" type="button">Log out</button>') + "</div>";
   // Compact version for the mobile topbar (the sidebar it normally lives in is hidden there).
   const mobileUserHtml = '<div class="avatar" title="' + escapeHtml(person) + " — " + escapeHtml(roleLabel) + '">' + escapeHtml(person.slice(0, 1).toUpperCase()) + '</div>' +
-    '<button class="switch btn-logout-action" type="button">Log out</button>';
+    (previewing ? "" : '<button class="switch btn-logout-action" type="button">Log out</button>');
 
   const sidebarHtml =
     '<div class="brand-block"><img src="' + LOGO_DATA_URI + '" alt=""><div class="word">TAG Academy<small>' + escapeHtml(state.meta.schoolYear) + "</small></div></div>" +
@@ -1386,6 +1530,18 @@ function renderShell(session) {
   if (mobileTabs) mobileTabs.innerHTML = navHtml;
   const topbarUser = document.getElementById("topbar-user");
   if (topbarUser) topbarUser.innerHTML = mobileUserHtml;
+
+  // Unmissable, full-width strip above everything else while previewing -- this is the one
+  // way back to the real admin account, so it needs to survive scrolling and be obvious on
+  // both desktop and mobile, not just tucked into the sidebar (which is hidden on mobile).
+  const bannerEl = document.getElementById("preview-banner");
+  if (bannerEl) {
+    bannerEl.innerHTML = previewing
+      ? '<div class="preview-banner-bar">Previewing as <strong>' + escapeHtml(person) + "</strong> (" + escapeHtml(roleLabel) + ') — nothing you do here is saved. <button type="button" class="btn btn-sm" id="exit-preview-btn">Exit preview</button></div>'
+      : "";
+    const exitBtn = document.getElementById("exit-preview-btn");
+    if (exitBtn) exitBtn.addEventListener("click", exitViewAs);
+  }
 
   document.querySelectorAll("[data-nav]").forEach((btn) => btn.addEventListener("click", () => {
     viewingStudentId = null;
@@ -1454,6 +1610,12 @@ let selectedPeriod = "";
 let showAddExtraPeriod = false;
 let showHebrewCal = false;
 let todayView = (function () { try { return localStorage.getItem(TODAY_VIEW_KEY) || "cards"; } catch (e) { return "cards"; } })();
+// The single most recent Today-page save, kept just long enough to offer one level of Undo --
+// { date, period, snapshot: { studentId: prevPairOrUndefined } }, where prevPairOrUndefined is
+// exactly what that student's pair[selectedPeriod] was immediately before the save that set
+// this (undefined means "didn't exist yet"). Cleared whenever a new save happens (on any
+// date/period) since only the very last save is undoable.
+let lastSaveUndo = null;
 
 function periodMarkedCount(date, period, roster) {
   return roster.filter((s) => {
@@ -1471,8 +1633,7 @@ function renderToday(root, session) {
   const restored = selectedPeriod ? popDraft("today:" + todayDate + ":" + selectedPeriod) : null;
 
   const hdayOptions = hebrewDayOptionsFor(todayDate);
-  const parshaOptions = parshaOptionsFor(todayDate);
-  const todayWeekSunday = weekRangeFor(todayDate).from;
+  const parshaHebLabel = parshaHebrewFor(todayDate);
   const monthRange = hebrewMonthRangeFor(todayDate);
   const hebLabel = stripHebrewPunct(hebrewDateFor(todayDate));
   const todayGregISO = todayISO();
@@ -1508,12 +1669,9 @@ function renderToday(root, session) {
     html += "</div>";
   }
   html += "</div>"; // .thc-row
-  if (parshaOptions.length) {
-    html += '<div class="field" style="margin-bottom:0;"><label for="today-parsha">Parsha</label><select id="today-parsha">' +
-      '<option value="">— pick a parsha —</option>' +
-      parshaOptions.map((o) => '<option value="' + o.date + '"' + (o.date === todayWeekSunday ? " selected" : "") + '>' + escapeHtml(o.label) + "</option>").join("") +
-      "</select></div>";
-  }
+  // Just reflects the selected date, in Hebrew -- no picker, since it's not an independent
+  // choice (the date already determines it).
+  if (parshaHebLabel) html += '<div class="today-parsha-line" dir="rtl">' + escapeHtml(parshaHebLabel) + "</div>";
   html += "</div>"; // .today-head-controls
 
   if (!canWrite) html += '<div class="banner banner-warn">Read-only view — changes here won’t be saved.</div>';
@@ -1590,20 +1748,24 @@ function renderToday(root, session) {
       const pair = pairFor(student);
       const linked = !(pair[0] !== null && pair[0] !== undefined && pair[1] !== null && pair[1] !== undefined && pair[0] !== pair[1]);
       const note = pair[2] || "";
-      html += '<div class="student-card student-row-compact" data-student="' + student.id + '">';
+      const excused = !!pair[4];
+      html += '<div class="student-card student-row-compact' + (excused ? " is-excused" : "") + '" data-student="' + student.id + '" data-excused="' + (excused ? "1" : "0") + '">';
       html += '<span class="src-name">' + studentLink(student) + markedByBadge(pair) + "</span>";
-      // Plain text values (not the drag-to-set pill bar from Cards view) -- this is what
-      // keeps every row to one line even on a phone. The real, draggable score inputs still
-      // exist just below, visually hidden, so Save/Present/Fill-all all keep working exactly
-      // as they do in Cards view; only the on-screen control differs.
+      // Small tap-to-edit dials (not the full-width drag bar from Cards view) -- this is what
+      // keeps every row to one line even on a phone. Tapping a dial reveals its own slider
+      // right there in the row (see compactSlotHtml/wireTodayGrid), no separate hidden inputs
+      // needed. Both the dials and the "Excused" text are always in the DOM (CSS shows/hides
+      // by .is-excused) so the Excused toggle can flip live without rebuilding this row.
       html += '<span class="src-vals">' +
-        '<span class="src-val-tag">A</span><span class="src-val" data-slot="att">' + (pair[0] === null || pair[0] === undefined ? "—" : num2(pair[0])) + "</span>" +
-        '<span class="src-val-tag">P</span><span class="src-val" data-slot="part">' + (pair[1] === null || pair[1] === undefined ? "—" : num2(pair[1])) + "</span>" +
+        '<span class="src-val-normal">' +
+        compactSlotHtml("att", pair[0], !canWrite) +
+        compactSlotHtml("part", pair[1], !canWrite, 'data-linked="' + (linked ? "1" : "0") + '"') +
+        "</span>" +
+        '<span class="src-val-excused">Excused</span>' +
         "</span>";
-      html += '<span class="src-actions">' + notePopoverHtml(note, !canWrite) + (canWrite ? '<button class="btn btn-ghost btn-sm row-present" type="button">Present</button>' : "") + "</span>";
-      html += '<span class="src-hidden-inputs" style="display:none;">' +
-        scorePillHtml("att", pair[0], null, !canWrite) +
-        scorePillHtml("part", pair[1], null, !canWrite, 'data-linked="' + (linked ? "1" : "0") + '"') +
+      html += '<span class="src-actions">' + notePopoverHtml(note, !canWrite) +
+        (canWrite ? '<button class="btn btn-ghost btn-sm row-present" type="button">Present</button>' : "") +
+        (canWrite ? '<button class="btn btn-ghost btn-sm row-excuse' + (excused ? " active" : "") + '" type="button">Exc</button>' : "") +
         "</span>";
       html += "</div>";
     });
@@ -1615,17 +1777,24 @@ function renderToday(root, session) {
       const pair = pairFor(student);
       const linked = !(pair[0] !== null && pair[0] !== undefined && pair[1] !== null && pair[1] !== undefined && pair[0] !== pair[1]);
       const note = pair[2] || "";
-      html += '<div class="student-card" data-student="' + student.id + '">';
-      html += '<div class="sc-head">' + studentLink(student) + markedByBadge(pair) + '<div class="sc-head-actions">' + notePopoverHtml(note, !canWrite) + (canWrite ? '<button class="btn btn-ghost btn-sm row-present" type="button">Present</button>' : "") + "</div></div>";
+      const excused = !!pair[4];
+      html += '<div class="student-card' + (excused ? " is-excused" : "") + '" data-student="' + student.id + '" data-excused="' + (excused ? "1" : "0") + '">';
+      html += '<div class="sc-head">' + studentLink(student) + markedByBadge(pair) + '<div class="sc-head-actions">' + notePopoverHtml(note, !canWrite) +
+        (canWrite ? '<button class="btn btn-ghost btn-sm row-present" type="button">Present</button>' : "") +
+        (canWrite ? '<button class="btn btn-ghost btn-sm row-excuse' + (excused ? " active" : "") + '" type="button">Excused</button>' : "") +
+        "</div></div>";
+      html += '<div class="excused-note pill pill-muted">Excused — not counted toward attendance</div>';
       html += scorePillHtml("att", pair[0], "Attendance", !canWrite);
       html += scorePillHtml("part", pair[1], "Participation", !canWrite, 'data-linked="' + (linked ? "1" : "0") + '"');
       html += "</div>";
     });
     html += "</div>";
-    html += '<div class="legend-note"><span><span class="sw" style="background:var(--brand)"></span>Tap or slide the bar for a quick mark, or type an exact decimal for partial credit. Blank = didn’t run. Participation copies Attendance until you edit it.</span></div>';
+    html += '<div class="legend-note"><span><span class="sw" style="background:var(--brand)"></span>Tap or slide the bar for a quick mark, or type an exact decimal for partial credit. Blank = didn’t run. Participation copies Attendance until you edit it. Excused clears both scores and leaves them out of attendance %.</span></div>';
   }
-  html += '<div style="margin-top:16px;display:flex;gap:10px;align-items:center;">' +
+  const canUndo = canWrite && lastSaveUndo && lastSaveUndo.date === todayDate && lastSaveUndo.period === selectedPeriod;
+  html += '<div style="margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">' +
     '<button class="btn btn-primary" id="save-today"' + (canWrite ? "" : " disabled") + '>Save ' + escapeHtml(selectedPeriod) + "</button>" +
+    (canUndo ? '<button class="btn btn-ghost btn-sm" id="undo-last-save" type="button">Undo last save</button>' : "") +
     '<span id="today-save-status" style="font-size:0.8rem;color:var(--muted);"></span></div>';
   html += "</div>";
 
@@ -1655,7 +1824,10 @@ function renderTodaySummary(date, periods, roster) {
       const hasPart = pair && pair[1] !== null && pair[1] !== undefined;
       const note = pair && pair[2];
       const by = pair && pair[3];
-      const text = has
+      const excused = pair && !!pair[4];
+      const text = excused
+        ? '<span class="att-glance-excused">Excused</span>'
+        : has
         ? '<span class="att-glance-att">' + num2(pair[0]) + '</span><span class="att-glance-sep">/</span><span class="att-glance-part">' + (hasPart ? num2(pair[1]) : "—") + "</span>"
         : "—";
       html += '<td class="num' + (p === selectedPeriod ? " col-active" : "") + '"' + (has ? "" : ' style="color:var(--muted);"') +
@@ -1686,8 +1858,6 @@ function wireTodayHeader(root) {
   if (hmonthPrev) hmonthPrev.addEventListener("click", () => { todayDate = shiftHebrewMonth(todayDate, -1); showAddExtraPeriod = false; localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
   const hmonthNext = document.getElementById("hmonth-next");
   if (hmonthNext) hmonthNext.addEventListener("click", () => { todayDate = shiftHebrewMonth(todayDate, 1); showAddExtraPeriod = false; localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
-  const parshaSel = document.getElementById("today-parsha");
-  if (parshaSel) parshaSel.addEventListener("change", () => { if (parshaSel.value) { todayDate = parshaSel.value; showAddExtraPeriod = false; showHebrewCal = false; localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); } });
   root.querySelectorAll(".today-view-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       todayView = btn.getAttribute("data-view");
@@ -1754,30 +1924,66 @@ function wireTodayGrid(root, teacherName) {
   body.querySelectorAll(".student-card").forEach((card) => {
     const attInp = card.querySelector('.score-input[data-slot="att"]');
     const partInp = card.querySelector('.score-input[data-slot="part"]');
-    // Compact view shows plain-text values (.src-val) instead of the draggable bar, so
-    // whatever changes the real (hidden there) inputs needs to keep that text in sync.
-    const updateSrcVals = () => {
-      const attValEl = card.querySelector('.src-val[data-slot="att"]');
-      const partValEl = card.querySelector('.src-val[data-slot="part"]');
-      if (attValEl && attInp) attValEl.textContent = attInp.value === "" ? "—" : num2(attInp.value);
-      if (partValEl && partInp) partValEl.textContent = partInp.value === "" ? "—" : num2(partInp.value);
+    // Compact view shows a small dial (.src-circle) instead of the full draggable bar, so
+    // whatever changes the real inputs needs to keep the dial's fill in sync. In Cards view
+    // there's no .src-circle on the card, so this is a harmless no-op there.
+    const updateSrcCircles = () => {
+      const attCircle = card.querySelector(".src-circle-att");
+      const partCircle = card.querySelector(".src-circle-part");
+      if (attCircle && attInp) attCircle.style.setProperty("--fill", (attInp.value === "" ? 0 : Math.max(0, Math.min(1, Number(attInp.value) || 0)) * 100) + "%");
+      if (partCircle && partInp) partCircle.style.setProperty("--fill", (partInp.value === "" ? 0 : Math.max(0, Math.min(1, Number(partInp.value) || 0)) * 100) + "%");
+    };
+    // Excused is mutually exclusive with having a real score -- typing/sliding a value or
+    // hitting Present clears it, and turning it on clears any scores, so the two states can
+    // never disagree about whether this student counts toward attendance %.
+    const setExcused = (on) => {
+      card.classList.toggle("is-excused", on);
+      card.dataset.excused = on ? "1" : "0";
+      const excuseBtn = card.querySelector(".row-excuse");
+      if (excuseBtn) excuseBtn.classList.toggle("active", on);
     };
     if (attInp && partInp) {
       const syncPart = () => {
         if (partInp.dataset.linked !== "0") { partInp.value = attInp.value; refreshPillForInput(partInp); }
         refreshPillForInput(attInp);
-        updateSrcVals();
+        updateSrcCircles();
+        if (attInp.value !== "") setExcused(false);
       };
       attInp.addEventListener("input", syncPart);
       attInp.addEventListener("blur", () => { const v = clampScore(attInp.value); attInp.value = v === null ? "" : v; syncPart(); });
-      partInp.addEventListener("input", () => { partInp.dataset.linked = "0"; refreshPillForInput(partInp); updateSrcVals(); });
-      partInp.addEventListener("blur", () => { const v = clampScore(partInp.value); partInp.value = v === null ? "" : v; refreshPillForInput(partInp); updateSrcVals(); });
+      partInp.addEventListener("input", () => { partInp.dataset.linked = "0"; refreshPillForInput(partInp); updateSrcCircles(); if (partInp.value !== "") setExcused(false); });
+      partInp.addEventListener("blur", () => { const v = clampScore(partInp.value); partInp.value = v === null ? "" : v; refreshPillForInput(partInp); updateSrcCircles(); });
     }
     const presentBtn = card.querySelector(".row-present");
     if (presentBtn) presentBtn.addEventListener("click", () => {
       if (attInp) { attInp.value = "1"; refreshPillForInput(attInp); }
       if (partInp) { partInp.value = "1"; partInp.dataset.linked = "1"; refreshPillForInput(partInp); }
-      updateSrcVals();
+      updateSrcCircles();
+      setExcused(false);
+    });
+    const excuseBtn = card.querySelector(".row-excuse");
+    if (excuseBtn) excuseBtn.addEventListener("click", () => {
+      const turningOn = card.dataset.excused !== "1";
+      if (turningOn) {
+        if (attInp) { attInp.value = ""; refreshPillForInput(attInp); }
+        if (partInp) { partInp.value = ""; refreshPillForInput(partInp); }
+        updateSrcCircles();
+      }
+      setExcused(turningOn);
+    });
+    // Compact's dials: tap the circle to reveal its slider right there in the row. Only one
+    // open at a time (across the whole page), closed by tapping elsewhere -- see the
+    // document-level listener near the note-popover one, below.
+    card.querySelectorAll(".src-circle").forEach((btn) => {
+      btn.addEventListener("click", (evt) => {
+        evt.stopPropagation();
+        if (btn.disabled) return;
+        const wrap = btn.closest(".src-slot");
+        if (!wrap) return;
+        const willOpen = !wrap.classList.contains("is-open");
+        document.querySelectorAll(".src-slot.is-open").forEach((w) => { if (w !== wrap) w.classList.remove("is-open"); });
+        wrap.classList.toggle("is-open", willOpen);
+      });
     });
   });
   const fillAllBtn = document.getElementById("fill-all");
@@ -1799,18 +2005,40 @@ function wireTodayGrid(root, teacherName) {
     if (statusEl) statusEl.textContent = "Saving…";
     const newState = JSON.parse(JSON.stringify(state));
     const draftForStash = {};
+    const undoSnapshot = {};
     body.querySelectorAll(".student-card").forEach((card) => {
       const studentId = card.getAttribute("data-student");
       const attInp = card.querySelector('.score-input[data-slot="att"]');
       const partInp = card.querySelector('.score-input[data-slot="part"]');
       const noteInp = card.querySelector('.note-input');
       const note = noteInp ? noteInp.value.trim() : "";
+      const excused = card.dataset.excused === "1";
       const pair = [clampScore(attInp ? attInp.value : ""), clampScore(partInp ? partInp.value : ""), note];
+      if (excused) pair[4] = true;
       draftForStash[studentId] = pair;
+      // What this student's pair looked like right before this save -- captured from `state`
+      // (the last-known server data), not `newState`, so Undo can put it back exactly.
+      const priorRec = state.attendance.find((r) => r.date === todayDate && r.studentId === studentId);
+      const priorPair = priorRec && priorRec.scores && priorRec.scores[selectedPeriod];
+      undoSnapshot[studentId] = priorPair ? JSON.parse(JSON.stringify(priorPair)) : undefined;
       let rec = newState.attendance.find((r) => r.date === todayDate && r.studentId === studentId);
       if (!rec) { rec = { id: uid("a"), date: todayDate, studentId, scores: {}, notes: "" }; newState.attendance.push(rec); }
-      if (pair[0] === null && pair[1] === null && !note) { delete rec.scores[selectedPeriod]; }
-      else { pair[3] = teacherName; rec.scores[selectedPeriod] = pair; }
+      // Excused-with-no-score still needs to be *saved* (not treated as "nothing entered"),
+      // otherwise it would get silently dropped from rec.scores right back to unmarked.
+      if (pair[0] === null && pair[1] === null && !note && !excused) {
+        delete rec.scores[selectedPeriod];
+      } else {
+        // Multiple staff can mark the same class (one opens after another has already marked
+        // some students) -- only claim credit for students THIS save actually changed. A
+        // student whose att/part/note/excused come out identical to what they already were
+        // keeps whoever's initials were on them before, instead of getting overwritten just
+        // because the same class got saved again.
+        const priorExcused = !!(priorPair && priorPair[4]);
+        const unchanged = priorPair && priorPair[0] === pair[0] && priorPair[1] === pair[1] &&
+          (priorPair[2] || "") === (pair[2] || "") && priorExcused === excused;
+        pair[3] = unchanged ? (priorPair[3] || teacherName) : teacherName;
+        rec.scores[selectedPeriod] = pair;
+      }
       // Record-level enteredBy/enteredAt stay as "who last touched this student's record"
       // (used in CSV exports); pair[3] above is the per-period marker shown in the UI, since
       // different staff can mark different classes for the same student on the same day.
@@ -1822,11 +2050,38 @@ function wireTodayGrid(root, teacherName) {
       // until some unrelated click forced a re-render -- a real save had gone through, it
       // just never told you. Re-rendering immediately shows the updated "x/y marked" count,
       // the just-saved "marked by" initials, etc.
+      lastSaveUndo = { date: todayDate, period: selectedPeriod, snapshot: undoSnapshot };
       toast("Saved " + selectedPeriod + ".", "good");
       renderAll();
     } else {
       saveBtn.disabled = false;
       if (statusEl) statusEl.textContent = "Not saved — see message above.";
+    }
+  });
+
+  const undoBtn = document.getElementById("undo-last-save");
+  if (undoBtn) undoBtn.addEventListener("click", async () => {
+    if (!lastSaveUndo) return;
+    undoBtn.disabled = true;
+    const { date, period, snapshot } = lastSaveUndo;
+    const newState = JSON.parse(JSON.stringify(state));
+    Object.keys(snapshot).forEach((studentId) => {
+      let rec = newState.attendance.find((r) => r.date === date && r.studentId === studentId);
+      const prior = snapshot[studentId];
+      if (prior === undefined) {
+        if (rec && rec.scores) delete rec.scores[period];
+      } else {
+        if (!rec) { rec = { id: uid("a"), date, studentId, scores: {}, notes: "" }; newState.attendance.push(rec); }
+        rec.scores[period] = prior;
+      }
+    });
+    const res = await saveState(newState);
+    if (res.ok || res.local) {
+      lastSaveUndo = null;
+      toast("Undid the last save for " + period + ".", "good");
+      renderAll();
+    } else {
+      undoBtn.disabled = false;
     }
   });
 }
@@ -1875,30 +2130,61 @@ function txPill(type) {
 /* ================================================================
    VIEW: COIN LEDGER
    ================================================================ */
+// The ledger is used, day to day, almost entirely to log a purchase -- so that's the primary,
+// one-tap-per-item flow. Manual grants and transfers are real but rare, so they're tucked
+// behind a small "different kind of entry" toggle instead of cluttering the main form.
+let ledgerCart = []; // [{ id, name, cost }] -- items tapped from the price list for this purchase
+let showOtherLedgerEntry = false;
+function ledgerCartTotal() { return ledgerCart.reduce((sum, item) => sum + Number(item.cost || 0), 0); }
+function ledgerCartNote() { return ledgerCart.map((item) => item.name).join(", "); }
+
 function renderLedger(root, session) {
   const roster = activeRoster();
+  const privs = state.settings.privileges || [];
   let html = '<div class="page-head"><div style="display:flex;gap:14px;align-items:center;">' + coinBadge("lg") +
     '<div><span class="eyebrow">Bank statement</span><h1>TAG Coin Ledger</h1>' +
-    '<p>Every manual grant, purchase, and transfer. Coins earned from Attendance &amp; Participation are calculated automatically and don’t appear here.</p></div></div></div>';
+    '<p>Every purchase, manual grant, and transfer. Coins earned from Attendance &amp; Participation are calculated automatically and don’t appear here.</p></div></div></div>';
 
   if (canWrite) {
-    html += '<div class="card card-pad"><div class="section-title">Add an entry</div><div class="field-row">' +
+    html += '<div class="card card-pad"><div class="section-title">Log a purchase</div>';
+    html += '<div class="field-row">' +
       '<div class="field"><label for="lg-date">Date</label><input type="date" id="lg-date" value="' + todayISO() + '"></div>' +
       '<div class="field"><label for="lg-student">Student</label><select id="lg-student">' + roster.map((s) => '<option value="' + s.id + '">' + fullName(s) + "</option>").join("") + "</select></div>" +
-      '<div class="field"><label for="lg-type">Type</label><select id="lg-type">' + TX_TYPES.map((t) => '<option value="' + t + '">' + t + "</option>").join("") + "</select></div>" +
-      '<div class="field"><label for="lg-amount">Amount</label><input type="number" min="0" step="0.5" id="lg-amount" placeholder="0"></div>' +
+      "</div>";
+    if (privs.length) {
+      html += '<div class="field"><label>Tap an item to add it to this purchase</label><div class="price-chip-row">' +
+        privs.map((p) => {
+          const inCart = ledgerCart.some((item) => item.id === p.id);
+          return '<button type="button" class="price-chip' + (inCart ? " active" : "") + '" data-price-item="' + p.id + '">' + escapeHtml(p.name) + ' <span class="price-chip-cost">' + num2(p.cost) + "</span></button>";
+        }).join("") + "</div></div>";
+    }
+    if (ledgerCart.length) {
+      html += '<div class="cart-list">' + ledgerCart.map((item, i) =>
+        '<span class="cart-chip">' + escapeHtml(item.name) + " (" + num2(item.cost) + ')<button type="button" class="cart-remove" data-cart-remove="' + i + '" aria-label="Remove">&times;</button></span>'
+      ).join("") + '<button type="button" class="btn btn-ghost btn-sm" id="cart-clear">Clear</button></div>';
+    }
+    html += '<div class="field-row">' +
+      '<div class="field"><label for="lg-amount">Amount spent</label><input type="number" min="0" step="0.5" id="lg-amount" value="' + (ledgerCart.length ? ledgerCartTotal() : "") + '" placeholder="0"></div>' +
       "</div>" +
-      '<div class="field"><label for="lg-note">Note — what for / who / privilege bought</label><input type="text" id="lg-note" placeholder="e.g. Helped set up for Shabbos guests"></div>' +
-      '<p class="help-text">For a transfer between students, add two entries: a Transfer Out for the giver and a Transfer In for the receiver, with the same note.</p>' +
-      '<button class="btn btn-primary" id="ledger-submit">Add to ledger</button></div>';
+      '<div class="field"><label for="lg-note">What for</label><input type="text" id="lg-note" value="' + escapeHtml(ledgerCartNote()) + '" placeholder="e.g. late lights-out"></div>';
+    // Type defaults to Spent/Redeemed (a purchase) and stays hidden -- this toggle is the
+    // escape hatch for the two other, much rarer cases (a bonus grant, or a transfer between
+    // students), without making the common case scroll past a type picker every time.
+    html += '<p class="help-text" style="margin:-2px 0 10px;">' +
+      '<button type="button" class="link-btn" id="ledger-other-toggle">' + (showOtherLedgerEntry ? "Hide — this is a purchase" : "This isn’t a purchase (grant coins, or transfer between students)") + "</button></p>";
+    if (showOtherLedgerEntry) {
+      html += '<div class="field" style="max-width:260px;"><label for="lg-type">Entry type</label><select id="lg-type">' +
+        TX_TYPES.map((t) => '<option value="' + t + '"' + (t === "Spent/Redeemed" ? " selected" : "") + ">" + t + "</option>").join("") + "</select></div>" +
+        '<p class="help-text">For a transfer between students, add two entries: a Transfer Out for the giver and a Transfer In for the receiver, with the same note.</p>';
+    }
+    html += '<button class="btn btn-primary" id="ledger-submit">Log purchase</button></div>';
   } else {
     html += '<div class="banner banner-warn">Read-only view — you can see the ledger but not add to it.</div>';
   }
 
-  const privs = state.settings.privileges || [];
   if (privs.length) {
     html += '<div class="card card-pad"><div class="section-title">Privilege price list</div><div class="table-wrap"><table><thead><tr><th>Privilege</th><th class="num">Cost</th></tr></thead><tbody>' +
-      privs.map((p) => "<tr><td>" + escapeHtml(p.name) + '</td><td class="num">' + p.cost + "</td></tr>").join("") + "</tbody></table></div></div>";
+      privs.map((p) => "<tr><td>" + escapeHtml(p.name) + '</td><td class="num">' + num2(p.cost) + "</td></tr>").join("") + "</tbody></table></div></div>";
   }
 
   const rows = state.ledger.slice().sort((a, b) => (b.enteredAt || 0) - (a.enteredAt || 0));
@@ -1918,11 +2204,36 @@ function renderLedger(root, session) {
   html += "</div>";
   root.innerHTML = html;
 
+  root.querySelectorAll("[data-price-item]").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      const id = chip.getAttribute("data-price-item");
+      const idx = ledgerCart.findIndex((item) => item.id === id);
+      if (idx !== -1) {
+        ledgerCart.splice(idx, 1);
+      } else {
+        const priv = privs.find((p) => p.id === id);
+        if (priv) ledgerCart.push({ id: priv.id, name: priv.name, cost: priv.cost });
+      }
+      renderAll();
+    });
+  });
+  root.querySelectorAll("[data-cart-remove]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      ledgerCart.splice(Number(btn.getAttribute("data-cart-remove")), 1);
+      renderAll();
+    });
+  });
+  const cartClearBtn = document.getElementById("cart-clear");
+  if (cartClearBtn) cartClearBtn.addEventListener("click", () => { ledgerCart = []; renderAll(); });
+  const otherToggle = document.getElementById("ledger-other-toggle");
+  if (otherToggle) otherToggle.addEventListener("click", () => { showOtherLedgerEntry = !showOtherLedgerEntry; renderAll(); });
+
   const submitBtn = document.getElementById("ledger-submit");
   if (submitBtn) submitBtn.addEventListener("click", async () => {
     const date = document.getElementById("lg-date").value;
     const studentId = document.getElementById("lg-student").value;
-    const type = document.getElementById("lg-type").value;
+    const typeSel = document.getElementById("lg-type");
+    const type = typeSel ? typeSel.value : "Spent/Redeemed";
     const amount = Number(document.getElementById("lg-amount").value);
     const note = document.getElementById("lg-note").value.trim();
     if (!date || !studentId || !amount || amount <= 0) { toast("Fill in date, student, and a positive amount.", "warn"); return; }
@@ -1939,8 +2250,14 @@ function renderLedger(root, session) {
     const newState = JSON.parse(JSON.stringify(state));
     newState.ledger.push({ id: uid("l"), date, studentId, type, amount, note, enteredBy: session.record.name, enteredAt: Date.now() });
     const res = await saveState(newState, { stashKey: "ledger:new", stashData: { date, studentId, type, amount, note } });
-    if (res.ok || res.local) { toast("Saved.", "good"); renderAll(); }
-    else { submitBtn.disabled = false; }
+    if (res.ok || res.local) {
+      ledgerCart = [];
+      showOtherLedgerEntry = false;
+      toast("Saved.", "good");
+      renderAll();
+    } else {
+      submitBtn.disabled = false;
+    }
   });
 }
 
@@ -2187,12 +2504,11 @@ function renderAdminSchedule(root) {
   html += '<div class="field-row" style="align-items:flex-end;max-width:480px;">' +
     '<div class="field" style="flex:1;"><label for="np-name">New class name</label><input type="text" id="np-name" placeholder="e.g. Chavrusa"></div>' +
     '<div class="field" style="flex-shrink:0;"><button class="btn btn-ghost btn-sm" id="np-add" type="button">Add class</button></div></div>';
-  html += '<p class="help-text" style="margin-top:-6px;">The order below is the order classes appear in every dropdown (Today’s Class/period picker, reports, etc.) — use the arrows to reorder.</p>';
-  html += '<div class="table-wrap"><table><thead><tr><th style="width:70px;">Order</th><th style="min-width:150px;">Period</th>' + DAY_NAMES.map((d) => "<th>" + d.slice(0, 3) + "</th>").join("") + "<th></th></tr></thead><tbody>";
+  html += '<p class="help-text" style="margin-top:-6px;">The order below is the order classes appear in every dropdown (Today’s Class/period picker, reports, etc.) — drag the handle to reorder.</p>';
+  html += '<div class="table-wrap"><table><thead><tr><th style="width:36px;">Order</th><th style="min-width:150px;">Period</th>' + DAY_NAMES.map((d) => "<th>" + d.slice(0, 3) + "</th>").join("") + "<th></th></tr></thead><tbody>";
   state.settings.periods.forEach((p, i) => {
-    html += '<tr><td style="white-space:nowrap;">' +
-      '<button class="btn btn-ghost btn-sm" data-move-period-up="' + escapeHtml(p) + '" type="button" title="Move up"' + (i === 0 ? " disabled" : "") + '>&uarr;</button> ' +
-      '<button class="btn btn-ghost btn-sm" data-move-period-down="' + escapeHtml(p) + '" type="button" title="Move down"' + (i === state.settings.periods.length - 1 ? " disabled" : "") + '>&darr;</button>' +
+    html += '<tr data-period-row="' + escapeHtml(p) + '"><td style="white-space:nowrap;">' +
+      '<button class="btn btn-ghost btn-sm drag-handle" type="button" data-drag-handle title="Drag to reorder">⠿</button>' +
       "</td>";
     html += '<td><input type="text" class="period-name-input" data-original="' + escapeHtml(p) + '" value="' + escapeHtml(p) + '"></td>';
     DAY_NAMES.forEach((d) => {
@@ -2266,20 +2582,56 @@ function renderAdminSchedule(root) {
     const res = await saveState(newState);
     if (res.ok || res.local) { toast("Removed " + name + " from the schedule.", "good"); renderAll(); }
   }));
-  function movePeriod(name, delta) {
-    return async () => {
-      const newState = JSON.parse(JSON.stringify(state));
-      const arr = newState.settings.periods;
-      const i = arr.indexOf(name);
-      const j = i + delta;
-      if (i === -1 || j < 0 || j >= arr.length) return;
-      const tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
-      const res = await saveState(newState);
-      if (res.ok || res.local) renderAll();
-    };
+  wireScheduleDrag(root);
+}
+/* Drag-to-reorder for the schedule table -- pointer events (not the HTML5 drag-and-drop API,
+   which real touch devices don't support) so this works the same with a mouse or a thumb.
+   Dragging the handle physically moves the <tr> live as you go, and the final DOM order is
+   what gets saved on release -- any unsaved renames/checkboxes on OTHER rows are untouched
+   since we never rebuild the table, only reorder the existing row elements. */
+function wireScheduleDrag(root) {
+  const tbody = root.querySelector("table tbody");
+  if (!tbody) return;
+  let draggingRow = null;
+  const rowsInOrder = () => Array.from(tbody.querySelectorAll("tr[data-period-row]"));
+  function onPointerMove(evt) {
+    if (!draggingRow) return;
+    evt.preventDefault();
+    const y = (evt.touches && evt.touches[0]) ? evt.touches[0].clientY : evt.clientY;
+    const others = rowsInOrder().filter((r) => r !== draggingRow);
+    for (const r of others) {
+      const rect = r.getBoundingClientRect();
+      if (y < rect.top + rect.height / 2) {
+        if (r.previousElementSibling !== draggingRow) tbody.insertBefore(draggingRow, r);
+        return;
+      }
+    }
+    tbody.appendChild(draggingRow);
   }
-  root.querySelectorAll("[data-move-period-up]").forEach((btn) => btn.addEventListener("click", movePeriod(btn.getAttribute("data-move-period-up"), -1)));
-  root.querySelectorAll("[data-move-period-down]").forEach((btn) => btn.addEventListener("click", movePeriod(btn.getAttribute("data-move-period-down"), 1)));
+  async function onPointerUp() {
+    if (!draggingRow) return;
+    draggingRow.classList.remove("dragging-row");
+    document.removeEventListener("pointermove", onPointerMove);
+    document.removeEventListener("pointerup", onPointerUp);
+    const newOrder = rowsInOrder().map((r) => r.getAttribute("data-period-row"));
+    draggingRow = null;
+    if (newOrder.length === state.settings.periods.length && newOrder.every((n, i) => n === state.settings.periods[i])) return;
+    const newState = JSON.parse(JSON.stringify(state));
+    newState.settings.periods = newOrder;
+    const res = await saveState(newState);
+    if (res.ok || res.local) renderAll();
+  }
+  root.querySelectorAll("[data-drag-handle]").forEach((handle) => {
+    handle.addEventListener("pointerdown", (evt) => {
+      const row = handle.closest("tr[data-period-row]");
+      if (!row) return;
+      evt.preventDefault();
+      draggingRow = row;
+      row.classList.add("dragging-row");
+      document.addEventListener("pointermove", onPointerMove, { passive: false });
+      document.addEventListener("pointerup", onPointerUp);
+    });
+  });
 }
 
 let bulkStaffResult = null;
@@ -2317,7 +2669,8 @@ function renderAdminStaff(root) {
   state.staff.forEach((s) => {
     html += "<tr><td>" + escapeHtml(s.name) + '</td><td class="num">' + escapeHtml(s.username) + '</td><td class="num">' + escapeHtml(s.password) +
       '</td><td>' + (s.role === "admin" ? '<span class="pill pill-gold">Admin</span>' : '<span class="pill pill-muted">Teacher</span>') +
-      '</td><td><button class="btn btn-ghost btn-sm" data-reset-staff="' + s.id + '">Reset password</button></td></tr>';
+      '</td><td><button class="btn btn-ghost btn-sm" data-view-as-staff="' + s.id + '">View as</button> ' +
+      '<button class="btn btn-ghost btn-sm" data-reset-staff="' + s.id + '">Reset password</button></td></tr>';
   });
   html += "</tbody></table></div></div>";
   root.innerHTML = html;
@@ -2335,6 +2688,14 @@ function renderAdminStaff(root) {
     const res = await saveState(newState);
     if (res.ok || res.local) { toast("Added " + name + " — password: " + password, "good"); renderAll(); }
   });
+  root.querySelectorAll("[data-view-as-staff]").forEach((btn) => btn.addEventListener("click", () => {
+    const id = btn.getAttribute("data-view-as-staff");
+    const rec = staffById(id);
+    viewAsSession = { type: "staff", id };
+    goToRoute("today");
+    if (rec) toast("Previewing as " + rec.name + ".", "good");
+    renderAll();
+  }));
   root.querySelectorAll("[data-reset-staff]").forEach((btn) => btn.addEventListener("click", async () => {
     const id = btn.getAttribute("data-reset-staff");
     const newState = JSON.parse(JSON.stringify(state));
@@ -2404,7 +2765,8 @@ function studentRow(s, archived) {
     ? '<span style="color:var(--warn);font-weight:600;">Delete permanently?</span> ' +
       '<button class="btn btn-danger btn-sm" data-confirm-delete-student="' + s.id + '">Yes, delete everything</button>' +
       '<button class="btn btn-ghost btn-sm" data-cancel-delete-student="' + s.id + '">Cancel</button>'
-    : '<button class="btn btn-ghost btn-sm" data-edit-student="' + s.id + '">Edit</button>' +
+    : '<button class="btn btn-ghost btn-sm" data-view-as-student="' + s.id + '">View as</button>' +
+      '<button class="btn btn-ghost btn-sm" data-edit-student="' + s.id + '">Edit</button>' +
       '<button class="btn btn-ghost btn-sm" data-toggle="' + s.id + '">' + (archived ? "Unarchive" : "Archive") + '</button>' +
       '<button class="btn btn-ghost btn-sm" data-reset-student="' + s.id + '">Reset pw</button>' +
       '<button class="btn btn-ghost btn-sm" data-delete-student="' + s.id + '" style="color:var(--warn);">Delete</button>';
@@ -2483,6 +2845,14 @@ function renderAdminStudents(root) {
     const res = await saveState(newState);
     if (res.ok || res.local) { toast("Added " + first + " " + last + " — username: " + username + ", password: " + password, "good"); renderAll(); }
   });
+  root.querySelectorAll("[data-view-as-student]").forEach((btn) => btn.addEventListener("click", () => {
+    const id = btn.getAttribute("data-view-as-student");
+    const rec = studentById(id);
+    viewAsSession = { type: "student", id };
+    goToRoute("balance");
+    if (rec) toast("Previewing as " + rec.first + " " + rec.last + ".", "good");
+    renderAll();
+  }));
   root.querySelectorAll("[data-toggle]").forEach((btn) => btn.addEventListener("click", async () => {
     const id = btn.getAttribute("data-toggle");
     const newState = JSON.parse(JSON.stringify(state));
@@ -2876,8 +3246,12 @@ function renderStudentDetail(root, student) {
     if (range.to && rec.date > range.to) return;
     Object.keys(rec.scores).forEach((p) => {
       const pair = rec.scores[p];
-      if (!pair || (pair[0] === null || pair[0] === undefined)) return;
-      logRows.push({ date: rec.date, period: p, att: pair[0], part: pair[1], note: pair[2] || "", by: pair[3] || "" });
+      if (!pair) return;
+      const excused = !!pair[4];
+      // Excused entries have no att/part score by design (that's what keeps them out of the
+      // percentages) -- don't let the "no score" skip below also hide them from this log.
+      if (!excused && (pair[0] === null || pair[0] === undefined)) return;
+      logRows.push({ date: rec.date, period: p, att: pair[0], part: pair[1], note: pair[2] || "", by: pair[3] || "", excused });
     });
   });
   logRows.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : a.period.localeCompare(b.period)));
@@ -2887,8 +3261,10 @@ function renderStudentDetail(root, student) {
   } else {
     html += '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Class</th><th class="num">Attendance</th><th class="num">Participation</th><th>Note</th><th>By</th></tr></thead><tbody>';
     logRows.slice(0, 150).forEach((r) => {
-      html += "<tr><td>" + fmtDateShort(r.date) + "</td><td>" + escapeHtml(r.period) + '</td><td class="num">' + num2(r.att) +
-        '</td><td class="num">' + (r.part === null || r.part === undefined ? "—" : num2(r.part)) + "</td><td>" + escapeHtml(r.note) +
+      const attPartHtml = r.excused
+        ? '<td class="num" colspan="2" style="color:var(--gold);font-weight:600;">Excused</td>'
+        : '<td class="num">' + num2(r.att) + '</td><td class="num">' + (r.part === null || r.part === undefined ? "—" : num2(r.part)) + "</td>";
+      html += "<tr><td>" + fmtDateShort(r.date) + "</td><td>" + escapeHtml(r.period) + "</td>" + attPartHtml + "<td>" + escapeHtml(r.note) +
         '</td><td>' + (r.by ? '<span class="marked-by marked-by-sm" title="' + escapeHtml(r.by) + '">' + escapeHtml(initialsFor(r.by)) + "</span>" : "") + "</td></tr>";
     });
     html += "</tbody></table></div>";
@@ -2935,15 +3311,26 @@ function renderAll() {
     if (loginEl) { loginEl.style.display = ""; loginEl.innerHTML = '<div class="login-wrap"><p class="sub" style="text-align:center;">Loading TAG Academy…</p></div>'; }
     return;
   }
-  const session = currentSession();
-  if (!session) {
+  const realSession = currentSession();
+  if (!realSession) {
     if (shellEl) shellEl.style.display = "none";
     if (loginEl) { loginEl.style.display = ""; renderLogin(loginEl); }
     return;
   }
+  // Swap in the previewed person's session for everything rendering-related (nav, routes,
+  // page content) while keeping realSession around for the exit-preview banner. Only an
+  // actual admin can be mid-preview; if the previewed record got deleted mid-preview, fall
+  // back to the real session instead of rendering a page for someone who no longer exists.
+  let session = realSession;
+  let previewing = false;
+  if (viewAsSession && isAdmin(realSession)) {
+    const rec = viewAsSession.type === "staff" ? staffById(viewAsSession.id) : studentById(viewAsSession.id);
+    if (rec) { session = { type: viewAsSession.type, record: rec }; previewing = true; }
+    else { viewAsSession = null; }
+  }
   if (shellEl) shellEl.style.display = "";
   if (loginEl) loginEl.style.display = "none";
-  renderShell(session);
+  renderShell(session, previewing);
   const root = document.getElementById("view-root");
   if (!root) return;
   const role = roleOf(session);
@@ -2953,7 +3340,13 @@ function renderAll() {
     viewingStudentId = null;
   }
   const route = currentRoute(session);
+  // View-as is a preview, not a way to act as someone else -- force every write path off for
+  // the duration of this one render (every renderer reads canWrite synchronously while
+  // building its HTML/wiring, so restoring it right after is safe).
+  const savedCanWrite = canWrite;
+  if (previewing) canWrite = false;
   ({ today: renderToday, ledger: renderLedger, overview: renderOverview, admin: renderAdmin, balance: renderBalance })[route](root, session);
+  canWrite = savedCanWrite;
   wireStudentLinks(root);
 }
 
