@@ -1921,6 +1921,14 @@ function wireTodayGrid(root, teacherName) {
   if (!body) return;
   wirePillTracks(body);
   wireNotePopovers(body);
+  // Closing a note (tapping "Done") is the one interaction on this page that reads as
+  // "finished entering that" -- so it saves the whole class immediately, the same as pressing
+  // the main Save button, instead of silently leaving the note unsaved until some later click.
+  // performTodaySave is declared further down (function declarations hoist), and this only
+  // wires the notes that actually have a "Done" button (read-only cards don't render one).
+  body.querySelectorAll(".note-popover-close").forEach((btn) => {
+    btn.addEventListener("click", () => performTodaySave());
+  });
   body.querySelectorAll(".student-card").forEach((card) => {
     const attInp = card.querySelector('.score-input[data-slot="att"]');
     const partInp = card.querySelector('.score-input[data-slot="part"]');
@@ -1999,7 +2007,11 @@ function wireTodayGrid(root, teacherName) {
 
   const saveBtn = document.getElementById("save-today");
   if (!saveBtn) return;
-  saveBtn.addEventListener("click", async () => {
+  saveBtn.addEventListener("click", performTodaySave);
+
+  // Named (not just an inline arrow on saveBtn) so the note popover's "Done" button, wired
+  // above, can trigger the exact same save -- one save path, however it's triggered.
+  async function performTodaySave() {
     saveBtn.disabled = true;
     const statusEl = document.getElementById("today-save-status");
     if (statusEl) statusEl.textContent = "Saving…";
@@ -2057,7 +2069,7 @@ function wireTodayGrid(root, teacherName) {
       saveBtn.disabled = false;
       if (statusEl) statusEl.textContent = "Not saved — see message above.";
     }
-  });
+  }
 
   const undoBtn = document.getElementById("undo-last-save");
   if (undoBtn) undoBtn.addEventListener("click", async () => {
@@ -2477,11 +2489,11 @@ function renderOverview(root) {
 }
 
 /* ================================================================
-   VIEW: ADMIN (Schedule & Coins · Staff · Students · Privileges)
+   VIEW: ADMIN (Schedule · Staff · Students · Coins & Privileges)
    ================================================================ */
 let adminTab = "schedule";
 function renderAdmin(root) {
-  const tabs = [["schedule", "Schedule & Coins"], ["staff", "Staff Accounts"], ["students", "Students"], ["privileges", "Privileges"]];
+  const tabs = [["schedule", "Schedule"], ["staff", "Staff Accounts"], ["students", "Students"], ["privileges", "Coins & Privileges"]];
   let html = '<div class="page-head"><div><span class="eyebrow">Set everything up</span><h1>Admin</h1>' +
     '<p>The weekly schedule, the coin rule, and every login — staff and student. Everything else in the app reads from here.</p></div></div>';
   html += '<div class="admin-tabs">' + tabs.map((t) => '<button class="admin-tab' + (adminTab === t[0] ? " active" : "") + '" data-admintab="' + t[0] + '">' + t[1] + "</button>").join("") + "</div>";
@@ -2496,10 +2508,7 @@ function renderAdmin(root) {
 }
 
 function renderAdminSchedule(root) {
-  let html = '<div class="card card-pad"><div class="section-title">TAG coin rule</div><div class="field" style="max-width:300px;">' +
-    '<label for="s-ppc">Attendance + participation points needed to earn 1 TAG coin</label><input type="number" min="1" step="1" id="s-ppc" value="' + state.settings.pointsPerCoin + '"></div>' +
-    '<button class="btn btn-primary btn-sm" id="s-ppc-save">Save</button></div>';
-  html += '<div class="card card-pad"><div class="section-title">Weekly class schedule</div>' +
+  let html = '<div class="card card-pad"><div class="section-title">Weekly class schedule</div>' +
     '<p class="help-text">Check every day a period runs, or rename a class right in its row. Add a class below, or remove one that’s no longer used — past attendance for a removed class is kept, not deleted, and comes back if you add a class with the exact same name again. Renaming a class keeps its past attendance under the new name.</p>';
   html += '<div class="field-row" style="align-items:flex-end;max-width:480px;">' +
     '<div class="field" style="flex:1;"><label for="np-name">New class name</label><input type="text" id="np-name" placeholder="e.g. Chavrusa"></div>' +
@@ -2519,12 +2528,6 @@ function renderAdminSchedule(root) {
   });
   html += "</tbody></table></div><button class=\"btn btn-primary btn-sm\" id=\"s-schedule-save\" style=\"margin-top:12px;\">Save schedule</button></div>";
   root.innerHTML = html;
-  document.getElementById("s-ppc-save").addEventListener("click", async () => {
-    const newState = JSON.parse(JSON.stringify(state));
-    newState.settings.pointsPerCoin = Number(document.getElementById("s-ppc").value) || 10;
-    const res = await saveState(newState);
-    if (res.ok || res.local) { toast("Coin rule saved.", "good"); renderAll(); }
-  });
   document.getElementById("s-schedule-save").addEventListener("click", async () => {
     // Read renames (keyed by each row's original name) and the day checkboxes (also keyed by
     // original name, since that's what the checkboxes' data-period still points at).
@@ -2953,13 +2956,22 @@ function renderAdminStudents(root) {
 }
 
 function renderAdminPrivileges(root) {
-  let html = '<div class="card card-pad"><div class="section-title">Privileges &amp; coin prices</div><div class="field-row">' +
+  let html = '<div class="card card-pad"><div class="section-title">TAG coin rule</div><div class="field" style="max-width:300px;">' +
+    '<label for="s-ppc">Attendance + participation points needed to earn 1 TAG coin</label><input type="number" min="1" step="1" id="s-ppc" value="' + state.settings.pointsPerCoin + '"></div>' +
+    '<button class="btn btn-primary btn-sm" id="s-ppc-save">Save</button></div>';
+  html += '<div class="card card-pad"><div class="section-title">Privileges &amp; coin prices</div><div class="field-row">' +
     '<div class="field"><label for="s-priv-name">Privilege</label><input type="text" id="s-priv-name"></div>' +
     '<div class="field" style="max-width:140px;"><label for="s-priv-cost">Coin cost</label><input type="number" min="0" step="1" id="s-priv-cost"></div></div>' +
     '<button class="btn btn-primary btn-sm" id="s-priv-add">Add</button>';
   html += '<div class="table-wrap" style="margin-top:14px;"><table><thead><tr><th>Privilege</th><th class="num">Cost</th></tr></thead><tbody>' +
     (state.settings.privileges || []).map((p) => "<tr><td>" + escapeHtml(p.name) + '</td><td class="num">' + p.cost + "</td></tr>").join("") + "</tbody></table></div></div>";
   root.innerHTML = html;
+  document.getElementById("s-ppc-save").addEventListener("click", async () => {
+    const newState = JSON.parse(JSON.stringify(state));
+    newState.settings.pointsPerCoin = Number(document.getElementById("s-ppc").value) || 10;
+    const res = await saveState(newState);
+    if (res.ok || res.local) { toast("Coin rule saved.", "good"); renderAll(); }
+  });
   document.getElementById("s-priv-add").addEventListener("click", async () => {
     const name = document.getElementById("s-priv-name").value.trim();
     const cost = Number(document.getElementById("s-priv-cost").value);
