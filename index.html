@@ -263,39 +263,29 @@ main.view {
 .sc-head .marked-by { margin-left: 6px; }
 .marked-by-sm { min-width: 16px; height: 16px; font-size: 0.58rem; vertical-align: middle; }
 
-/* Compact rows: same score-pill controls as Cards, laid out in a single dense line. */
-.student-rows { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+/* Compact rows: every student on exactly one line, always -- no score-pill labels, no
+   wrapping to a second line even on a phone, so many more students fit on screen than
+   Cards. If a row's contents genuinely can't fit a very narrow screen, that one row
+   scrolls horizontally on its own rather than wrapping (which would make it as tall as a
+   card again) or overflowing the page. */
+.student-rows { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; }
 .student-row-compact {
-  display: flex; align-items: center; gap: 10px; padding: 8px 10px; flex-direction: row;
+  display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+  flex-wrap: nowrap; overflow-x: auto;
 }
-.student-row-compact .src-name { flex: 0 0 128px; min-width: 0; display: flex; align-items: center; gap: 6px; font-size: 0.86rem; }
-.student-row-compact .src-name .student-link { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.student-row-compact .src-pills { flex: 1; min-width: 0; display: flex; gap: 10px; }
-.student-row-compact .src-pills .score-pill-row { flex: 1; min-width: 70px; gap: 3px; }
-.student-row-compact .score-pill-track { height: 22px; }
-.student-row-compact .score-pill-wrap .score-input { width: 38px; }
-.student-row-compact .src-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-
-/* Checklist: maximum density, name chips colored by whether they're marked yet, meant
-   to answer "who hasn't been marked" at a glance without scrolling. */
-.student-checklist { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-.check-chip {
-  display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px; border-radius: 999px;
-  border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--ink);
-  font-size: 0.82rem; font-weight: 600; cursor: pointer; position: relative;
+.student-row-compact .src-name {
+  flex: 1 1 auto; min-width: 64px; display: flex; align-items: center; gap: 6px;
+  font-size: 0.85rem; overflow: hidden; white-space: nowrap;
 }
-.check-chip:disabled { cursor: default; opacity: 0.75; }
-.check-chip .check-val { font-family: var(--font-mono); font-size: 0.74rem; color: var(--muted); }
-.check-chip .check-val.check-dash { color: var(--muted); }
-.check-chip.check-unmarked { border-style: dashed; }
-.check-chip.check-good { background: var(--good-soft); border-color: var(--good); color: var(--good); }
-.check-chip.check-good .check-val { color: var(--good); }
-.check-chip.check-caution { background: var(--caution-soft); border-color: var(--caution); color: var(--caution); }
-.check-chip.check-caution .check-val { color: var(--caution); }
-.check-chip.check-warn { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
-.check-chip.check-warn .check-val { color: var(--warn); }
-.check-chip .note-dot { position: static; width: 6px; height: 6px; border: none; }
-.check-chip .marked-by { margin-left: 2px; }
+.student-row-compact .src-name .student-link { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.student-row-compact .src-pills { flex: 0 0 auto; display: flex; gap: 8px; }
+.student-row-compact .src-pill-slot { display: flex; align-items: center; gap: 3px; }
+.student-row-compact .src-pill-tag { font-size: 0.6rem; color: var(--muted); font-weight: 700; }
+.student-row-compact .score-pill-wrap { gap: 4px; }
+.student-row-compact .score-pill-track { height: 20px; width: 42px; flex: none; }
+.student-row-compact .score-pill-wrap .score-input { width: 30px; padding: 2px; flex-shrink: 0; }
+.student-row-compact .src-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.student-row-compact .src-actions .btn { white-space: nowrap; }
 
 /* ===================== cards / surfaces ===================== */
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
@@ -570,9 +560,10 @@ td.num, th.num { font-family: var(--font-mono); text-align: right; }
      the right edge of a phone screen, so on phone widths it drops into normal flow (full
      width, below the date row) instead of floating. */
   .hcal-pop { position: static; width: 100%; max-width: none; margin-top: 8px; }
-  .student-row-compact { flex-wrap: wrap; }
-  .student-row-compact .src-name { flex: 1 1 100%; }
-  .student-row-compact .src-pills { flex: 1 1 100%; }
+  /* Compact view stays one line per student even on phones -- shrink the name's minimum
+     width a bit further and let the row itself scroll sideways as the last resort instead
+     of wrapping, which would make it as tall as Cards again (the exact complaint it fixes). */
+  .student-row-compact .src-name { min-width: 44px; }
 }
 @media (max-width: 360px) {
   main.view { padding: 20px 10px 50px; }
@@ -690,12 +681,16 @@ function parshaFor(dateStr) {
     return r.chag ? "" : "Parshas " + r.parsha.join("-");
   } catch (e) { return ""; }
 }
+/* Drop the gershayim/geresh punctuation (״ ׳) that renderGematriya() adds -- fine to lose
+   for the compact mobile-width spots below (a picker trigger button, calendar-grid cells);
+   "כ״ח" -> "כח" reads the same and takes noticeably less width. */
+function stripHebrewPunct(s) { return s ? s.replace(/[׳״]/g, "") : s; }
 /* Just the day numeral out of a full Hebrew date render — renderGematriya() always puts
    it before the first space (e.g. "י״ח אלול תשפ״ו" -> "י״ח"), so no need to hand-roll a
    separate gematriya table for the calendar-grid picker below. */
 function hebrewDayNumeral(dateStr) {
   const full = hebrewDateFor(dateStr);
-  return full ? full.split(" ")[0] : "";
+  return full ? stripHebrewPunct(full.split(" ")[0]) : "";
 }
 /* Short initials for attributing an attendance entry to the staff member who marked it
    (e.g. "Chaim Friedman" -> "CF", "Admin" -> "AD"). */
@@ -735,14 +730,16 @@ function clampScore(v) {
 function scorePillHtml(slot, value, label, disabled, extraAttrs) {
   const v = (value === null || value === undefined) ? "" : value;
   const pct = v === "" ? 0 : Math.max(0, Math.min(1, Number(v))) * 100;
-  return '<div class="score-pill-row">' +
-    '<div class="score-pill-label">' + escapeHtml(label) + "</div>" +
-    '<div class="score-pill-wrap">' +
+  const core = '<div class="score-pill-wrap">' +
     '<div class="score-pill-track' + (disabled ? " score-pill-disabled" : "") + '" data-slot="' + slot + '">' +
     '<div class="score-pill-fill" style="width:' + pct + '%"></div>' +
     "</div>" +
     '<input class="score-input" type="number" min="0" max="1" step="0.05" data-slot="' + slot + '" value="' + v + '" ' + (extraAttrs || "") + (disabled ? " disabled" : "") + ">" +
-    "</div></div>";
+    "</div>";
+  // label === null skips the label/row wrapper entirely -- used by the Compact view, where
+  // every student is one line and there's no room for "ATTENDANCE" / "PARTICIPATION" headers.
+  if (label === null) return core;
+  return '<div class="score-pill-row"><div class="score-pill-label">' + escapeHtml(label) + "</div>" + core + "</div>";
 }
 function refreshPillForInput(input) {
   if (!input) return;
@@ -894,6 +891,7 @@ function seedState() {
   const l1 = uid("l"), l2 = uid("l"), l3 = uid("l"), l4 = uid("l");
   const exampleDate = "2026-09-06";
   return {
+    _rev: 0, // see saveState() -- guards against two tabs/devices silently overwriting each other
     meta: { schoolYear: "2026–2027" },
     settings: {
       pointsPerCoin: 10,
@@ -1199,6 +1197,25 @@ async function saveState(newState, opts) {
   opts = opts || {};
   if (opts.stashKey) stashDraft(opts.stashKey, opts.stashData);
   try {
+    // Everyone shares one Firestore document, everyone's tab keeps its own in-memory copy
+    // of it, and .set() below fully replaces the document -- so without a check here, a
+    // tab that's been open a while (its `state` now stale) would silently overwrite
+    // whatever anyone else saved in the meantime (e.g. a new staff account another admin
+    // just added). `_rev` is a save counter: re-read the server's current value right
+    // before writing, and if it's moved past what our copy of `state` was built from,
+    // someone else saved first -- pull in their version instead of clobbering it, and ask
+    // this save to be retried against the fresh data (the draft stash above means nothing
+    // typed here is lost while that happens).
+    const freshSnap = await STATE_DOC.get();
+    const serverRev = freshSnap.exists ? (freshSnap.data()._rev || 0) : 0;
+    const ourRev = (state && state._rev) || 0;
+    if (freshSnap.exists && serverRev !== ourRev) {
+      state = freshSnap.data();
+      toast("Someone else just saved changes, so we didn't overwrite them — we've pulled in the latest data. Please try your save again.", "warn");
+      renderAll();
+      return { ok: false, code: "conflict" };
+    }
+    newState._rev = serverRev + 1;
     await STATE_DOC.set(newState);
     // Keep our in-memory copy in sync with what we just saved -- otherwise the next
     // edit in this session would clone the old (pre-save) state and silently undo
@@ -1446,7 +1463,7 @@ function renderToday(root, session) {
   const parshaOptions = parshaOptionsFor(todayDate);
   const todayWeekSunday = weekRangeFor(todayDate).from;
   const monthRange = hebrewMonthRangeFor(todayDate);
-  const hebLabel = hebrewDateFor(todayDate);
+  const hebLabel = stripHebrewPunct(hebrewDateFor(todayDate));
   const todayGregISO = todayISO();
 
   let html = '<div class="page-head"><div><span class="eyebrow">Class by class</span><h1>Attendance &amp; Participation</h1>' +
@@ -1537,11 +1554,10 @@ function renderToday(root, session) {
 
   html += extraPeriodHtml;
 
-  html += (canWrite && todayView !== "checklist" ? '<div style="margin-top:10px;"><button class="btn btn-ghost btn-sm" id="fill-all">Mark whole class present</button></div>' : "");
+  html += (canWrite ? '<div style="margin-top:10px;"><button class="btn btn-ghost btn-sm" id="fill-all">Mark whole class present</button></div>' : "");
 
-  const VIEW_LABELS = { cards: "Cards", compact: "Compact", checklist: "Checklist" };
-  html += '<div class="view-toggle-row"><span class="view-toggle-hint">' +
-    (todayView === "checklist" ? "Tap a name to mark present at a glance." : "View") + "</span>" +
+  const VIEW_LABELS = { cards: "Cards", compact: "Compact" };
+  html += '<div class="view-toggle-row"><span class="view-toggle-hint">View</span>' +
     '<div class="view-toggle" role="group" aria-label="Student list view">' +
     Object.keys(VIEW_LABELS).map((v) => '<button type="button" class="today-view-btn' + (todayView === v ? " active" : "") + '" data-view="' + v + '">' + VIEW_LABELS[v] + "</button>").join("") +
     "</div></div>";
@@ -1564,40 +1580,16 @@ function renderToday(root, session) {
       const linked = !(pair[0] !== null && pair[0] !== undefined && pair[1] !== null && pair[1] !== undefined && pair[0] !== pair[1]);
       const note = pair[2] || "";
       html += '<div class="student-card student-row-compact" data-student="' + student.id + '">';
-      html += '<div class="src-name">' + studentLink(student) + markedByBadge(pair) + "</div>";
-      html += '<div class="src-pills">' +
-        scorePillHtml("att", pair[0], "Att", !canWrite) +
-        scorePillHtml("part", pair[1], "Part", !canWrite, 'data-linked="' + (linked ? "1" : "0") + '"') +
-        "</div>";
-      html += '<div class="src-actions">' + notePopoverHtml(note, !canWrite) + (canWrite ? '<button class="btn btn-ghost btn-sm row-present" type="button">Present</button>' : "") + "</div>";
+      html += '<span class="src-name">' + studentLink(student) + markedByBadge(pair) + "</span>";
+      html += '<span class="src-pills">' +
+        '<span class="src-pill-slot"><span class="src-pill-tag">A</span>' + scorePillHtml("att", pair[0], null, !canWrite) + "</span>" +
+        '<span class="src-pill-slot"><span class="src-pill-tag">P</span>' + scorePillHtml("part", pair[1], null, !canWrite, 'data-linked="' + (linked ? "1" : "0") + '"') + "</span>" +
+        "</span>";
+      html += '<span class="src-actions">' + notePopoverHtml(note, !canWrite) + (canWrite ? '<button class="btn btn-ghost btn-sm row-present" type="button">Present</button>' : "") + "</span>";
       html += "</div>";
     });
     html += "</div>";
     html += '<div class="legend-note"><span><span class="sw" style="background:var(--brand)"></span>Tap or slide either bar for a quick mark. Blank = didn’t run.</span></div>';
-  } else if (todayView === "checklist") {
-    html += '<div class="student-checklist" id="period-entry-body">';
-    roster.forEach((student) => {
-      const pair = pairFor(student);
-      const linked = !(pair[0] !== null && pair[0] !== undefined && pair[1] !== null && pair[1] !== undefined && pair[0] !== pair[1]);
-      const note = pair[2] || "";
-      const has = pair[0] !== null && pair[0] !== undefined;
-      const tone = has ? pctTone(pair[0]) : "";
-      html += '<button type="button" class="check-chip' + (tone ? " check-" + tone : " check-unmarked") + '" data-student="' + student.id + '"' + (canWrite ? "" : " disabled") + '>' +
-        '<span class="check-name">' + escapeHtml(fullName(student)) + "</span>" +
-        (has ? '<span class="check-val">' + num2(pair[0]) + "</span>" : '<span class="check-val check-dash">—</span>') +
-        (note ? '<span class="note-dot" title="' + escapeHtml(note) + '"></span>' : "") +
-        markedByBadge(pair) +
-        "</button>" +
-        // hidden inputs so the existing save logic (which reads .score-input elements
-        // inside each .student-card) keeps working unchanged for this view too.
-        '<span class="student-card hidden-inputs" data-student="' + student.id + '" style="display:none;">' +
-        scorePillHtml("att", pair[0], "Attendance", !canWrite) +
-        scorePillHtml("part", pair[1], "Participation", !canWrite, 'data-linked="' + (linked ? "1" : "0") + '"') +
-        notePopoverHtml(note, !canWrite) +
-        "</span>";
-    });
-    html += "</div>";
-    html += '<div class="legend-note"><span><span class="sw" style="background:var(--good)"></span>Marked · <span class="sw" style="background:var(--surface-2);border:1px solid var(--line-strong);"></span>Not marked yet — tap a name to mark present. Numbers and notes stay editable in Cards or Compact view.</span></div>';
   } else {
     html += '<div class="student-grid" id="period-entry-body">';
     roster.forEach((student) => {
@@ -1754,24 +1746,6 @@ function wireTodayGrid(root, teacherName) {
     if (presentBtn) presentBtn.addEventListener("click", () => {
       if (attInp) { attInp.value = "1"; refreshPillForInput(attInp); }
       if (partInp) { partInp.value = "1"; partInp.dataset.linked = "1"; refreshPillForInput(partInp); }
-    });
-  });
-  // Checklist view: each chip is a quick "mark present" tap — the actual score fields
-  // live in a hidden sibling .student-card (built during render) so the shared Save
-  // logic below (which reads every .student-card on the page) picks them up unchanged.
-  body.querySelectorAll(".check-chip").forEach((chip) => {
-    chip.addEventListener("click", () => {
-      const sid = chip.getAttribute("data-student");
-      const hidden = body.querySelector('.hidden-inputs[data-student="' + sid + '"]');
-      if (!hidden) return;
-      const attInp = hidden.querySelector('.score-input[data-slot="att"]');
-      const partInp = hidden.querySelector('.score-input[data-slot="part"]');
-      if (attInp) { attInp.value = "1"; refreshPillForInput(attInp); }
-      if (partInp) { partInp.value = "1"; partInp.dataset.linked = "1"; refreshPillForInput(partInp); }
-      chip.classList.remove("check-unmarked", "check-good", "check-caution", "check-warn");
-      chip.classList.add("check-good");
-      const valEl = chip.querySelector(".check-val");
-      if (valEl) { valEl.textContent = "1"; valEl.classList.remove("check-dash"); }
     });
   });
   const fillAllBtn = document.getElementById("fill-all");
