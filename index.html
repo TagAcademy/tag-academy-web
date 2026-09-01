@@ -2149,7 +2149,7 @@ function renderToday(root, session) {
   // that needs its own full-width line instead. extraPeriodButtonHtml is the inline piece;
   // extraPeriodFormHtml (only non-empty while the form is open) renders below the action row.
   const extraPeriodButtonHtml = canWrite && !showAddExtraPeriod
-    ? '<button class="btn btn-ghost btn-sm" id="extra-period-open" type="button">+ Add a class just for today</button>' : "";
+    ? '<button class="btn btn-ghost btn-sm" id="extra-period-open" type="button" title="Add a class just for today">+ Class</button>' : "";
   const extraPeriodFormHtml = canWrite && showAddExtraPeriod ? (() => {
     const otherPeriods = state.settings.periods.filter((p) => !periods.includes(p));
     return '<div class="field-row" style="margin-top:10px;align-items:flex-end;">' +
@@ -2198,9 +2198,9 @@ function renderToday(root, session) {
   const periodIsBonus = selectedPeriod && isBonusPeriod(todayDate, selectedPeriod);
   const canToggleBonus = canWrite && isAdmin(session);
   const bonusPieceHtml = (periodIsBonus ? '<span class="pill pill-gold" title="Marked scores help this average; a missed or low mark leaves it unchanged.">★ Bonus today — only helps, never hurts</span>' : "") +
-    (canToggleBonus ? '<button class="btn btn-ghost btn-sm" id="toggle-bonus" type="button">' + (periodIsBonus ? "Unmark as bonus" : "Mark " + escapeHtml(selectedPeriod) + " as bonus today") + "</button>" : "");
+    (canToggleBonus ? '<button class="btn btn-ghost btn-sm" id="toggle-bonus" type="button" title="' + (periodIsBonus ? "Unmark " + escapeHtml(selectedPeriod) + " as bonus" : "Mark " + escapeHtml(selectedPeriod) + " as bonus today") + '">' + (periodIsBonus ? "Unmark bonus" : "Mark bonus") + "</button>" : "");
 
-  const fillAllHtml = canWrite ? '<button class="btn btn-ghost btn-sm" id="fill-all">Mark whole class present</button>' : "";
+  const fillAllHtml = canWrite ? '<button class="btn btn-ghost btn-sm" id="fill-all" title="Mark whole class present">Mark all present</button>' : "";
 
   // These three used to each sit on their own stacked line; now they share one row (wrapping
   // on narrow screens) so they read as a single group of quick actions instead of a scroll of
@@ -4394,21 +4394,55 @@ async function init() {
 // at the same class can each be working from data that's gone stale the moment the other one
 // saves. This keeps every open tab/device subscribed to the one shared document and pulls in
 // whatever anyone (including a different tab of the same person) just saved, in real time.
+function applyIncomingState(incoming) {
+  if (!incoming) return;
+  // saveState() already sets `state` to exactly this same object right after a successful
+  // write of its own, and Firestore's SDK fires the listener for that local write too (an
+  // immediate local echo, then again once the server confirms it) -- comparing `_rev` skips
+  // acting on our own save a second time, so it doesn't trigger a redundant re-render or
+  // stomp on whatever the person has started doing since that save went through.
+  if (state && incoming._rev === state._rev) return;
+  state = incoming;
+  refreshViewOrDefer();
+}
 function listenForLiveUpdates() {
-  STATE_DOC.onSnapshot((snap) => {
-    if (!snap.exists) return;
-    const incoming = snap.data();
-    // saveState() already sets `state` to exactly this same object right after a successful
-    // write of its own, and Firestore's SDK fires this listener for that local write too (an
-    // immediate local echo, then again once the server confirms it) -- comparing `_rev` skips
-    // acting on our own save a second time, so it doesn't trigger a redundant re-render or
-    // stomp on whatever the person has started doing since that save went through.
-    if (state && incoming._rev === state._rev) return;
-    state = incoming;
-    refreshViewOrDefer();
-  }, (err) => {
-    console.error("Live sync error:", err);
+  // A phone's screen turning off, a laptop going to sleep, or a wifi network dropping for a
+  // moment can all leave Firestore's realtime "watch" channel silently stalled -- no error,
+  // no more updates, just quietly stuck -- which is exactly what makes it look like the app
+  // "needs a refresh." Resubscribing (with a short, backing-off delay so a real outage
+  // doesn't spam retries) heals a channel that errored out on its own; the visibility/online
+  // listeners and the periodic catch-up poll below heal the far more common case where it
+  // stalls silently and never calls the error handler at all.
+  let retryDelay = 2000;
+  function subscribe() {
+    return STATE_DOC.onSnapshot((snap) => {
+      retryDelay = 2000;
+      if (!snap.exists) return;
+      applyIncomingState(snap.data());
+    }, (err) => {
+      console.error("Live sync error:", err);
+      setTimeout(subscribe, retryDelay);
+      retryDelay = Math.min(retryDelay * 2, 30000);
+    });
+  }
+  subscribe();
+
+  // Belt-and-suspenders beyond the push-based listener above: catch up with one plain fetch
+  // the moment a backgrounded tab is looked at again or the network comes back, instead of
+  // waiting on the realtime channel to notice by itself.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") syncNow();
   });
+  window.addEventListener("online", syncNow);
+  // And a final safety net that needs no trigger at all: every 20 seconds, just check --
+  // so even a stall none of the above catches can never leave a screen more than about 20
+  // seconds out of date.
+  setInterval(syncNow, 20000);
+}
+function syncNow() {
+  STATE_DOC.get().then((snap) => {
+    if (snap.exists) applyIncomingState(snap.data());
+  }).catch((err) => console.error("Live sync catch-up failed:", err));
 }
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
 else init();
