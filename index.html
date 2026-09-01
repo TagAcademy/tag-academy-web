@@ -427,8 +427,13 @@ textarea { resize: vertical; min-height: 60px; }
 .sc-head-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
 /* Excused: the score pills and the excused note both stay in the card's DOM always, and
-   .is-excused (toggled live in JS, no re-render needed) picks which one shows. */
-.excused-note { display: none; }
+   .is-excused (toggled live in JS, no re-render needed) picks which one shows. The hide rule
+   is deliberately the compound ".student-card .excused-note" (specificity 0,2,0), not the
+   bare ".excused-note" it used to be (0,1,0) -- tied against ".pill"'s own (0,1,0) below, a
+   bare selector loses on source order alone and the note showed on EVERY card regardless of
+   excused state. The compound selector wins outright, so it no longer matters which rule the
+   cascade sees last. */
+.student-card .excused-note { display: none; }
 .student-card.is-excused .excused-note { display: inline-block; margin: -4px 0 0; }
 .student-card.is-excused .score-pill-row { display: none; }
 .row-excuse.active { background: var(--gold-soft); border-color: var(--gold); color: var(--gold); }
