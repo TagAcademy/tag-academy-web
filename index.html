@@ -1070,7 +1070,12 @@ function pillValueFromEvent(evt, trackEl) {
   frac = Math.max(0, Math.min(1, frac));
   return Math.round(frac * 20) / 20;
 }
-function wirePillTracks(root) {
+// Set while any Cards-view bar is actively being dragged, and checked by isViewBusy() -- the
+// drag targets the track div, not the underlying (often invisible) input, so
+// document.activeElement alone wouldn't notice a drag in progress, and a live update arriving
+// mid-drag would otherwise yank the DOM out from under the pointer capture.
+let pointerDragActive = false;
+function wirePillTracks(root, onRelease) {
   root.querySelectorAll(".score-pill-track").forEach((track) => {
     if (track.classList.contains("score-pill-disabled")) return;
     const slot = track.getAttribute("data-slot");
@@ -1086,11 +1091,18 @@ function wirePillTracks(root) {
     track.addEventListener("pointerdown", (evt) => {
       if (input.disabled) return;
       dragging = true;
+      pointerDragActive = true;
       try { track.setPointerCapture(evt.pointerId); } catch (e) {}
       apply(evt);
     });
     track.addEventListener("pointermove", (evt) => { if (dragging) apply(evt); });
-    const stop = () => { dragging = false; };
+    const stop = () => {
+      const wasDragging = dragging;
+      dragging = false;
+      pointerDragActive = false;
+      if (wasDragging && onRelease) onRelease(input);
+      flushDeferredRefresh();
+    };
     track.addEventListener("pointerup", stop);
     track.addEventListener("pointercancel", stop);
   });
@@ -1142,7 +1154,43 @@ document.addEventListener("click", (evt) => {
   document.querySelectorAll(".src-slot.is-open").forEach((wrap) => {
     if (!wrap.contains(evt.target)) wrap.classList.remove("is-open");
   });
+  flushDeferredRefresh();
 });
+
+/* ---------- refresh-vs-interrupt: with autosave and live updates, a re-render can now be
+   triggered by someone ELSE's save (or by this device's own autosave finishing for a
+   different student) at any moment -- including while this person has a note popover or a
+   Compact dial slider open, or is mid-drag on a Cards-view bar. renderAll() rebuilds the
+   page's HTML from scratch, so doing that right then would slam an open popover/slider shut
+   or yank focus out of a field. isViewBusy() below is the check: if anything on today's grid
+   looks mid-interaction, a refresh is deferred (state itself still updates immediately, so
+   nothing is lost) and flushed the moment that interaction ends (an outside click closing a
+   popover/slider, above, or losing focus, below). ---------- */
+let deferredRefreshPending = false;
+function isViewBusy() {
+  if (pointerDragActive) return true;
+  if (document.querySelector(".note-popover:not([hidden])")) return true;
+  if (document.querySelector(".src-slot.is-open")) return true;
+  const root = document.getElementById("view-root");
+  const ae = document.activeElement;
+  if (root && ae && root !== ae && root.contains(ae) && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA")) return true;
+  return false;
+}
+function refreshViewOrDefer() {
+  if (isViewBusy()) { deferredRefreshPending = true; return; }
+  deferredRefreshPending = false;
+  renderAll();
+}
+function flushDeferredRefresh() {
+  if (deferredRefreshPending && !isViewBusy()) { deferredRefreshPending = false; renderAll(); }
+}
+// Losing focus on a text field is the other moment an interaction can end (tabbing/clicking
+// away without necessarily triggering the click-outside handlers above) -- 'focusout' bubbles,
+// unlike 'blur', so one listener on the document catches every field. The tiny delay lets the
+// next element finish becoming document.activeElement first (e.g. clicking straight from one
+// input into another), so isViewBusy() checks the settled state, not a momentary gap between
+// the two.
+document.addEventListener("focusout", () => { setTimeout(flushDeferredRefresh, 0); });
 function fullName(person) { return escapeHtml(person.last) + ", " + escapeHtml(person.first); }
 function studentLink(student) { return '<button type="button" class="student-link" data-student-link="' + student.id + '">' + fullName(student) + "</button>"; }
 function slugUsername(first, last) {
@@ -1566,48 +1614,63 @@ function clearDraft(key) { try { sessionStorage.removeItem("draft:" + key); } ca
 async function saveState(newState, opts) {
   opts = opts || {};
   if (opts.stashKey) stashDraft(opts.stashKey, opts.stashData);
-  try {
-    // Everyone shares one Firestore document, everyone's tab keeps its own in-memory copy
-    // of it, and .set() below fully replaces the document -- so without a check here, a
-    // tab that's been open a while (its `state` now stale) would silently overwrite
-    // whatever anyone else saved in the meantime (e.g. a new staff account another admin
-    // just added). `_rev` is a save counter: re-read the server's current value right
-    // before writing, and if it's moved past what our copy of `state` was built from,
-    // someone else saved first -- pull in their version instead of clobbering it, and ask
-    // this save to be retried against the fresh data (the draft stash above means nothing
-    // typed here is lost while that happens).
-    const freshSnap = await STATE_DOC.get();
-    const serverRev = freshSnap.exists ? (freshSnap.data()._rev || 0) : 0;
-    const ourRev = (state && state._rev) || 0;
-    if (freshSnap.exists && serverRev !== ourRev) {
-      state = freshSnap.data();
-      toast("Someone else just saved changes, so we didn't overwrite them — we've pulled in the latest data. Please try your save again.", "warn");
-      renderAll();
-      return { ok: false, code: "conflict" };
+  // opts.retry(freshState) -> newState: when given, a conflict (below) doesn't stop and ask
+  // the person to press Save again -- it recomputes just this one edit against whatever the
+  // fresh server data turned out to be, and writes that instead, up to a few times. This is
+  // what makes autosave actually fire-and-forget: with several people marking at once, a
+  // conflict here is expected to happen occasionally, and re-deriving the same intended edit
+  // from current data is safe as long as the recompute (like per-student attendance patches)
+  // only touches what this one action actually changed.
+  const maxAttempts = opts.retry ? 5 : 1;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      // Everyone shares one Firestore document, everyone's tab keeps its own in-memory copy
+      // of it, and .set() below fully replaces the document -- so without a check here, a
+      // tab that's been open a while (its `state` now stale) would silently overwrite
+      // whatever anyone else saved in the meantime (e.g. a new staff account another admin
+      // just added). `_rev` is a save counter: re-read the server's current value right
+      // before writing, and if it's moved past what our copy of `state` was built from,
+      // someone else saved first -- pull in their version instead of clobbering it.
+      const freshSnap = await STATE_DOC.get();
+      const serverRev = freshSnap.exists ? (freshSnap.data()._rev || 0) : 0;
+      const ourRev = (state && state._rev) || 0;
+      if (freshSnap.exists && serverRev !== ourRev) {
+        state = freshSnap.data();
+        if (opts.retry && attempt < maxAttempts) {
+          newState = opts.retry(state);
+          continue;
+        }
+        toast("Someone else just saved changes, so we didn't overwrite them — we've pulled in the latest data. Please try your save again.", "warn");
+        renderAll();
+        return { ok: false, code: "conflict" };
+      }
+      newState._rev = serverRev + 1;
+      await STATE_DOC.set(newState);
+      // Keep our in-memory copy in sync with what we just saved -- otherwise the next
+      // edit in this session would clone the old (pre-save) state and silently undo
+      // whatever this save just changed.
+      state = newState;
+      clearDraft(opts.stashKey);
+      return { ok: true };
+    } catch (err) {
+      return saveStateError(err);
     }
-    newState._rev = serverRev + 1;
-    await STATE_DOC.set(newState);
-    // Keep our in-memory copy in sync with what we just saved -- otherwise the next
-    // edit in this session would clone the old (pre-save) state and silently undo
-    // whatever this save just changed.
-    state = newState;
-    clearDraft(opts.stashKey);
-    return { ok: true };
-  } catch (err) {
-    const code = err && err.code;
-    if (code === "permission-denied") {
-      canWrite = false;
-      toast("This copy can't save right now -- check your connection, or ask an admin for help.", "warn");
-      renderAll();
-      return { ok: false, code };
-    }
-    if (code === "unavailable" || code === "deadline-exceeded") {
-      toast("Couldn't reach the server -- check your connection and try again. Your entries are still on screen.", "warn");
-      return { ok: false, code };
-    }
-    toast("Couldn't save (" + (err && err.message ? err.message : "unknown error") + "). Your entries are still on screen -- try again.", "warn");
-    return { ok: false, code: code || "error" };
   }
+}
+function saveStateError(err) {
+  const code = err && err.code;
+  if (code === "permission-denied") {
+    canWrite = false;
+    toast("This copy can't save right now -- check your connection, or ask an admin for help.", "warn");
+    renderAll();
+    return { ok: false, code };
+  }
+  if (code === "unavailable" || code === "deadline-exceeded") {
+    toast("Couldn't reach the server -- check your connection and try again. Your entries are still on screen.", "warn");
+    return { ok: false, code };
+  }
+  toast("Couldn't save (" + (err && err.message ? err.message : "unknown error") + "). Your entries are still on screen -- try again.", "warn");
+  return { ok: false, code: code || "error" };
 }
 
 /* ================================================================
@@ -1843,6 +1906,18 @@ let todayView = (function () { try { return localStorage.getItem(TODAY_VIEW_KEY)
 // this (undefined means "didn't exist yet"). Cleared whenever a new save happens (on any
 // date/period) since only the very last save is undoable.
 let lastSaveUndo = null;
+// Per-student autosave bookkeeping for the Today grid -- module-level (not local to one
+// wireTodayGrid call) because a successful autosave triggers its own re-render, which tears
+// down and rebuilds that closure; keeping these here means an autosave still in flight for one
+// student survives a re-render triggered by a different student's autosave finishing a beat
+// earlier, instead of losing track of it.
+const todayAutosaveInFlight = new Map(); // studentId -> in-flight save promise
+const todayAutosavePending = new Map(); // studentId -> latest .student-card element to re-save once current save finishes
+function updateTodaySaveStatus() {
+  const el = document.getElementById("today-save-status");
+  if (!el) return;
+  el.textContent = todayAutosaveInFlight.size > 0 ? "Saving…" : "All changes saved";
+}
 
 function periodMarkedCount(date, period, roster) {
   return roster.filter((s) => {
@@ -2178,7 +2253,15 @@ function wireExtraPeriod(root) {
 function wireTodayGrid(root, teacherName) {
   const body = document.getElementById("period-entry-body");
   if (!body) return;
-  wirePillTracks(body);
+  // Dragging a dial/bar to a value doesn't "commit" until the pointer lifts -- that's when
+  // this fires, so a drag saves itself once at the end instead of on every intermediate
+  // pointermove tick. (scheduleAutosave is declared further down but hoisted -- see its
+  // definition for why that's safe -- since it's only actually invoked once a drag finishes,
+  // well after this whole function has run.)
+  wirePillTracks(body, (input) => {
+    const card = input.closest(".student-card");
+    if (card) scheduleAutosave(card);
+  });
   wireNotePopovers(body);
   // Closing a note (tapping "Done") is the one interaction on this page that reads as
   // "finished entering that" -- so it saves the whole class immediately, the same as pressing
@@ -2224,6 +2307,7 @@ function wireTodayGrid(root, teacherName) {
     if (absentBtn) absentBtn.classList.toggle("active", state === "absent");
   }
   body.querySelectorAll(".student-card").forEach((card) => {
+    const studentId = card.getAttribute("data-student");
     const attInp = card.querySelector('.score-input[data-slot="att"]');
     const partInp = card.querySelector('.score-input[data-slot="part"]');
     // Excused is mutually exclusive with having a real score -- typing/sliding a value or
@@ -2244,9 +2328,9 @@ function wireTodayGrid(root, teacherName) {
         if (attInp.value !== "") setExcused(false); else syncCheckButtons(card);
       };
       attInp.addEventListener("input", syncPart);
-      attInp.addEventListener("blur", () => { const v = clampScore(attInp.value); attInp.value = v === null ? "" : v; syncPart(); });
+      attInp.addEventListener("blur", () => { const v = clampScore(attInp.value); attInp.value = v === null ? "" : v; syncPart(); scheduleAutosave(card); });
       partInp.addEventListener("input", () => { partInp.dataset.linked = "0"; refreshPillForInput(partInp); updateSrcCircles(card); if (partInp.value !== "") setExcused(false); else syncCheckButtons(card); });
-      partInp.addEventListener("blur", () => { const v = clampScore(partInp.value); partInp.value = v === null ? "" : v; refreshPillForInput(partInp); updateSrcCircles(card); syncCheckButtons(card); });
+      partInp.addEventListener("blur", () => { const v = clampScore(partInp.value); partInp.value = v === null ? "" : v; refreshPillForInput(partInp); updateSrcCircles(card); syncCheckButtons(card); scheduleAutosave(card); });
     }
     const presentBtn = card.querySelector(".row-present");
     if (presentBtn) presentBtn.addEventListener("click", () => {
@@ -2254,6 +2338,7 @@ function wireTodayGrid(root, teacherName) {
       if (partInp) { partInp.value = "1"; partInp.dataset.linked = "1"; refreshPillForInput(partInp); }
       updateSrcCircles(card);
       setExcused(false);
+      scheduleAutosave(card);
     });
     const excuseBtn = card.querySelector(".row-excuse");
     if (excuseBtn) excuseBtn.addEventListener("click", () => {
@@ -2264,6 +2349,7 @@ function wireTodayGrid(root, teacherName) {
         updateSrcCircles(card);
       }
       setExcused(turningOn);
+      scheduleAutosave(card);
     });
     // Compact's dials: tap the circle to reveal its slider right there in the row. Only one
     // open at a time (across the whole page), closed by tapping elsewhere -- see the
@@ -2290,6 +2376,7 @@ function wireTodayGrid(root, teacherName) {
       if (partInp) { partInp.value = v; partInp.dataset.linked = "1"; refreshPillForInput(partInp); }
       updateSrcCircles(card);
       setExcused(false);
+      scheduleAutosave(card);
     });
     const checkAbsentBtn = card.querySelector(".src-check-absent");
     if (checkAbsentBtn) checkAbsentBtn.addEventListener("click", () => {
@@ -2298,6 +2385,7 @@ function wireTodayGrid(root, teacherName) {
       if (partInp) { partInp.value = v; partInp.dataset.linked = "1"; refreshPillForInput(partInp); }
       updateSrcCircles(card);
       setExcused(false);
+      scheduleAutosave(card);
     });
   });
   const fillAllBtn = document.getElementById("fill-all");
@@ -2313,20 +2401,17 @@ function wireTodayGrid(root, teacherName) {
     toast("Filled every blank score with 1 — adjust any exceptions, then save.", "good");
   });
 
-  const saveBtn = document.getElementById("save-today");
-  if (!saveBtn) return;
-  saveBtn.addEventListener("click", performTodaySave);
-
-  // Named (not just an inline arrow on saveBtn) so the note popover's "Done" button, wired
-  // above, can trigger the exact same save -- one save path, however it's triggered.
-  async function performTodaySave() {
-    saveBtn.disabled = true;
-    const statusEl = document.getElementById("today-save-status");
-    if (statusEl) statusEl.textContent = "Saving…";
-    const newState = JSON.parse(JSON.stringify(state));
+  // Builds the Firestore patch for either every visible card (bulk Save / note "Done") or
+  // just one student (per-tap autosave), reading `base` (whatever state it's handed -- the
+  // in-memory `state`, or fresher data handed back on a conflict) rather than the module-level
+  // `state` directly, so the exact same function can be re-run against fresh server data on
+  // retry without duplicating this logic.
+  function buildTodayPatch(base, onlyCard) {
+    const newState = JSON.parse(JSON.stringify(base));
     const draftForStash = {};
     const undoSnapshot = {};
-    body.querySelectorAll(".student-card").forEach((card) => {
+    const cards = onlyCard ? [onlyCard] : body.querySelectorAll(".student-card");
+    cards.forEach((card) => {
       const studentId = card.getAttribute("data-student");
       const attInp = card.querySelector('.score-input[data-slot="att"]');
       const partInp = card.querySelector('.score-input[data-slot="part"]');
@@ -2336,9 +2421,10 @@ function wireTodayGrid(root, teacherName) {
       const pair = [clampScore(attInp ? attInp.value : ""), clampScore(partInp ? partInp.value : ""), note];
       if (excused) pair[4] = true;
       draftForStash[studentId] = pair;
-      // What this student's pair looked like right before this save -- captured from `state`
-      // (the last-known server data), not `newState`, so Undo can put it back exactly.
-      const priorRec = state.attendance.find((r) => r.date === todayDate && r.studentId === studentId);
+      // What this student's pair looked like right before this save -- captured from `base`
+      // (the last-known server data at the time of this attempt), not `newState`, so Undo
+      // can put it back exactly and "unchanged" (below) compares against the real prior value.
+      const priorRec = base.attendance.find((r) => r.date === todayDate && r.studentId === studentId);
       const priorPair = priorRec && priorRec.scores && priorRec.scores[selectedPeriod];
       undoSnapshot[studentId] = priorPair ? JSON.parse(JSON.stringify(priorPair)) : undefined;
       let rec = newState.attendance.find((r) => r.date === todayDate && r.studentId === studentId);
@@ -2364,18 +2450,83 @@ function wireTodayGrid(root, teacherName) {
       // different staff can mark different classes for the same student on the same day.
       rec.enteredBy = teacherName; rec.enteredAt = Date.now();
     });
-    const res = await saveState(newState, { stashKey: "today:" + todayDate + ":" + selectedPeriod, stashData: draftForStash });
+    return { newState, draftForStash, undoSnapshot };
+  }
+
+  // Only one save per student in flight at a time -- if more taps land on the same student
+  // while a save is already on the wire, don't fire a second overlapping request (that's its
+  // own way to trip the _rev conflict check against yourself); just remember to run once more
+  // when the current one finishes, which re-reads the card's now-current DOM values anyway.
+  // (todayAutosaveInFlight/todayAutosavePending live at module scope, not as locals here --
+  // see their declaration for why.)
+  async function autosaveStudent(card) {
+    const first = buildTodayPatch(state, card);
+    const studentId = card.getAttribute("data-student");
+    const res = await saveState(first.newState, {
+      stashKey: "today:" + todayDate + ":" + selectedPeriod + ":" + studentId,
+      stashData: first.draftForStash,
+      retry: (fresh) => buildTodayPatch(fresh, card).newState,
+    });
+    if (res.ok || res.local) {
+      lastSaveUndo = { date: todayDate, period: selectedPeriod, snapshot: first.undoSnapshot };
+      // Deliberately no per-tap toast -- with several people marking at once a toast for
+      // every single check/x would be constant noise; the status line above the grid (and the
+      // "marked by" initials that show up on re-render) is enough confirmation. Deferred
+      // (not an immediate renderAll()) so finishing this student's save doesn't yank the page
+      // out from under someone still mid-interaction with a different student's row.
+      refreshViewOrDefer();
+    } else {
+      const el = document.getElementById("today-save-status");
+      if (el) el.textContent = "Couldn't save that change — check your connection.";
+    }
+  }
+  function scheduleAutosave(card) {
+    const studentId = card.getAttribute("data-student");
+    if (todayAutosaveInFlight.has(studentId)) { todayAutosavePending.set(studentId, card); updateTodaySaveStatus(); return; }
+    const run = (c) => {
+      updateTodaySaveStatus();
+      const p = autosaveStudent(c).finally(() => {
+        todayAutosaveInFlight.delete(studentId);
+        if (todayAutosavePending.has(studentId)) {
+          const next = todayAutosavePending.get(studentId);
+          todayAutosavePending.delete(studentId);
+          run(next);
+        } else updateTodaySaveStatus();
+      });
+      todayAutosaveInFlight.set(studentId, p);
+    };
+    run(card);
+  }
+
+  const saveBtn = document.getElementById("save-today");
+  if (!saveBtn) return;
+  saveBtn.addEventListener("click", performTodaySave);
+
+  // Kept as a manual "sync everything now" fallback -- every check/x/dial/note already
+  // autosaves itself the moment it changes (see scheduleAutosave above), so this button and
+  // its "Saving…" state are a safety net, not the only way a mark gets saved.
+  async function performTodaySave() {
+    saveBtn.disabled = true;
+    const statusElNow = document.getElementById("today-save-status");
+    if (statusElNow) statusElNow.textContent = "Saving…";
+    const first = buildTodayPatch(state);
+    const res = await saveState(first.newState, {
+      stashKey: "today:" + todayDate + ":" + selectedPeriod,
+      stashData: first.draftForStash,
+      retry: (fresh) => buildTodayPatch(fresh).newState,
+    });
     if (res.ok || res.local) {
       // Without this, the button stayed disabled and the status text stuck on "Saving…"
       // until some unrelated click forced a re-render -- a real save had gone through, it
       // just never told you. Re-rendering immediately shows the updated "x/y marked" count,
       // the just-saved "marked by" initials, etc.
-      lastSaveUndo = { date: todayDate, period: selectedPeriod, snapshot: undoSnapshot };
+      lastSaveUndo = { date: todayDate, period: selectedPeriod, snapshot: first.undoSnapshot };
       toast("Saved " + selectedPeriod + ".", "good");
       renderAll();
     } else {
       saveBtn.disabled = false;
-      if (statusEl) statusEl.textContent = "Not saved — see message above.";
+      const el = document.getElementById("today-save-status");
+      if (el) el.textContent = "Not saved — see message above.";
     }
   }
 
@@ -4003,6 +4154,28 @@ async function init() {
     return;
   }
   renderAll();
+  listenForLiveUpdates();
+}
+// With several people marking attendance at once, everyone's copy of `state` needs to stay
+// current on its own -- not just right after this device's own saves -- or two people looking
+// at the same class can each be working from data that's gone stale the moment the other one
+// saves. This keeps every open tab/device subscribed to the one shared document and pulls in
+// whatever anyone (including a different tab of the same person) just saved, in real time.
+function listenForLiveUpdates() {
+  STATE_DOC.onSnapshot((snap) => {
+    if (!snap.exists) return;
+    const incoming = snap.data();
+    // saveState() already sets `state` to exactly this same object right after a successful
+    // write of its own, and Firestore's SDK fires this listener for that local write too (an
+    // immediate local echo, then again once the server confirms it) -- comparing `_rev` skips
+    // acting on our own save a second time, so it doesn't trigger a redundant re-render or
+    // stomp on whatever the person has started doing since that save went through.
+    if (state && incoming._rev === state._rev) return;
+    state = incoming;
+    refreshViewOrDefer();
+  }, (err) => {
+    console.error("Live sync error:", err);
+  });
 }
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
 else init();
