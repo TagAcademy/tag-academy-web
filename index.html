@@ -1317,6 +1317,20 @@ function classStats(period, roster, opts) {
     partPts, partPoss, partPct: partPoss ? partPts / partPoss : null,
   };
 }
+/* Whole-roster blended attendance+participation for a single day -- attendance and
+   participation across every student, combined into one percentage the same way a single
+   student's blendedPct is (see computeStats), just summed over the roster instead of one
+   student. Powers the Reports page's day-by-day calendar. period is optional: pass one to
+   narrow to a single class, or omit/null for every class held that day. */
+function rosterDayBlendedPct(roster, date, period) {
+  let pts = 0, poss = 0;
+  roster.forEach((s) => {
+    const st = computeStats(s.id, period ? { from: date, to: date, period } : { from: date, to: date });
+    pts += st.attPts + st.partPts;
+    poss += st.attPoss + st.partPoss;
+  });
+  return poss ? pts / poss : null;
+}
 function isoFromJsDate(d) {
   const tz = d.getTimezoneOffset();
   const local = new Date(d.getTime() - tz * 60000);
@@ -2441,6 +2455,10 @@ let reportScope = "all"; // "all" | "week" | "hmonth" | "custom"
 let reportAnchor = todayISO();
 let reportFrom = todayISO();
 let reportTo = todayISO();
+// The Reports page's whole-school "day by day" calendar -- its own Hebrew-month anchor and
+// class filter, independent of the table above (which has its own time-range picker).
+let repCalAnchor = todayISO();
+let repCalClassFilter = null;
 let exportScope = "hmonth"; // "today" | "week" | "hmonth" | "hyear" | "all" | "custom"
 let exportAnchor = todayISO();
 let exportFrom = todayISO();
@@ -2487,6 +2505,63 @@ function reportRange() {
     return { from, to, title: "Custom range", sub: fmtDateShort(from) + " – " + fmtDateShort(to) };
   }
   return { from: null, to: null, title: "All time", sub: "Since the start of the year" };
+}
+
+/* Reports page's whole-school day-by-day calendar -- same look and grid as the student-detail
+   one (renderStudentCalendarHtml), but each cell blends the WHOLE roster instead of one
+   student, so an admin/teacher can spot a rough day for the school at a glance. Reuses the
+   .sd-cal-* classes for visual consistency; only the element ids/data attributes differ so its
+   wiring doesn't collide with the student-detail calendar's. Clicking a day jumps the table
+   above into that single day via the existing Custom-range machinery. */
+function renderReportsCalendarHtml() {
+  const monthRange = hebrewMonthRangeFor(repCalAnchor);
+  const hdayOptions = hebrewDayOptionsFor(repCalAnchor);
+  if (!monthRange || !hdayOptions.length) return ""; // Hebrew calendar library unavailable
+  const firstDow = jsDateFor(hdayOptions[0].date).getDay();
+  const todayGregISO = todayISO();
+  const roster = activeRoster();
+  const periods = state.settings.periods;
+
+  let html = '<div class="card card-pad" style="margin-top:16px;">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:12px;">' +
+    '<div><span class="eyebrow">Whole school, day by day</span><h2 style="margin:2px 0 0;font-family:var(--font-display);font-size:1.15rem;">Attendance calendar</h2></div>' +
+    '<div class="field" style="min-width:180px;margin-bottom:0;"><label for="rep-cal-class">Class</label><select id="rep-cal-class">' +
+    '<option value=""' + (!repCalClassFilter ? " selected" : "") + '>All classes</option>' +
+    periods.map((p) => '<option value="' + escapeHtml(p) + '"' + (repCalClassFilter === p ? " selected" : "") + '>' + escapeHtml(p) + "</option>").join("") +
+    "</select></div></div>";
+
+  html += '<div class="sd-cal-nav">' +
+    '<button class="btn btn-ghost btn-sm" id="rep-cal-prev" type="button" title="Previous Hebrew month">&larr;</button>' +
+    '<span class="sd-cal-title">' + escapeHtml(monthRange.monthName + " " + monthRange.year) + "</span>" +
+    '<button class="btn btn-ghost btn-sm" id="rep-cal-next" type="button" title="Next Hebrew month">&rarr;</button>' +
+    '<button class="btn btn-ghost btn-sm" id="rep-cal-today" type="button">This month</button>' +
+    "</div>";
+
+  html += '<div class="sd-cal-grid">' +
+    DAY_NAMES.map((n) => '<div class="sd-cal-dow">' + escapeHtml(n.slice(0, 2)) + "</div>").join("") +
+    Array(firstDow).fill('<div class="sd-cal-cell sd-cal-blank"></div>').join("") +
+    hdayOptions.map((o) => {
+      const dayPct = rosterDayBlendedPct(roster, o.date, repCalClassFilter);
+      const hasData = dayPct !== null && dayPct !== undefined;
+      const tone = hasData ? pctTone(dayPct) : "";
+      const isToday = o.date === todayGregISO;
+      const isSel = reportScope === "custom" && reportFrom === o.date && reportTo === o.date;
+      const gregDay = jsDateFor(o.date).getDate();
+      const hebNum = hebrewDayNumeral(o.date) || "";
+      const titleText = fmtDateLong(o.date) + (hasData ? " — " + pct(dayPct) : repCalClassFilter ? " — not held / not marked" : " — nothing entered");
+      return '<button type="button" class="sd-cal-cell sd-cal-day' + (tone ? " tone-" + tone : " sd-cal-empty") +
+        (isToday ? " sd-cal-today" : "") + (isSel ? " sd-cal-sel" : "") + '" data-rep-cal-date="' + o.date + '" title="' + escapeHtml(titleText) + '">' +
+        '<span class="sd-cal-day-top"><span class="sd-cal-greg">' + gregDay + '</span><span class="sd-cal-heb">' + escapeHtml(hebNum) + "</span></span>" +
+        (hasData ? '<span class="sd-cal-val">' + Math.round(dayPct * 100) + "%</span>" : "") +
+        "</button>";
+    }).join("") +
+    "</div>";
+
+  html += '<p class="help-text" style="margin-top:10px;">Each day blends attendance and participation across the whole roster' +
+    (repCalClassFilter ? " for " + escapeHtml(repCalClassFilter) : " and every class held that day") +
+    '. Click a day to jump the table above to just that day.</p>';
+  html += "</div>";
+  return html;
 }
 
 function renderOverview(root) {
@@ -2545,6 +2620,8 @@ function renderOverview(root) {
   }
   html += "</div>";
 
+  html += renderReportsCalendarHtml();
+
   const xr = exportRange();
   const showNav = exportScope !== "all" && exportScope !== "custom";
   const canExport = exportAvailable();
@@ -2600,6 +2677,22 @@ function renderOverview(root) {
   if (repFromInput) repFromInput.addEventListener("change", () => { reportFrom = repFromInput.value || reportFrom; renderAll(); });
   const repToInput = document.getElementById("rep-to");
   if (repToInput) repToInput.addEventListener("change", () => { reportTo = repToInput.value || reportTo; renderAll(); });
+
+  const repCalClassSel = document.getElementById("rep-cal-class");
+  if (repCalClassSel) repCalClassSel.addEventListener("change", () => { repCalClassFilter = repCalClassSel.value || null; renderAll(); });
+  const repCalPrev = document.getElementById("rep-cal-prev");
+  if (repCalPrev) repCalPrev.addEventListener("click", () => { repCalAnchor = shiftHebrewMonth(repCalAnchor, -1); renderAll(); });
+  const repCalNext = document.getElementById("rep-cal-next");
+  if (repCalNext) repCalNext.addEventListener("click", () => { repCalAnchor = shiftHebrewMonth(repCalAnchor, 1); renderAll(); });
+  const repCalTodayBtn = document.getElementById("rep-cal-today");
+  if (repCalTodayBtn) repCalTodayBtn.addEventListener("click", () => { repCalAnchor = todayISO(); renderAll(); });
+  // Clicking a calendar day jumps the table above into that single day, reusing the existing
+  // Custom-range machinery (same as picking "Custom range" and setting From/To to the same date).
+  root.querySelectorAll("[data-rep-cal-date]").forEach((btn) => btn.addEventListener("click", () => {
+    const d = btn.getAttribute("data-rep-cal-date");
+    reportScope = "custom"; reportFrom = d; reportTo = d;
+    renderAll();
+  }));
 
   const expScopeSel = document.getElementById("exp-scope");
   if (expScopeSel) expScopeSel.addEventListener("change", () => { exportScope = expScopeSel.value; renderAll(); });
