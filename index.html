@@ -2279,31 +2279,13 @@ function coinBadge(size) {
   const sm = size === "sm";
   return '<span class="coin-badge ' + (sm ? "coin-badge-sm" : "coin-badge-lg") + '"><span class="coin-face"><span class="coin-ring"></span><img class="coin-mark" src="' + LOGO_DATA_URI + '" alt=""></span></span>';
 }
-function renderBalance(root, session) {
-  const student = session.record;
-  const st = studentStats(student.id);
-  const trail = ledgerBalanceTrail(student.id).slice(0, 8);
-  let html = '<div class="page-head"><div><span class="eyebrow">Welcome, ' + escapeHtml(student.first) + '</span><h1>My Balance</h1>' +
-    '<p>Your attendance, participation, and current TAG coin balance.</p></div></div>';
-  html += '<div class="card card-pad coin-hero" style="margin-bottom:16px;">' + coinBadge("lg") +
-    '<div><div class="coin-hero-label">TAG Coin Balance</div><div class="coin-hero-value">' + num2(st.balance) + '</div>' +
-    '<div class="coin-hero-sub">' + st.coinsEarned + ' earned from classes · ' + (st.ledgerNet >= 0 ? "+" : "") + num2(st.ledgerNet) + ' from staff &amp; transfers</div></div></div>';
-  html += '<div class="grid-stats">' +
-    statTile("Attendance", pct(st.attPct), pctTone(st.attPct)) +
-    statTile("Participation", pct(st.partPct), pctTone(st.partPct)) + "</div>";
-  html += '<div class="card card-pad"><h3>Recent activity</h3>';
-  if (trail.length === 0) {
-    html += '<p class="help-text">No coin activity yet.</p>';
-  } else {
-    html += '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Type</th><th class="num">Amount</th><th class="num">Balance after</th></tr></thead><tbody>';
-    trail.forEach((tx) => {
-      const out = tx.type === "Spent/Redeemed" || tx.type === "Transfer Out";
-      html += "<tr><td>" + fmtDateShort(tx.date) + "</td><td>" + txPill(tx.type) + '</td><td class="num" style="font-weight:700;color:' + (out ? "var(--warn)" : "var(--gold)") + ';">' + (out ? "−" : "+") + num2(tx.amount) + '</td><td class="num">' + num2(tx.balanceAfter) + "</td></tr>";
-    });
-    html += "</tbody></table></div>";
-  }
-  html += "</div>";
-  root.innerHTML = html;
+// "My Balance" is a student viewing their own record -- the exact same rich page a staff
+// member sees when they open a student from the roster (coin balance, attendance/participation
+// for whatever range you pick, the day-by-day calendar with click-to-drill-in, the by-class
+// breakdown, the report-card narrative, and the log), just headed as their own page instead of
+// someone else's. See renderStudentDetail's opts.self handling for what's different.
+function renderMyBalance(root, session) {
+  renderStudentDetail(root, session.record, { self: true });
 }
 function statTile(label, value, tone) {
   return '<div class="stat-tile"><div class="label">' + escapeHtml(label) + '</div><div class="value' + (tone ? " " + tone : "") + '">' + value + "</div></div>";
@@ -3632,7 +3614,11 @@ function renderStudentCalendarHtml(student) {
   return html;
 }
 
-function renderStudentDetail(root, student) {
+function renderStudentDetail(root, student, opts) {
+  // opts.self: a student viewing their own record (from the "My Balance" tab) rather than a
+  // staff member browsing the roster. Same page, same calendar/log/report-card machinery --
+  // just no "Back" button (there's no roster to go back to) and a friendlier header.
+  const isSelf = !!(opts && opts.self);
   const allTimeSt = studentStats(student.id);
   const range = sdRange();
   const rangeSt = computeStats(student.id, { from: range.from, to: range.to });
@@ -3643,11 +3629,14 @@ function renderStudentDetail(root, student) {
   const periods = state.settings.periods;
 
   let html = '<div class="page-head"><div>' +
-    '<button type="button" class="btn btn-ghost btn-sm" id="sd-back" style="margin-bottom:10px;">&larr; Back</button>' +
-    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="eyebrow">Student</span>' +
-    (student.active === false ? '<span class="pill pill-muted">Inactive</span>' : "") + "</div>" +
-    "<h1>" + escapeHtml(student.first) + " " + escapeHtml(student.last) + "</h1>" +
-    '<p>Username: ' + escapeHtml(student.username || "—") + ' · TAG coins are always a running total; pick a day, week, month, or custom range below to see attendance and participation for that window.</p></div></div>';
+    (isSelf ? "" : '<button type="button" class="btn btn-ghost btn-sm" id="sd-back" style="margin-bottom:10px;">&larr; Back</button>') +
+    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="eyebrow">' + (isSelf ? "Welcome, " + escapeHtml(student.first) : "Student") + '</span>' +
+    (!isSelf && student.active === false ? '<span class="pill pill-muted">Inactive</span>' : "") + "</div>" +
+    "<h1>" + (isSelf ? "My Balance" : escapeHtml(student.first) + " " + escapeHtml(student.last)) + "</h1>" +
+    "<p>" + (isSelf
+      ? "Your attendance, participation, and current TAG coin balance. Pick a day, week, month, or custom range below, or tap a day on the calendar to jump straight to it."
+      : "Username: " + escapeHtml(student.username || "—") + " · TAG coins are always a running total; pick a day, week, month, or custom range below to see attendance and participation for that window."
+    ) + "</p></div></div>";
 
   html += '<div class="card card-pad coin-hero" style="margin-bottom:16px;">' + coinBadge("lg") +
     '<div><div class="coin-hero-label">TAG Coin Balance</div><div class="coin-hero-value">' + num2(allTimeSt.balance) + '</div>' +
@@ -3859,7 +3848,7 @@ function renderAll() {
   // building its HTML/wiring, so restoring it right after is safe).
   const savedCanWrite = canWrite;
   if (previewing) canWrite = false;
-  ({ today: renderToday, ledger: renderLedger, overview: renderOverview, leaderboard: renderLeaderboard, admin: renderAdmin, balance: renderBalance })[route](root, session);
+  ({ today: renderToday, ledger: renderLedger, overview: renderOverview, leaderboard: renderLeaderboard, admin: renderAdmin, balance: renderMyBalance })[route](root, session);
   canWrite = savedCanWrite;
   wireStudentLinks(root);
 }
