@@ -325,41 +325,70 @@ main.view {
   font-size: 0.85rem; overflow: hidden; white-space: nowrap;
 }
 .student-row-compact .src-name .student-link { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* Small tap-to-edit dials (not the full-width draggable bar from Cards) -- this, not a
+   narrower track, is what keeps every row to one line: a dial is barely wider than a letter.
+   Tapping one reveals its own slider inline (see .src-slot/.src-slider-pop below), so the
+   real draggable input lives right there instead of off-screen. Each ring's own color now
+   reflects the score it holds (see --circle-color, set from scoreTone in app.js): 0 = red,
+   1 = green, a partial value in between = yellow/gold, same tokens the Cards-view bars use --
+   a blank dial (--fill: 0%, no --circle-color set) keeps its plain default color below since
+   there's nothing yet to tint. */
 .student-row-compact .src-vals { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
-/* Three one-tap tri-state buttons -- check/x/E -- replacing the old tap-to-reveal dials. None
-   active is blank/unmarked; exactly one lit up is present/absent/excused. Colors intentionally
-   reuse the app's existing good/caution/warn tone tokens (see scoreTone in app.js) rather than
-   inventing a separate palette: present=1 is the same "good" green as a top score, absent=0 is
-   the same "warn" red as a bottom score, so a glance at Compact and a glance at a Cards-view
-   bar mean the same thing. Excused is deliberately its own color (gold), since it isn't a score
-   at all. */
-.src-tri { display: inline-flex; align-items: center; gap: 4px; }
-.src-tri-btn {
-  width: 24px; height: 24px; flex-shrink: 0; border-radius: 50%; border: 1px solid var(--line-strong);
-  background: var(--surface); color: var(--muted); font-size: 0.72rem; font-weight: 700; line-height: 1;
+.src-val-normal { display: flex; align-items: center; gap: 6px; }
+.src-slot { position: relative; display: inline-flex; align-items: center; }
+.src-circle {
+  position: relative; width: 26px; height: 26px; flex-shrink: 0; border-radius: 50%; border: none;
+  padding: 0; cursor: pointer; background: transparent;
+}
+.src-circle-ring {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: conic-gradient(var(--circle-color, var(--brand)) var(--fill, 0%), var(--surface-2) 0);
+  border: 1px solid var(--line-strong);
+}
+.src-circle-part .src-circle-ring { background: conic-gradient(var(--circle-color, var(--gold)) var(--fill, 0%), var(--surface-2) 0); }
+.src-circle-label {
+  position: absolute; inset: 3px; border-radius: 50%; background: var(--surface);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.6rem; font-weight: 700; color: var(--ink);
+}
+.src-circle:hover .src-circle-ring { border-color: var(--brand); }
+.src-circle-disabled { cursor: default; opacity: 0.55; }
+.src-slot.is-open .src-circle-ring { border-color: var(--brand); border-width: 2px; }
+/* The "tube": collapsed to nothing until its dial is tapped, then slides open. Lives inline
+   in the row (not a floating popover), so the row's own overflow-x: auto is what keeps it
+   from ever breaking the page layout on a narrow phone. */
+.src-slider-pop {
+  max-width: 0; opacity: 0; overflow: hidden; transition: max-width 0.18s ease, opacity 0.12s ease;
+}
+.src-slot.is-open .src-slider-pop { max-width: 170px; opacity: 1; margin-left: 6px; }
+.src-slider-pop .score-pill-wrap { width: 160px; }
+.src-slider-pop .score-pill-track { height: 26px; }
+/* Quick-mark check/x, replacing the old single "Present" button -- a small round icon button
+   matching the note button's own size, colored by the same good/warn tone a full present (1)
+   or absent (0) score gets everywhere else, so lit up here means the same thing it means on a
+   dial or a Cards-view bar. Neither lit is blank/unmarked, the whole point of having these
+   instead of just the dials: leaving a student untouched now looks different from
+   deliberately marking them absent, not just calculates differently. */
+.btn-icon-sm {
+  width: 26px; height: 26px; flex-shrink: 0; border-radius: 50%; border: 1px solid var(--line-strong);
+  background: var(--surface); color: var(--muted); font-size: 0.76rem; font-weight: 700; line-height: 1;
   padding: 0; cursor: pointer; display: flex; align-items: center; justify-content: center;
   transition: background 0.1s ease, border-color 0.1s ease, color 0.1s ease;
 }
-.src-tri-btn:hover { border-color: var(--brand); }
-.src-tri-btn:disabled { cursor: default; opacity: 0.55; }
-.src-tri-btn:disabled:hover { border-color: var(--line-strong); }
-.src-tri-btn.src-tri-present.active { background: var(--good-soft); border-color: var(--good); color: var(--good); }
-.src-tri-btn.src-tri-absent.active { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
-.src-tri-btn.src-tri-excused.active { background: var(--gold-soft); border-color: var(--gold); color: var(--gold); }
-/* Partial credit (set in Cards view) can't be shown as a clean present/absent/excused tap, so
-   it shows its own value instead -- tinted by the same score-based tone as the Cards-view bar
-   (see data-tone on .score-pill-fill) so a 92% badge reads green and a 20% badge reads red. */
-.src-tri-partial {
-  font-size: 0.72rem; font-weight: 700; color: var(--muted); white-space: nowrap;
-  padding: 2px 6px; border-radius: 99px; background: var(--surface-2);
-}
-.src-tri-partial[data-tone="good"] { background: var(--good-soft); color: var(--good); }
-.src-tri-partial[data-tone="caution"] { background: var(--caution-soft); color: var(--caution); }
-.src-tri-partial[data-tone="warn"] { background: var(--warn-soft); color: var(--warn); }
+.btn-icon-sm:hover { border-color: var(--brand); }
+.btn-icon-sm:disabled { cursor: default; opacity: 0.55; }
+.btn-icon-sm:disabled:hover { border-color: var(--line-strong); }
+.src-check-present.active { background: var(--good-soft); border-color: var(--good); color: var(--good); }
+.src-check-absent.active { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
 .student-row-compact .src-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
 .student-row-compact .src-actions .note-toggle-btn { width: 26px; height: 26px; }
 .student-row-compact .src-actions .btn-sm { padding: 4px 9px; font-size: 0.74rem; }
 .student-row-compact .src-actions .btn { white-space: nowrap; }
+/* Excused: both representations stay in the DOM always (see the markup comment in app.js) so
+   this toggle is the only thing that needs to change, live, with no re-render. */
+.src-val-excused { display: none; font-size: 0.8rem; font-weight: 600; color: var(--gold); white-space: nowrap; }
+.student-row-compact.is-excused .src-val-normal { display: none; }
+.student-row-compact.is-excused .src-val-excused { display: inline; }
 /* .row-excuse.active is styled once, below, near the Cards-view excused rules -- it's shared
    by both views' Excused/Exc buttons. */
 
@@ -999,16 +1028,33 @@ function refreshPillForInput(input) {
   if (tone) { fill.setAttribute("data-tone", tone); if (track) track.setAttribute("data-tone", tone); }
   else { fill.removeAttribute("data-tone"); if (track) track.removeAttribute("data-tone"); }
 }
-/* ---------- Compact view's one-line quick-mark: three small buttons -- check for present,
-   x for absent, E for excused -- instead of the two-value dials this used to be. A blank/
-   unmarked student has NONE of the three lit up, which is the whole point: leaving a student
-   untouched must look different from deliberately marking them absent (0), not just calculate
-   differently (computeStats already excludes true blanks from both the numerator and
-   denominator; see its own comment). Present/Absent set attendance AND participation together
-   -- partial credit for the two separately is still available in Cards view. A record that
-   doesn't cleanly match present/absent/excused (typically partial credit set in Cards view)
-   shows as a small percentage instead of lighting up a button, so it's never misrepresented
-   as a clean present or absent. ---------- */
+/* ---------- Compact view's small tap-to-edit dials (not the full-width draggable bar from
+   Cards) -- a dial is barely wider than a letter, which is what keeps every row to one line.
+   Tapping one reveals its own slider inline (see .src-slot/.src-slider-pop in the CSS), so
+   the real draggable input lives right there instead of off-screen. The ring's own color now
+   reflects the score it holds (0=red, 1=green, in between=yellow -- see scoreTone), same as
+   the Cards-view bars; a blank dial falls back to its plain default color (brand for
+   Attendance, gold for Participation) since --fill is 0% either way and there's nothing to
+   tint. ---------- */
+function compactSlotHtml(slot, value, disabled, extraAttrs) {
+  const v = (value === null || value === undefined) ? "" : value;
+  const pct = v === "" ? 0 : Math.max(0, Math.min(1, Number(v))) * 100;
+  const label = slot === "att" ? "A" : "P";
+  const tone = v === "" ? "" : scoreTone(v);
+  const toneVar = tone ? ("--circle-color:var(--" + tone + ");") : "";
+  return '<span class="src-slot" data-slot-wrap="' + slot + '">' +
+    '<button type="button" class="src-circle src-circle-' + slot + (disabled ? " src-circle-disabled" : "") + '" data-slot-toggle="' + slot + '" style="--fill:' + pct + '%;' + toneVar + '"' + (disabled ? " disabled" : "") + '>' +
+    '<span class="src-circle-ring"></span><span class="src-circle-label">' + label + "</span></button>" +
+    '<span class="src-slider-pop">' + scorePillHtml(slot, value, null, disabled, extraAttrs, "0.1") + "</span>" +
+    "</span>";
+}
+/* Present/Absent/Excused state of a pair, purely for lighting up the right quick-mark button
+   -- a blank/unmarked student has none of the three lit, which is what makes "never marked"
+   look different from "deliberately marked absent (0)" at a glance, without changing the
+   dials themselves (computeStats already excludes true blanks from both the numerator and
+   denominator; see its own comment). Anything that doesn't cleanly match one of the three
+   (typically partial credit set via a dial's slider) lights up nothing -- the dials' own fill
+   is where that value shows. */
 function compactTriState(pair) {
   const att = pair[0], part = pair[1];
   if (pair[4]) return "excused";
@@ -1016,36 +1062,6 @@ function compactTriState(pair) {
   if (Number(att) === 1 && (part === null || part === undefined || Number(part) === 1)) return "present";
   if (Number(att) === 0 && (part === null || part === undefined || Number(part) === 0)) return "absent";
   return "partial";
-}
-function compactPartialLabel(pair) {
-  const att = pair[0], part = pair[1];
-  const a = att === null || att === undefined ? null : Math.round(Number(att) * 100);
-  const p = part === null || part === undefined ? null : Math.round(Number(part) * 100);
-  if (a === null) return p === null ? "" : p + "%";
-  if (p === null || p === a) return a + "%";
-  return a + "/" + p + "%";
-}
-function compactPartialTone(pair) {
-  const att = pair[0], part = pair[1];
-  const a = att === null || att === undefined ? null : Number(att);
-  const p = part === null || part === undefined ? null : Number(part);
-  if (a === null && p === null) return "";
-  if (a === null) return scoreTone(p);
-  if (p === null) return scoreTone(a);
-  return scoreTone((a + p) / 2);
-}
-function compactTriHtml(pair, disabled) {
-  const state = compactTriState(pair);
-  const linked = !(pair[0] !== null && pair[0] !== undefined && pair[1] !== null && pair[1] !== undefined && pair[0] !== pair[1]);
-  const partialTone = compactPartialTone(pair);
-  return '<input type="hidden" class="score-input" data-slot="att" value="' + (pair[0] === null || pair[0] === undefined ? "" : pair[0]) + '">' +
-    '<input type="hidden" class="score-input" data-slot="part" value="' + (pair[1] === null || pair[1] === undefined ? "" : pair[1]) + '" data-linked="' + (linked ? "1" : "0") + '">' +
-    '<span class="src-tri" data-tri-state="' + state + '">' +
-    '<button type="button" class="src-tri-btn src-tri-present' + (state === "present" ? " active" : "") + '" data-tri="present" title="Mark present"' + (disabled ? " disabled" : "") + ">&#10003;</button>" +
-    '<button type="button" class="src-tri-btn src-tri-absent' + (state === "absent" ? " active" : "") + '" data-tri="absent" title="Mark absent"' + (disabled ? " disabled" : "") + ">&#10007;</button>" +
-    '<button type="button" class="src-tri-btn src-tri-excused' + (state === "excused" ? " active" : "") + '" data-tri="excused" title="Excused"' + (disabled ? " disabled" : "") + ">E</button>" +
-    '<span class="src-tri-partial"' + (state === "partial" ? "" : ' style="display:none;"') + (partialTone ? ' data-tone="' + partialTone + '"' : "") + ' title="Partial credit — open Cards view to edit the exact value">' + compactPartialLabel(pair) + "</span>" +
-    "</span>";
 }
 function pillValueFromEvent(evt, trackEl) {
   const rect = trackEl.getBoundingClientRect();
@@ -1118,6 +1134,13 @@ document.addEventListener("click", (evt) => {
   document.querySelectorAll(".note-popover:not([hidden])").forEach((p) => {
     const wrap = p.closest(".note-pop-wrap");
     if (wrap && !wrap.contains(evt.target)) p.hidden = true;
+  });
+});
+// Same pattern for Compact view's tap-to-edit dials -- an open slider closes on any click
+// outside it, so at most one is open at a time and it never lingers after a tap elsewhere.
+document.addEventListener("click", (evt) => {
+  document.querySelectorAll(".src-slot.is-open").forEach((wrap) => {
+    if (!wrap.contains(evt.target)) wrap.classList.remove("is-open");
   });
 });
 function fullName(person) { return escapeHtml(person.last) + ", " + escapeHtml(person.first); }
@@ -1962,19 +1985,33 @@ function renderToday(root, session) {
     html += '<div class="student-rows" id="period-entry-body">';
     roster.forEach((student) => {
       const pair = pairFor(student);
+      const linked = !(pair[0] !== null && pair[0] !== undefined && pair[1] !== null && pair[1] !== undefined && pair[0] !== pair[1]);
       const note = pair[2] || "";
       const excused = !!pair[4];
+      const triState = compactTriState(pair);
       html += '<div class="student-card student-row-compact' + (excused ? " is-excused" : "") + '" data-student="' + student.id + '" data-excused="' + (excused ? "1" : "0") + '">';
       html += '<span class="src-name">' + studentLink(student) + markedByBadge(pair) + "</span>";
-      // Three one-tap buttons -- check/x/E -- instead of the old two-value dials, so a blank
-      // (unmarked) student is unmistakably different from one marked absent: none of the three
-      // is lit up. See compactTriHtml's own comment for the full reasoning.
-      html += '<span class="src-vals">' + compactTriHtml(pair, !canWrite) + "</span>";
-      html += '<span class="src-actions">' + notePopoverHtml(note, !canWrite) + "</span>";
+      // Both the dials and the "Excused" text stay in the DOM always (CSS shows/hides by
+      // .is-excused) so the Excused toggle can flip live without rebuilding this row.
+      html += '<span class="src-vals">' +
+        '<span class="src-val-normal">' +
+        compactSlotHtml("att", pair[0], !canWrite) +
+        compactSlotHtml("part", pair[1], !canWrite, 'data-linked="' + (linked ? "1" : "0") + '"') +
+        "</span>" +
+        '<span class="src-val-excused">Excused</span>' +
+        "</span>";
+      // Quick-mark check/x, replacing the old single "Present" button -- lit up state (see
+      // compactTriState) is what makes a blank row visibly different from one marked absent.
+      // Tapping a dial above still opens its own slider for partial credit, unchanged.
+      html += '<span class="src-actions">' + notePopoverHtml(note, !canWrite) +
+        (canWrite ? '<button type="button" class="btn-icon-sm src-check-present' + (triState === "present" ? " active" : "") + '" data-check="present" title="Mark present">&#10003;</button>' : "") +
+        (canWrite ? '<button type="button" class="btn-icon-sm src-check-absent' + (triState === "absent" ? " active" : "") + '" data-check="absent" title="Mark absent">&#10007;</button>' : "") +
+        (canWrite ? '<button class="btn btn-ghost btn-sm row-excuse' + (excused ? " active" : "") + '" type="button">Exc</button>' : "") +
+        "</span>";
       html += "</div>";
     });
     html += "</div>";
-    html += '<div class="legend-note"><span><span class="sw" style="background:var(--good)"></span>&#10003; present &nbsp; <span class="sw" style="background:var(--warn)"></span>&#10007; absent &nbsp; <span class="sw" style="background:var(--gold)"></span>E excused &nbsp; blank = not marked yet</span></div>';
+    html += '<div class="legend-note"><span><span class="sw" style="background:var(--good)"></span>&#10003; present &nbsp; <span class="sw" style="background:var(--warn)"></span>&#10007; absent &nbsp; Tap a dial to fine-tune · blank = didn’t run</span></div>';
   } else {
     html += '<div class="student-grid" id="period-entry-body">';
     roster.forEach((student) => {
@@ -2151,62 +2188,71 @@ function wireTodayGrid(root, teacherName) {
   body.querySelectorAll(".note-popover-close").forEach((btn) => {
     btn.addEventListener("click", () => performTodaySave());
   });
-  // Compact view's three one-tap buttons mirror whatever the hidden att/part inputs and the
-  // card's excused flag currently say -- called after every change (tri click, Present/Excused
-  // in Cards -- there's no .src-tri there so this is a harmless no-op -- and bulk-fill) so the
-  // buttons, the partial badge, and its score-based tone never drift from the real values.
-  function syncTriForCard(card) {
-    const triWrap = card.querySelector(".src-tri");
-    if (!triWrap) return;
+  // Compact view shows small dials (.src-circle) instead of the full draggable bar, so
+  // whatever changes the real inputs needs to keep a dial's fill -- and its score-based tone
+  // -- in sync. In Cards view there's no .src-circle on the card, so this is a harmless no-op
+  // there.
+  function updateSrcCircles(card) {
+    const attInp = card.querySelector('.score-input[data-slot="att"]');
+    const partInp = card.querySelector('.score-input[data-slot="part"]');
+    const setCircle = (circle, input) => {
+      if (!circle || !input) return;
+      const v = input.value === "" ? null : Math.max(0, Math.min(1, Number(input.value) || 0));
+      circle.style.setProperty("--fill", (v === null ? 0 : v * 100) + "%");
+      const tone = v === null ? "" : scoreTone(v);
+      if (tone) circle.style.setProperty("--circle-color", "var(--" + tone + ")");
+      else circle.style.removeProperty("--circle-color");
+    };
+    setCircle(card.querySelector(".src-circle-att"), attInp);
+    setCircle(card.querySelector(".src-circle-part"), partInp);
+  }
+  // Compact's quick-mark check/x buttons mirror whatever the real inputs and the card's
+  // excused flag currently say -- called after every change so a blank row (neither lit up)
+  // never gets confused with one marked absent (0), which is the whole point of having them
+  // at all (computeStats already excludes true blanks from both the numerator and
+  // denominator; see its own comment).
+  function syncCheckButtons(card) {
+    const presentBtn = card.querySelector(".src-check-present");
+    const absentBtn = card.querySelector(".src-check-absent");
+    if (!presentBtn && !absentBtn) return;
     const attInp = card.querySelector('.score-input[data-slot="att"]');
     const partInp = card.querySelector('.score-input[data-slot="part"]');
     const a = attInp && attInp.value !== "" ? Number(attInp.value) : null;
     const p = partInp && partInp.value !== "" ? Number(partInp.value) : null;
-    const pair = [a, p, null, null, card.dataset.excused === "1"];
-    const state = compactTriState(pair);
-    triWrap.setAttribute("data-tri-state", state);
-    triWrap.querySelectorAll(".src-tri-btn").forEach((b) => b.classList.toggle("active", b.getAttribute("data-tri") === state));
-    const triPartial = triWrap.querySelector(".src-tri-partial");
-    if (triPartial) {
-      if (state === "partial") {
-        triPartial.textContent = compactPartialLabel(pair);
-        triPartial.style.display = "";
-        const tone = compactPartialTone(pair);
-        if (tone) triPartial.setAttribute("data-tone", tone); else triPartial.removeAttribute("data-tone");
-      } else {
-        triPartial.style.display = "none";
-        triPartial.removeAttribute("data-tone");
-      }
-    }
+    const state = compactTriState([a, p, null, null, card.dataset.excused === "1"]);
+    if (presentBtn) presentBtn.classList.toggle("active", state === "present");
+    if (absentBtn) absentBtn.classList.toggle("active", state === "absent");
   }
   body.querySelectorAll(".student-card").forEach((card) => {
     const attInp = card.querySelector('.score-input[data-slot="att"]');
     const partInp = card.querySelector('.score-input[data-slot="part"]');
     // Excused is mutually exclusive with having a real score -- typing/sliding a value or
-    // hitting Present clears it, and turning it on clears any scores, so the two states can
-    // never disagree about whether this student counts toward attendance %.
+    // marking present/absent clears it, and turning it on clears any scores, so the two
+    // states can never disagree about whether this student counts toward attendance %.
     const setExcused = (on) => {
       card.classList.toggle("is-excused", on);
       card.dataset.excused = on ? "1" : "0";
       const excuseBtn = card.querySelector(".row-excuse");
       if (excuseBtn) excuseBtn.classList.toggle("active", on);
-      syncTriForCard(card);
+      syncCheckButtons(card);
     };
     if (attInp && partInp) {
       const syncPart = () => {
         if (partInp.dataset.linked !== "0") { partInp.value = attInp.value; refreshPillForInput(partInp); }
         refreshPillForInput(attInp);
-        if (attInp.value !== "") setExcused(false); else syncTriForCard(card);
+        updateSrcCircles(card);
+        if (attInp.value !== "") setExcused(false); else syncCheckButtons(card);
       };
       attInp.addEventListener("input", syncPart);
       attInp.addEventListener("blur", () => { const v = clampScore(attInp.value); attInp.value = v === null ? "" : v; syncPart(); });
-      partInp.addEventListener("input", () => { partInp.dataset.linked = "0"; refreshPillForInput(partInp); if (partInp.value !== "") setExcused(false); else syncTriForCard(card); });
-      partInp.addEventListener("blur", () => { const v = clampScore(partInp.value); partInp.value = v === null ? "" : v; refreshPillForInput(partInp); syncTriForCard(card); });
+      partInp.addEventListener("input", () => { partInp.dataset.linked = "0"; refreshPillForInput(partInp); updateSrcCircles(card); if (partInp.value !== "") setExcused(false); else syncCheckButtons(card); });
+      partInp.addEventListener("blur", () => { const v = clampScore(partInp.value); partInp.value = v === null ? "" : v; refreshPillForInput(partInp); updateSrcCircles(card); syncCheckButtons(card); });
     }
     const presentBtn = card.querySelector(".row-present");
     if (presentBtn) presentBtn.addEventListener("click", () => {
       if (attInp) { attInp.value = "1"; refreshPillForInput(attInp); }
       if (partInp) { partInp.value = "1"; partInp.dataset.linked = "1"; refreshPillForInput(partInp); }
+      updateSrcCircles(card);
       setExcused(false);
     });
     const excuseBtn = card.querySelector(".row-excuse");
@@ -2215,32 +2261,43 @@ function wireTodayGrid(root, teacherName) {
       if (turningOn) {
         if (attInp) { attInp.value = ""; refreshPillForInput(attInp); }
         if (partInp) { partInp.value = ""; refreshPillForInput(partInp); }
+        updateSrcCircles(card);
       }
       setExcused(turningOn);
     });
-    // Compact's three tri-state buttons: tapping the active one clears back to blank; tapping
-    // a different one (or the same one while something else is active) sets that state. Present
-    // and Absent set attendance AND participation together at 1/0 -- partial credit for the two
-    // separately stays a Cards-view-only capability, as noted on compactTriHtml.
-    card.querySelectorAll(".src-tri-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
+    // Compact's dials: tap the circle to reveal its slider right there in the row. Only one
+    // open at a time (across the whole page), closed by tapping elsewhere -- see the
+    // document-level listener near the note-popover one, below.
+    card.querySelectorAll(".src-circle").forEach((btn) => {
+      btn.addEventListener("click", (evt) => {
+        evt.stopPropagation();
         if (btn.disabled) return;
-        const tri = btn.getAttribute("data-tri");
-        const turningOn = !btn.classList.contains("active");
-        if (tri === "excused") {
-          card.dataset.excused = turningOn ? "1" : "0";
-          card.classList.toggle("is-excused", turningOn);
-          if (attInp) { attInp.value = ""; refreshPillForInput(attInp); }
-          if (partInp) { partInp.value = ""; refreshPillForInput(partInp); }
-        } else {
-          card.dataset.excused = "0";
-          card.classList.remove("is-excused");
-          const v = turningOn ? (tri === "present" ? "1" : "0") : "";
-          if (attInp) { attInp.value = v; refreshPillForInput(attInp); }
-          if (partInp) { partInp.value = v; partInp.dataset.linked = "1"; refreshPillForInput(partInp); }
-        }
-        syncTriForCard(card);
+        const wrap = btn.closest(".src-slot");
+        if (!wrap) return;
+        const willOpen = !wrap.classList.contains("is-open");
+        document.querySelectorAll(".src-slot.is-open").forEach((w) => { if (w !== wrap) w.classList.remove("is-open"); });
+        wrap.classList.toggle("is-open", willOpen);
       });
+    });
+    // Compact's quick-mark check/x, replacing the old single Present button -- tapping the
+    // already-active one clears back to blank, tapping the other sets that state. Both set
+    // attendance AND participation together at 1/0; partial credit for the two separately
+    // stays available by tapping a dial above to open its slider.
+    const checkPresentBtn = card.querySelector(".src-check-present");
+    if (checkPresentBtn) checkPresentBtn.addEventListener("click", () => {
+      const v = checkPresentBtn.classList.contains("active") ? "" : "1";
+      if (attInp) { attInp.value = v; refreshPillForInput(attInp); }
+      if (partInp) { partInp.value = v; partInp.dataset.linked = "1"; refreshPillForInput(partInp); }
+      updateSrcCircles(card);
+      setExcused(false);
+    });
+    const checkAbsentBtn = card.querySelector(".src-check-absent");
+    if (checkAbsentBtn) checkAbsentBtn.addEventListener("click", () => {
+      const v = checkAbsentBtn.classList.contains("active") ? "" : "0";
+      if (attInp) { attInp.value = v; refreshPillForInput(attInp); }
+      if (partInp) { partInp.value = v; partInp.dataset.linked = "1"; refreshPillForInput(partInp); }
+      updateSrcCircles(card);
+      setExcused(false);
     });
   });
   const fillAllBtn = document.getElementById("fill-all");
@@ -2250,7 +2307,8 @@ function wireTodayGrid(root, teacherName) {
       const partInp = card.querySelector('.score-input[data-slot="part"]');
       if (attInp && attInp.value === "") { attInp.value = "1"; refreshPillForInput(attInp); }
       if (partInp && partInp.value === "") { partInp.value = "1"; if (!partInp.dataset.linked) partInp.dataset.linked = "1"; refreshPillForInput(partInp); }
-      syncTriForCard(card);
+      updateSrcCircles(card);
+      syncCheckButtons(card);
     });
     toast("Filled every blank score with 1 — adjust any exceptions, then save.", "good");
   });
