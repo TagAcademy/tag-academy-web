@@ -269,7 +269,11 @@ main.view {
    scrolls horizontally on its own rather than wrapping (which would make it as tall as a
    card again) or overflowing the page. */
 .student-rows { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; }
-.student-row-compact {
+/* .student-card.student-row-compact (not just .student-row-compact): .student-card's own
+   flex-direction:column rule is defined later in this file and has equal specificity, so a
+   single-class override here would lose to it on source order -- the compound selector
+   wins regardless of where either rule sits. */
+.student-card.student-row-compact {
   display: flex; flex-direction: row; align-items: center; gap: 8px; padding: 6px 10px;
   flex-wrap: nowrap; overflow-x: auto;
 }
