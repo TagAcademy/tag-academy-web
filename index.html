@@ -210,13 +210,13 @@ main.view {
 .page-head .actions { display: flex; gap: 8px; flex-shrink: 0; }
 
 /* ===================== Today page: date/hebrew-date/parsha controls =====================
-   Gregorian + Hebrew date sit side by side; Parsha always gets its own row underneath
-   (rather than wrapping to the far right of a single flex row) so nothing needs a
-   horizontal scroll to reach on a phone. */
-.today-head-controls { margin: 14px 0 18px; display: flex; flex-direction: column; gap: 10px; max-width: 560px; }
+   Gregorian + Hebrew date sit side by side in a narrow left-hand column; Parsha lives outside
+   that column, as its own full-width row, so it can be centered across the whole page rather
+   than just within the narrow date controls. */
+.today-head-controls { margin: 14px 0 10px; display: flex; flex-direction: column; gap: 10px; max-width: 560px; }
 .today-parsha-line {
   font-family: var(--font-display); font-size: 1.05rem; font-weight: 700; color: var(--gold);
-  text-align: right;
+  text-align: center; margin: 0 0 18px;
 }
 .thc-row { display: flex; gap: 10px; flex-wrap: wrap; }
 .thc-row > .field { flex: 1 1 150px; min-width: 130px; }
@@ -254,6 +254,36 @@ main.view {
 .hcal-day.hcal-today { border-color: var(--gold); }
 .hcal-day.hcal-sel { background: var(--brand); color: #fff; }
 .hcal-blank { visibility: hidden; }
+
+/* ===================== student detail: attendance calendar ===================== */
+.sd-cal-nav { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.sd-cal-title { font-family: var(--font-display); font-weight: 800; font-size: 0.95rem; flex: 1; text-align: center; }
+.sd-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.sd-cal-dow { text-align: center; font-size: 0.68rem; color: var(--muted); font-weight: 700; text-transform: uppercase; padding-bottom: 4px; }
+.sd-cal-cell { aspect-ratio: 1; }
+.sd-cal-day {
+  width: 100%; height: 100%; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--surface-2); cursor: pointer; padding: 2px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; color: var(--ink);
+}
+.sd-cal-day:hover { border-color: var(--brand); }
+.sd-cal-day.sd-cal-today { border-color: var(--gold); border-width: 2px; }
+.sd-cal-day.sd-cal-sel { background: var(--brand); }
+.sd-cal-day.sd-cal-sel .sd-cal-greg, .sd-cal-day.sd-cal-sel .sd-cal-heb, .sd-cal-day.sd-cal-sel .sd-cal-val { color: #fff; }
+.sd-cal-day.sd-cal-empty { color: var(--muted); }
+.sd-cal-greg { font-family: var(--font-mono); font-weight: 700; font-size: 0.86rem; line-height: 1; }
+.sd-cal-heb { font-size: 0.6rem; color: var(--muted); line-height: 1; }
+.sd-cal-val { font-size: 0.62rem; font-weight: 700; line-height: 1; margin-top: 1px; }
+.sd-cal-day.tone-good { background: var(--good-soft); }
+.sd-cal-day.tone-good .sd-cal-val { color: var(--good); }
+.sd-cal-day.tone-caution { background: var(--caution-soft); }
+.sd-cal-day.tone-caution .sd-cal-val { color: var(--caution); }
+.sd-cal-day.tone-warn { background: var(--warn-soft); }
+.sd-cal-day.tone-warn .sd-cal-val { color: var(--warn); }
+.sd-cal-blank { visibility: hidden; }
+.sd-class-row { cursor: pointer; }
+.sd-class-row:hover td { background: var(--surface-2); }
+.sd-class-row-sel td { background: var(--brand-soft); }
 
 /* ===================== Today page: view toggle + alternate list views ===================== */
 .view-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
@@ -683,6 +713,9 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
 @media (max-width: 360px) {
   main.view { padding: 20px 10px 50px; }
   .student-card { padding: 12px; gap: 10px; }
+  .sd-cal-grid { gap: 3px; }
+  .sd-cal-greg { font-size: 0.72rem; }
+  .sd-cal-heb, .sd-cal-val { font-size: 0.54rem; }
 }
 
 /* Report card printing: hitting Print on a student's report card should print
@@ -860,6 +893,29 @@ function hebrewDayNumeral(dateStr) {
   const full = hebrewDateFor(dateStr);
   return full ? stripHebrewPunct(full.split(" ")[0]) : "";
 }
+const DOW_SHORT_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const HEBREW_DOW = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
+/* "Mon 9/01" -- weekday abbreviation + month/day (day zero-padded, month not), so the Today
+   page's Gregorian date field clearly shows the day of week at a glance. */
+function fmtDateDow(dateStr) {
+  if (!dateStr) return "";
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dow = new Date(y, m - 1, d).getDay();
+  return DOW_SHORT_EN[dow] + " " + m + "/" + String(d).padStart(2, "0");
+}
+/* Hebrew weekday + day/month, no year -- e.g. "שני יח אלול". Drops only the last
+   space-separated token (the year) rather than assuming exactly two remain, so this still
+   comes out right for Adar I/II ("כ׳ אדר א׳ תשפ״ד" -> "שני כ אדר א"). */
+function hebrewDateDowFor(dateStr) {
+  if (!HebcalMini || !dateStr) return "";
+  const full = hebrewDateFor(dateStr);
+  if (!full) return "";
+  const parts = full.split(" ");
+  const dayMonth = stripHebrewPunct(parts.slice(0, -1).join(" "));
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dow = new Date(y, m - 1, d).getDay();
+  return HEBREW_DOW[dow] + " " + dayMonth;
+}
 /* Short initials for attributing an attendance entry to the staff member who marked it
    (e.g. "Chaim Friedman" -> "CF", "Admin" -> "AD"). */
 function initialsFor(name) {
@@ -869,7 +925,7 @@ function initialsFor(name) {
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
-function pct(n) { return (n === null || n === undefined || isNaN(n)) ? "—" : (n * 100).toFixed(1) + "%"; }
+function pct(n) { return (n === null || n === undefined || isNaN(n)) ? "—" : Math.round(n * 100) + "%"; }
 /* Percentage color-coding: 90%+ good, 75-89% caution, below 75% needs attention. */
 const PCT_GOOD_MIN = 0.9, PCT_CAUTION_MIN = 0.75;
 function pctTone(n) {
@@ -1094,6 +1150,7 @@ function seedState() {
         { id: uid("p"), name: "Example: choose Shabbos seat", cost: 10 },
       ],
       extraPeriods: {}, // { "YYYY-MM-DD": ["Class name", ...] } — one-off classes added for a single day
+      bonusPeriods: {}, // { "YYYY-MM-DD": ["Class name", ...] } — that day's class only ever helps a student's average, never hurts it (see isBonusPeriod)
     },
     staff: [
       { id: stAdmin, username: "admin", name: "Example Admin", password: "admin1234", role: "admin" },
@@ -1190,6 +1247,12 @@ function periodsForDate(dateStr) {
 function extraPeriodsFor(dateStr) {
   return (state.settings.extraPeriods && state.settings.extraPeriods[dateStr]) || [];
 }
+/* A bonus class (admin-toggled per date+period from the Today page) only ever helps a
+   student's attendance/participation average, never hurts it -- see the bonus handling in
+   computeStats for exactly what that means numerically. */
+function isBonusPeriod(dateStr, period) {
+  return !!(state.settings.bonusPeriods && state.settings.bonusPeriods[dateStr] && state.settings.bonusPeriods[dateStr].includes(period));
+}
 function attendanceRecord(dateStr, studentId) {
   return state.attendance.find((r) => r.date === dateStr && r.studentId === studentId);
 }
@@ -1216,11 +1279,15 @@ function computeStats(studentId, opts) {
       const pair = rec.scores && rec.scores[p];
       if (!pair) continue;
       const [a, pt] = pair;
-      // Percentages count only what was actually marked — a blank attendance
-      // or participation score is left out of both the numerator and the
-      // denominator, rather than counting against the student as a 0.
-      if (a !== null && a !== undefined && a !== "") { attPts += Number(a); attPoss += 1; }
-      if (pt !== null && pt !== undefined && pt !== "") { partPts += Number(pt); partPoss += 1; }
+      const bonus = isBonusPeriod(rec.date, p);
+      // Percentages count only what was actually marked — a blank attendance or participation
+      // score is left out of both the numerator and the denominator, rather than counting
+      // against the student as a 0. A bonus class (admin-toggled per date+period) goes one
+      // step further: whatever was marked still adds to the numerator as usual, but never
+      // adds to the denominator — so a great score there raises the average, while a poor one
+      // (or no mark at all) leaves it exactly where it was instead of dragging it down.
+      if (a !== null && a !== undefined && a !== "") { attPts += Number(a); if (!bonus) attPoss += 1; }
+      if (pt !== null && pt !== undefined && pt !== "") { partPts += Number(pt); if (!bonus) partPoss += 1; }
     }
   }
   // TAG coins are earned from Attendance AND Participation points combined.
@@ -1708,7 +1775,7 @@ function renderToday(root, session) {
   const hdayOptions = hebrewDayOptionsFor(todayDate);
   const parshaHebLabel = parshaHebrewFor(todayDate);
   const monthRange = hebrewMonthRangeFor(todayDate);
-  const hebLabel = stripHebrewPunct(hebrewDateFor(todayDate));
+  const hebLabel = hebrewDateDowFor(todayDate);
   const todayGregISO = todayISO();
 
   let html = '<div class="page-head"><div><span class="eyebrow">Class by class</span><h1>Attendance &amp; Participation</h1>' +
@@ -1716,10 +1783,10 @@ function renderToday(root, session) {
 
   html += '<div class="today-head-controls">';
   html += '<div class="thc-row">';
-  html += '<div class="field" style="margin-bottom:0;"><label for="today-date">Date</label><input type="date" id="today-date" value="' + todayDate + '"></div>';
+  html += '<div class="field" style="margin-bottom:0;"><label for="today-date">' + escapeHtml(fmtDateDow(todayDate)) + '</label><input type="date" id="today-date" value="' + todayDate + '"></div>';
   if (hdayOptions.length) {
-    html += '<div class="field hcal-field" style="margin-bottom:0;"><label for="hcal-trigger">Hebrew date</label>' +
-      '<button type="button" class="hcal-trigger" id="hcal-trigger">' + escapeHtml(hebLabel || "Pick a date") + "</button>";
+    html += '<div class="field hcal-field" style="margin-bottom:0;"><label for="hcal-trigger" dir="rtl">היום</label>' +
+      '<button type="button" class="hcal-trigger" id="hcal-trigger" dir="rtl">' + escapeHtml(hebLabel || "Pick a date") + "</button>";
     if (showHebrewCal) {
       const firstDow = jsDateFor(hdayOptions[0].date).getDay();
       html += '<div class="hcal-pop" id="hcal-pop">' +
@@ -1742,10 +1809,11 @@ function renderToday(root, session) {
     html += "</div>";
   }
   html += "</div>"; // .thc-row
-  // Just reflects the selected date, in Hebrew -- no picker, since it's not an independent
-  // choice (the date already determines it).
-  if (parshaHebLabel) html += '<div class="today-parsha-line" dir="rtl">' + escapeHtml(parshaHebLabel) + "</div>";
   html += "</div>"; // .today-head-controls
+  // Just reflects the selected date, in Hebrew -- no picker, since it's not an independent
+  // choice (the date already determines it). Lives outside the (narrow, left-hand)
+  // today-head-controls column so it can be centered across the full page width.
+  if (parshaHebLabel) html += '<div class="today-parsha-line" dir="rtl">' + escapeHtml(parshaHebLabel) + "</div>";
 
   if (!canWrite) html += '<div class="banner banner-warn">Read-only view — changes here won’t be saved.</div>';
   if (restored) html += '<div class="banner banner-warn">Your last save may not have gone through (someone else saved first). We’ve restored what you typed below — check it and save again.</div>';
@@ -1793,6 +1861,17 @@ function renderToday(root, session) {
       "</div>";
   }
   html += "</div>";
+
+  // Bonus: admin-only toggle, but the "this class is bonus today" pill is visible to whoever's
+  // marking it too, so a teacher isn't left guessing why a student's average moved.
+  const periodIsBonus = selectedPeriod && isBonusPeriod(todayDate, selectedPeriod);
+  const canToggleBonus = canWrite && isAdmin(session);
+  if (periodIsBonus || canToggleBonus) {
+    html += '<div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+      (periodIsBonus ? '<span class="pill pill-gold" title="Marked scores help this average; a missed or low mark leaves it unchanged.">★ Bonus today — only helps, never hurts</span>' : "") +
+      (canToggleBonus ? '<button class="btn btn-ghost btn-sm" id="toggle-bonus" type="button">' + (periodIsBonus ? "Unmark as bonus" : "Mark " + escapeHtml(selectedPeriod) + " as bonus today") + "</button>" : "") +
+      "</div>";
+  }
 
   html += extraPeriodHtml;
 
@@ -1877,6 +1956,7 @@ function renderToday(root, session) {
   wireTodayHeader(root);
   wirePeriodSelect(root);
   wireExtraPeriod(root);
+  wireBonusToggle(root);
   wireTodayGrid(root, teacherName);
 }
 
@@ -1944,6 +2024,23 @@ function wirePeriodSelect(root) {
   if (sel) sel.addEventListener("change", () => { selectedPeriod = sel.value; renderAll(); });
   root.querySelectorAll(".summary-period-btn").forEach((btn) => {
     btn.addEventListener("click", () => { selectedPeriod = btn.getAttribute("data-period"); renderAll(); });
+  });
+}
+function wireBonusToggle(root) {
+  const btn = document.getElementById("toggle-bonus");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    const period = selectedPeriod, date = todayDate;
+    const wasOn = isBonusPeriod(date, period);
+    const newState = JSON.parse(JSON.stringify(state));
+    newState.settings.bonusPeriods = newState.settings.bonusPeriods || {};
+    const list = newState.settings.bonusPeriods[date] || [];
+    newState.settings.bonusPeriods[date] = wasOn ? list.filter((p) => p !== period) : list.concat([period]);
+    const res = await saveState(newState);
+    if (res.ok || res.local) {
+      toast(wasOn ? "Removed bonus for " + period + " today." : period + " marked as bonus for today — it'll only ever help students' averages.", "good");
+      renderAll();
+    }
   });
 }
 function wireExtraPeriod(root) {
@@ -3217,10 +3314,13 @@ let sdScope = "all"; // "all" | "day" | "week" | "hmonth" | "custom"
 let sdAnchor = todayISO();
 let sdFrom = todayISO();
 let sdTo = todayISO();
+let sdClassFilter = null; // null = every class combined; otherwise one period name
+let sdCalAnchor = todayISO(); // which Hebrew month the attendance calendar is showing
 function wireStudentLinks(root) {
   root.querySelectorAll("[data-student-link]").forEach((el) => el.addEventListener("click", () => {
     viewingStudentId = el.getAttribute("data-student-link");
     sdScope = "all"; sdAnchor = todayISO(); sdFrom = todayISO(); sdTo = todayISO();
+    sdClassFilter = null; sdCalAnchor = todayISO();
     renderAll();
   }));
 }
@@ -3394,10 +3494,69 @@ function notesForStudent(studentId, from, to) {
   return notes;
 }
 
+/* Attendance calendar (student detail page) — one Hebrew month at a time, every day colored
+   by that day's blended attendance+participation average (across every class held that day,
+   or just one class when sdClassFilter is set). Clicking a day drills the whole page's
+   time-range picker into that single day; the class dropdown here and the "By class" table's
+   clickable rows both write the same sdClassFilter, so either one narrows both the calendar
+   and the stat tiles above it to a single class. */
+function renderStudentCalendarHtml(student) {
+  const monthRange = hebrewMonthRangeFor(sdCalAnchor);
+  const hdayOptions = hebrewDayOptionsFor(sdCalAnchor);
+  if (!monthRange || !hdayOptions.length) return ""; // Hebrew calendar library unavailable
+  const firstDow = jsDateFor(hdayOptions[0].date).getDay();
+  const todayGregISO = todayISO();
+  const periods = state.settings.periods;
+
+  let html = '<div class="card card-pad" style="margin-top:16px;">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:12px;">' +
+    '<div><span class="eyebrow">Day by day</span><h3 style="margin:2px 0 0;">Attendance calendar</h3></div>' +
+    '<div class="field" style="min-width:180px;margin-bottom:0;"><label for="sd-cal-class">Class</label><select id="sd-cal-class">' +
+    '<option value=""' + (!sdClassFilter ? " selected" : "") + '>All classes</option>' +
+    periods.map((p) => '<option value="' + escapeHtml(p) + '"' + (sdClassFilter === p ? " selected" : "") + '>' + escapeHtml(p) + "</option>").join("") +
+    "</select></div></div>";
+
+  html += '<div class="sd-cal-nav">' +
+    '<button class="btn btn-ghost btn-sm" id="sd-cal-prev" type="button" title="Previous Hebrew month">&larr;</button>' +
+    '<span class="sd-cal-title">' + escapeHtml(monthRange.monthName + " " + monthRange.year) + "</span>" +
+    '<button class="btn btn-ghost btn-sm" id="sd-cal-next" type="button" title="Next Hebrew month">&rarr;</button>' +
+    '<button class="btn btn-ghost btn-sm" id="sd-cal-today" type="button">This month</button>' +
+    "</div>";
+
+  html += '<div class="sd-cal-grid">' +
+    DAY_NAMES.map((n) => '<div class="sd-cal-dow">' + escapeHtml(n.slice(0, 2)) + "</div>").join("") +
+    Array(firstDow).fill('<div class="sd-cal-cell sd-cal-blank"></div>').join("") +
+    hdayOptions.map((o) => {
+      const st = computeStats(student.id, sdClassFilter ? { from: o.date, to: o.date, period: sdClassFilter } : { from: o.date, to: o.date });
+      const hasData = st.blendedPct !== null && st.blendedPct !== undefined;
+      const tone = hasData ? pctTone(st.blendedPct) : "";
+      const isToday = o.date === todayGregISO;
+      const isSel = sdScope === "day" && o.date === sdAnchor;
+      const gregDay = jsDateFor(o.date).getDate();
+      const hebNum = hebrewDayNumeral(o.date) || "";
+      const titleText = fmtDateLong(o.date) + (hasData ? " — " + pct(st.blendedPct) : sdClassFilter ? " — not held / not marked" : " — nothing entered");
+      return '<button type="button" class="sd-cal-cell sd-cal-day' + (tone ? " tone-" + tone : " sd-cal-empty") +
+        (isToday ? " sd-cal-today" : "") + (isSel ? " sd-cal-sel" : "") + '" data-sd-cal-date="' + o.date + '" title="' + escapeHtml(titleText) + '">' +
+        '<span class="sd-cal-greg">' + gregDay + "</span>" +
+        '<span class="sd-cal-heb">' + escapeHtml(hebNum) + "</span>" +
+        (hasData ? '<span class="sd-cal-val">' + Math.round(st.blendedPct * 100) + "%</span>" : "") +
+        "</button>";
+    }).join("") +
+    "</div>";
+
+  html += '<p class="help-text" style="margin-top:10px;">Each day blends attendance and participation across ' +
+    (sdClassFilter ? escapeHtml(sdClassFilter) : "every class held that day") + '. Click a day to see just that day above.</p>';
+  html += "</div>";
+  return html;
+}
+
 function renderStudentDetail(root, student) {
   const allTimeSt = studentStats(student.id);
   const range = sdRange();
   const rangeSt = computeStats(student.id, { from: range.from, to: range.to });
+  // sdClassFilter (set from the calendar's Class dropdown, or by clicking a row in the "By
+  // class" table below) narrows the stat tiles to one class instead of every class combined.
+  const filteredSt = sdClassFilter ? computeStats(student.id, { from: range.from, to: range.to, period: sdClassFilter }) : rangeSt;
   const trail = ledgerBalanceTrail(student.id).slice(0, 12);
   const periods = state.settings.periods;
 
@@ -3432,9 +3591,17 @@ function renderStudentDetail(root, student) {
       (range.sub ? '<div style="font-size:0.82rem;color:var(--muted);margin-top:2px;">' + escapeHtml(range.sub) + "</div>" : "") : "") +
     "</div>";
 
+  const scopeSuffix = sdScope === "all" ? " (all time)" : "";
+  const classSuffix = sdClassFilter ? " — " + sdClassFilter : "";
   html += '<div class="grid-stats">' +
-    statTile("Attendance" + (sdScope === "all" ? " (all time)" : ""), pct(rangeSt.attPct), pctTone(rangeSt.attPct)) +
-    statTile("Participation" + (sdScope === "all" ? " (all time)" : ""), pct(rangeSt.partPct), pctTone(rangeSt.partPct)) + "</div>";
+    statTile("Attendance" + scopeSuffix + classSuffix, pct(filteredSt.attPct), pctTone(filteredSt.attPct)) +
+    statTile("Participation" + scopeSuffix + classSuffix, pct(filteredSt.partPct), pctTone(filteredSt.partPct)) + "</div>";
+  if (sdClassFilter) {
+    html += '<p class="help-text" style="margin:-10px 0 16px;">Showing ' + escapeHtml(sdClassFilter) + ' only — ' +
+      '<button type="button" class="link-btn" id="sd-class-clear">show every class combined</button>.</p>';
+  }
+
+  html += renderStudentCalendarHtml(student);
 
   const reportNotes = notesForStudent(student.id, range.from, range.to);
   const reportClusters = clusterNotes(reportNotes);
@@ -3449,14 +3616,17 @@ function renderStudentDetail(root, student) {
     (reportNotes.length ? '<p class="help-text" style="margin-top:10px;">Based on ' + reportNotes.length + ' comment' + (reportNotes.length === 1 ? "" : "s") + ' logged in this period.</p>' : "") +
     "</div>";
 
-  html += '<div class="card card-pad" style="margin-top:16px;"><h3>By class</h3>';
+  html += '<div class="card card-pad" style="margin-top:16px;"><h3>By class</h3>' +
+    '<p class="help-text" style="margin-top:-6px;">Click a class to see the calendar and stats above for just that class.</p>';
   const classRows = periods.map((p) => ({ p: p, cs: computeStats(student.id, { period: p, from: range.from, to: range.to }) })).filter((r) => r.cs.attPoss > 0 || r.cs.partPoss > 0);
   if (classRows.length === 0) {
     html += '<p class="help-text">No classes recorded for this student yet.</p>';
   } else {
     html += '<div class="table-wrap"><table><thead><tr><th>Class</th><th class="num">Attendance</th><th class="num">Participation</th><th class="num">Times marked</th></tr></thead><tbody>';
     classRows.forEach((r) => {
-      html += "<tr><td>" + escapeHtml(r.p) + '</td><td class="num">' + pctPill(r.cs.attPct) + '</td><td class="num">' + pctPill(r.cs.partPct) +
+      const isSel = sdClassFilter === r.p;
+      html += '<tr class="sd-class-row' + (isSel ? " sd-class-row-sel" : "") + '" data-sd-class-row="' + escapeHtml(r.p) + '"><td>' + escapeHtml(r.p) + (isSel ? ' <span class="pill pill-good">Selected</span>' : "") +
+        '</td><td class="num">' + pctPill(r.cs.attPct) + '</td><td class="num">' + pctPill(r.cs.partPct) +
         '</td><td class="num">' + r.cs.attPoss + "</td></tr>";
     });
     html += "</tbody></table></div>";
@@ -3482,17 +3652,18 @@ function renderStudentDetail(root, student) {
     if (range.from && rec.date < range.from) return;
     if (range.to && rec.date > range.to) return;
     Object.keys(rec.scores).forEach((p) => {
+      if (sdClassFilter && p !== sdClassFilter) return;
       const pair = rec.scores[p];
       if (!pair) return;
       const excused = !!pair[4];
       // Excused entries have no att/part score by design (that's what keeps them out of the
       // percentages) -- don't let the "no score" skip below also hide them from this log.
       if (!excused && (pair[0] === null || pair[0] === undefined)) return;
-      logRows.push({ date: rec.date, period: p, att: pair[0], part: pair[1], note: pair[2] || "", by: pair[3] || "", excused });
+      logRows.push({ date: rec.date, period: p, att: pair[0], part: pair[1], note: pair[2] || "", by: pair[3] || "", excused, bonus: isBonusPeriod(rec.date, p) });
     });
   });
   logRows.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : a.period.localeCompare(b.period)));
-  html += '<div class="card card-pad" style="margin-top:16px;"><h3>Attendance &amp; participation log</h3>';
+  html += '<div class="card card-pad" style="margin-top:16px;"><h3>Attendance &amp; participation log' + (sdClassFilter ? " — " + escapeHtml(sdClassFilter) : "") + '</h3>';
   if (logRows.length === 0) {
     html += '<p class="help-text">' + (sdScope === "all" ? "Nothing entered for this student yet." : "Nothing entered for this student in this range.") + '</p>';
   } else {
@@ -3501,7 +3672,7 @@ function renderStudentDetail(root, student) {
       const attPartHtml = r.excused
         ? '<td class="num" colspan="2" style="color:var(--gold);font-weight:600;">Excused</td>'
         : '<td class="num">' + num2(r.att) + '</td><td class="num">' + (r.part === null || r.part === undefined ? "—" : num2(r.part)) + "</td>";
-      html += "<tr><td>" + fmtDateShort(r.date) + "</td><td>" + escapeHtml(r.period) + "</td>" + attPartHtml + "<td>" + escapeHtml(r.note) +
+      html += "<tr><td>" + fmtDateShort(r.date) + "</td><td>" + escapeHtml(r.period) + (r.bonus ? ' <span class="pill pill-gold" title="Bonus that day — only helped, never hurt">★</span>' : "") + "</td>" + attPartHtml + "<td>" + escapeHtml(r.note) +
         '</td><td>' + (r.by ? '<span class="marked-by marked-by-sm" title="' + escapeHtml(r.by) + '">' + escapeHtml(initialsFor(r.by)) + "</span>" : "") + "</td></tr>";
     });
     html += "</tbody></table></div>";
@@ -3535,6 +3706,30 @@ function renderStudentDetail(root, student) {
   if (sdToInput) sdToInput.addEventListener("change", () => { sdTo = sdToInput.value || sdTo; renderAll(); });
   const printBtn = document.getElementById("sd-print");
   if (printBtn) printBtn.addEventListener("click", () => window.print());
+
+  const clearClassBtn = document.getElementById("sd-class-clear");
+  if (clearClassBtn) clearClassBtn.addEventListener("click", () => { sdClassFilter = null; renderAll(); });
+  root.querySelectorAll("[data-sd-class-row]").forEach((row) => row.addEventListener("click", () => {
+    const p = row.getAttribute("data-sd-class-row");
+    sdClassFilter = sdClassFilter === p ? null : p; // clicking the already-selected class clears it
+    renderAll();
+  }));
+
+  const calClassSel = document.getElementById("sd-cal-class");
+  if (calClassSel) calClassSel.addEventListener("change", () => { sdClassFilter = calClassSel.value || null; renderAll(); });
+  const calPrev = document.getElementById("sd-cal-prev");
+  if (calPrev) calPrev.addEventListener("click", () => { sdCalAnchor = shiftHebrewMonth(sdCalAnchor, -1); renderAll(); });
+  const calNext = document.getElementById("sd-cal-next");
+  if (calNext) calNext.addEventListener("click", () => { sdCalAnchor = shiftHebrewMonth(sdCalAnchor, 1); renderAll(); });
+  const calTodayBtn = document.getElementById("sd-cal-today");
+  if (calTodayBtn) calTodayBtn.addEventListener("click", () => { sdCalAnchor = todayISO(); renderAll(); });
+  root.querySelectorAll(".sd-cal-day").forEach((btn) => btn.addEventListener("click", () => {
+    // Clicking a day drills the whole page's time-range picker into just that day, so the
+    // stat tiles, report card, and log above all reflect it too -- not just the calendar.
+    sdScope = "day";
+    sdAnchor = btn.getAttribute("data-sd-cal-date");
+    renderAll();
+  }));
 }
 
 /* ================================================================
