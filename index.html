@@ -700,22 +700,46 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
 .admin-tab:hover { color: var(--ink); }
 .admin-tab.active { color: var(--brand); border-bottom-color: var(--brand); }
 
-/* ===================== leaderboard ===================== */
-.lb-top-row td { font-weight: 700; }
+/* ===================== leaderboard: bar chart ===================== */
 .lb-medal {
   display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px;
   border-radius: 50%; font-family: var(--font-mono); font-weight: 700; font-size: 0.82rem; color: var(--muted);
+  background: var(--surface-2); border: 1px solid var(--line);
 }
-.lb-medal.lb-gold { background: var(--gold-soft); color: var(--gold); }
-.lb-medal.lb-silver { background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--line-strong); }
-.lb-medal.lb-bronze { background: var(--caution-soft); color: var(--caution); }
-/* Every other table in the app keeps its cells on one line (tbody td { white-space: nowrap }
-   above) since their content is always short. The leaderboard's Student column is the one
-   place that isn't -- a two-word combined name easily runs past a phone's width -- so letting
-   just that column wrap keeps the whole table inside the viewport instead of forcing the
-   table-wrap div (or, without this, the page itself) to scroll sideways to read a name. Rank
-   and the value column stay nowrap; they're always short. */
-.lb-table-wrap td:nth-child(2) { white-space: normal; word-break: break-word; }
+.lb-medal.lb-gold { background: var(--gold-soft); color: var(--gold); border-color: transparent; }
+.lb-medal.lb-silver { background: var(--surface-2); color: var(--ink-2); border-color: var(--line-strong); }
+.lb-medal.lb-bronze { background: var(--caution-soft); color: var(--caution); border-color: transparent; }
+
+/* Each student is a column: a badge (trophy for 1st, a medal for 2nd/3rd, a plain numbered
+   badge below that) sits above a bar sized to their value, on one shared baseline so the
+   columns read as a single chart. Ties in value share the same badge/rank (see
+   competitionRanks) instead of being pulled apart into 1st/2nd/3rd by coincidence of sort
+   order. Horizontal scroll (rather than shrinking columns to fit) keeps bars legible on a
+   phone with a big roster, the same tradeoff the data tables elsewhere already make. */
+.lb-chart-wrap { overflow-x: auto; padding-bottom: 4px; }
+.lb-chart { display: flex; align-items: flex-end; gap: 14px; min-width: min-content; padding: 10px 4px 0; }
+.lb-chart-col { display: flex; flex-direction: column; align-items: center; flex: 0 0 76px; width: 76px; text-align: center; }
+.lb-chart-col-top .lb-chart-name, .lb-chart-col-top .lb-chart-name .student-link { font-weight: 800; color: var(--ink); }
+.lb-chart-topper { height: 30px; display: flex; align-items: flex-end; justify-content: center; margin-bottom: 2px; }
+.lb-chart-trophy { color: var(--gold); }
+.lb-chart-trophy svg { width: 28px; height: 28px; }
+.lb-chart-medal { width: 24px; height: 24px; font-size: 0.72rem; }
+.lb-chart-value { font-size: 0.78rem; margin-bottom: 6px; min-height: 1.1em; }
+.lb-chart-value-text { font-weight: 800; }
+.lb-chart-value-text.tone-good { color: var(--good); }
+.lb-chart-value-text.tone-caution { color: var(--caution); }
+.lb-chart-value-text.tone-warn { color: var(--warn); }
+.lb-chart-track {
+  width: 100%; height: 130px; background: var(--surface-2); border: 1px solid var(--line);
+  border-bottom: 2px solid var(--line-strong); border-radius: var(--radius-sm) var(--radius-sm) 2px 2px;
+  display: flex; align-items: flex-end; overflow: hidden;
+}
+.lb-chart-fill { width: 100%; border-radius: 3px 3px 0 0; min-height: 4px; }
+.lb-chart-fill.tone-good { background: var(--good); }
+.lb-chart-fill.tone-caution { background: var(--caution); }
+.lb-chart-fill.tone-warn { background: var(--warn); }
+.lb-chart-fill.tone-gold { background: var(--gold); }
+.lb-chart-name { font-size: 0.76rem; margin-top: 7px; line-height: 1.25; word-break: break-word; }
 
 /* ===================== desktop (>900px) =====================
    Everything above is tuned mobile-first: small type, tight padding, and rows built to just
@@ -751,12 +775,11 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
   .stat-tile { padding: 18px 20px; }
   .stat-tile .value { font-size: 1.9rem; }
 
-  /* Compact Today rows and the class-marking cards are a name-plus-controls list, not a
-     table that benefits from every extra pixel of a wide monitor -- capping the measure
-     keeps a row's contents together instead of pulled apart across the full window width.
-     "Today at a glance" and the other data tables elsewhere are untouched and still use the
-     full page width, where more columns genuinely benefit from it. */
-  .student-rows { max-width: 900px; }
+  /* Every block on the Today page -- the date controls, the class picker and its buttons, the
+     student list, and the "Today at a glance" summary -- shares this one width instead of each
+     stretching to whatever its own content needs, which used to leave their right edges all
+     over the place on a wide monitor. */
+  .today-wrap { max-width: 1040px; }
   .student-card.student-row-compact { padding: 11px 18px; gap: 14px; }
   .student-row-compact .src-name { font-size: 1rem; }
   /* Cards view: the bigger type below no longer fits a card's name+note+Present+Excused
@@ -769,6 +792,28 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
   .btn-icon-sm { width: 32px; height: 32px; font-size: 0.85rem; }
   .student-row-compact .src-actions .note-toggle-btn { width: 32px; height: 32px; }
   .marked-by { min-width: 22px; height: 22px; font-size: 0.68rem; }
+
+  /* Leaderboard chart: more room on a monitor for taller, wider bars and a bigger trophy. */
+  .lb-chart { gap: 22px; padding-top: 14px; }
+  .lb-chart-col { flex-basis: 96px; width: 96px; }
+  .lb-chart-track { height: 220px; }
+  .lb-chart-topper { height: 40px; }
+  .lb-chart-trophy svg { width: 38px; height: 38px; }
+  .lb-chart-medal { width: 30px; height: 30px; font-size: 0.85rem; }
+  .lb-chart-value { font-size: 0.92rem; }
+  .lb-chart-name { font-size: 0.88rem; }
+
+  /* Attendance calendar (Reports overview + a student's own detail page): the mobile-first
+     cells left a lot of dead space on a wide monitor -- taller cells and bigger type put that
+     space to use instead of a tiny percentage floating in the middle of an oversized square. */
+  .sd-cal-grid { gap: 10px; }
+  .sd-cal-day { padding: 8px 10px; }
+  .sd-cal-cell { aspect-ratio: 4 / 3; }
+  .sd-cal-greg { font-size: 0.92rem; }
+  .sd-cal-heb { font-size: 0.76rem; }
+  .sd-cal-val { font-size: 1.05rem; }
+  .sd-cal-dow { font-size: 0.78rem; padding-bottom: 8px; }
+  .sd-cal-title { font-size: 1.15rem; }
 }
 
 /* ===================== mobile ===================== */
@@ -2022,6 +2067,12 @@ function renderToday(root, session) {
   let html = '<div class="page-head"><div><span class="eyebrow">Class by class</span><h1>Attendance &amp; Participation</h1>' +
     '<p>Pick a class below, mark each student, and save — then move to the next class as the day goes on.</p></div></div>';
 
+  // Everything below shares one reading-width column on desktop (see .today-wrap in the
+  // desktop media query) so the date controls, the class picker, the student list, and the
+  // "Today at a glance" summary all line up at the same right edge instead of each block
+  // stretching to whatever width its own content happens to need.
+  html += '<div class="today-wrap">';
+
   html += '<div class="today-head-controls">';
   html += '<div class="thc-row">';
   html += '<div class="field" style="margin-bottom:0;"><label for="today-date">' + escapeHtml(dayNameFor(todayDate)) + '</label><input type="date" id="today-date" value="' + todayDate + '"></div>';
@@ -2079,11 +2130,11 @@ function renderToday(root, session) {
   })() : "";
 
   if (periods.length === 0) {
-    html += '<div class="empty-state">No periods are scheduled on ' + dayNameFor(todayDate) + '.</div>' + extraPeriodHtml;
+    html += '<div class="empty-state">No periods are scheduled on ' + dayNameFor(todayDate) + '.</div>' + extraPeriodHtml + "</div>";
     root.innerHTML = html; wireTodayHeader(root); wireExtraPeriod(root); return;
   }
   if (roster.length === 0) {
-    html += '<div class="empty-state">No active students on the roster yet — ask an admin to add them.</div>';
+    html += '<div class="empty-state">No active students on the roster yet — ask an admin to add them.</div></div>';
     root.innerHTML = html; wireTodayHeader(root); return;
   }
 
@@ -2194,6 +2245,7 @@ function renderToday(root, session) {
   html += "</div>";
 
   html += renderTodaySummary(todayDate, periods, roster);
+  html += "</div>"; // .today-wrap
 
   root.innerHTML = html;
   wireTodayHeader(root);
@@ -3134,6 +3186,23 @@ function leaderboardEntryFor(studentId, catId, range) {
   return { value: st.blendedPct, display: pct(st.blendedPct) };
 }
 function medalClass(rank) { return rank === 1 ? "lb-medal lb-gold" : rank === 2 ? "lb-medal lb-silver" : rank === 3 ? "lb-medal lb-bronze" : ""; }
+/* Standard "competition ranking": students tied on value share the same rank, and the rank
+   right after a tie skips ahead by however many people just shared it (1, 1, 3 — not 1, 2, 3),
+   the same convention leaderboards and races use. `sortedDesc` must already be sorted by value,
+   highest first. */
+function competitionRanks(sortedDesc) {
+  const ranks = [];
+  sortedDesc.forEach((e, i) => { ranks.push(i > 0 && e.value === sortedDesc[i - 1].value ? ranks[i - 1] : i + 1); });
+  return ranks;
+}
+/* The badge shown above each bar in the leaderboard chart: a trophy for whoever's in 1st
+   (everyone tied for it gets their own trophy), silver/bronze medals for 2nd/3rd, and a plain
+   numbered badge below that. */
+function lbRankBadgeHtml(rank) {
+  if (rank === 1) return '<span class="lb-chart-trophy" title="1st place">' + icon("trophy") + "</span>";
+  if (rank === 2 || rank === 3) return '<span class="' + medalClass(rank) + ' lb-chart-medal" title="Rank ' + rank + '">' + rank + "</span>";
+  return '<span class="lb-medal lb-chart-medal" title="Rank ' + rank + '">' + rank + "</span>";
+}
 function renderLeaderboard(root, session) {
   const role = roleOf(session);
   const roster = activeRoster();
@@ -3190,16 +3259,31 @@ function renderLeaderboard(root, session) {
   if (!ranked.length) {
     html += '<p class="help-text" style="margin:0;">Nobody has data for ' + escapeHtml(cat.label) + (lbAgeBand !== "all" ? " in the ages " + escapeHtml(lbAgeBand) + " group" : "") + " yet.</p>";
   } else {
-    html += '<div class="table-wrap lb-table-wrap"><table><thead><tr><th style="width:44px;">Rank</th><th>Student</th><th class="num">' + escapeHtml(cat.label) + "</th></tr></thead><tbody>";
+    // Bar heights are relative to the spread actually on the board (lowest to highest value)
+    // rather than an absolute 0-100 scale, so differences stay visible even when everyone's
+    // clustered up near 95-100%. Coin balances can go negative, so 0 isn't necessarily the
+    // floor -- min() folds that in too, and a value below it just shows as the shortest bar.
+    const maxVal = Math.max(0, ...ranked.map((e) => e.value));
+    const minVal = Math.min(0, ...ranked.map((e) => e.value));
+    const range = maxVal - minVal || 1;
+    const ranks = competitionRanks(ranked);
+    html += '<div class="lb-chart-wrap"><div class="lb-chart">';
     ranked.forEach((e, i) => {
-      const rank = i + 1;
+      const rank = ranks[i];
+      const barPct = Math.max(4, Math.round(((e.value - minVal) / range) * 100));
       const nameHtml = (role === "admin" || role === "teacher") ? studentLink(e.student) : fullName(e.student);
+      const tone = cat.id === "coins" ? "gold" : (pctTone(e.value) || "good");
       const valueHtml = cat.id === "coins"
-        ? '<span class="coin-inline">' + coinBadge("sm") + '<span style="font-weight:700;color:var(--gold);">' + e.display + "</span></span>"
-        : pctPill(e.value);
-      html += '<tr class="' + (rank <= 3 ? "lb-top-row" : "") + '"><td><span class="' + medalClass(rank) + '">' + rank + "</span></td><td>" + nameHtml + '</td><td class="num">' + valueHtml + "</td></tr>";
+        ? '<span class="coin-inline">' + coinBadge("sm") + '<span style="font-weight:800;color:var(--gold);">' + e.display + "</span></span>"
+        : '<span class="lb-chart-value-text tone-' + tone + '">' + e.display + "</span>";
+      html += '<div class="lb-chart-col' + (rank <= 3 ? " lb-chart-col-top" : "") + '">' +
+        '<div class="lb-chart-topper">' + lbRankBadgeHtml(rank) + "</div>" +
+        '<div class="lb-chart-value">' + valueHtml + "</div>" +
+        '<div class="lb-chart-track"><div class="lb-chart-fill tone-' + tone + '" style="height:' + barPct + '%"></div></div>' +
+        '<div class="lb-chart-name">' + nameHtml + "</div>" +
+        "</div>";
     });
-    html += "</tbody></table></div>";
+    html += "</div></div>";
   }
   if (noData > 0) {
     html += '<p class="help-text" style="margin:12px 0 0;">' + noData + " student" + (noData === 1 ? "" : "s") + " with no " + escapeHtml(cat.label.toLowerCase()) + " record yet in this range" + (lbAgeBand !== "all" ? " and age group" : "") + " — not shown above.</p>";
