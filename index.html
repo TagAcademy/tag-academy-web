@@ -465,8 +465,11 @@ td.num, th.num { font-family: var(--font-mono); text-align: right; }
 .att-grid th:last-child, .att-grid td:last-child { border-right: none; }
 .att-grid thead th { background: var(--surface-2); padding: 6px 8px; text-align: center; }
 .att-grid th:first-child, .att-grid td.student-cell { width: 150px; }
-.att-grid th:not(:first-child), .att-grid td:not(.student-cell) { width: 100px; }
+.att-grid th:not(:first-child), .att-grid td:not(.student-cell) { width: 112px; }
 .att-grid td.num { font-size: 0.82rem; text-align: center; padding-left: 4px; padding-right: 4px; position: relative; }
+.att-glance-att { font-weight: 600; }
+.att-glance-sep { color: var(--muted); margin: 0 1px; }
+.att-glance-part { color: var(--gold); }
 .note-dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--gold); margin-left: 2px; vertical-align: super; }
 .att-grid thead .period-name { font-size: 0.66rem; font-weight: 800; color: var(--ink-2); text-transform: none; letter-spacing: 0; white-space: normal; line-height: 1.15; }
 .att-grid thead .sub { font-size: 0.6rem; color: var(--muted); font-weight: 600; }
@@ -1637,7 +1640,7 @@ function renderToday(root, session) {
 
 function renderTodaySummary(date, periods, roster) {
   let html = '<div class="card card-pad" style="margin-top:18px;"><div class="section-title"><span>Today at a glance</span></div>' +
-    '<p style="margin:2px 0 12px;font-size:0.82rem;color:var(--muted);">Every class entered so far for this day — click a class name to jump to it.</p>';
+    '<p style="margin:2px 0 12px;font-size:0.82rem;color:var(--muted);">Every class entered so far for this day — click a class name to jump to it. Each cell shows attendance / participation.</p>';
   html += '<div class="att-grid-scroll"><table class="att-grid"><thead><tr><th style="position:sticky;left:0;background:var(--surface-2);z-index:2;">Student</th>';
   periods.forEach((p) => {
     html += '<th class="' + (p === selectedPeriod ? "col-active" : "") + '"><button type="button" class="summary-period-btn" data-period="' + escapeHtml(p) + '">' + escapeHtml(p) + "</button></th>";
@@ -1649,9 +1652,12 @@ function renderTodaySummary(date, periods, roster) {
     periods.forEach((p) => {
       const pair = rec && rec.scores && rec.scores[p];
       const has = pair && pair[0] !== null && pair[0] !== undefined;
+      const hasPart = pair && pair[1] !== null && pair[1] !== undefined;
       const note = pair && pair[2];
       const by = pair && pair[3];
-      const text = has ? num2(pair[0]) : "—";
+      const text = has
+        ? '<span class="att-glance-att">' + num2(pair[0]) + '</span><span class="att-glance-sep">/</span><span class="att-glance-part">' + (hasPart ? num2(pair[1]) : "—") + "</span>"
+        : "—";
       html += '<td class="num' + (p === selectedPeriod ? " col-active" : "") + '"' + (has ? "" : ' style="color:var(--muted);"') +
         (note ? ' title="' + escapeHtml(note) + '"' : "") + ">" + text +
         (note ? ' <span class="note-dot" title="' + escapeHtml(note) + '"></span>' : "") +
@@ -1811,7 +1817,17 @@ function wireTodayGrid(root, teacherName) {
       rec.enteredBy = teacherName; rec.enteredAt = Date.now();
     });
     const res = await saveState(newState, { stashKey: "today:" + todayDate + ":" + selectedPeriod, stashData: draftForStash });
-    if (!res.ok && !res.local) { saveBtn.disabled = false; if (statusEl) statusEl.textContent = "Not saved — see message above."; }
+    if (res.ok || res.local) {
+      // Without this, the button stayed disabled and the status text stuck on "Saving…"
+      // until some unrelated click forced a re-render -- a real save had gone through, it
+      // just never told you. Re-rendering immediately shows the updated "x/y marked" count,
+      // the just-saved "marked by" initials, etc.
+      toast("Saved " + selectedPeriod + ".", "good");
+      renderAll();
+    } else {
+      saveBtn.disabled = false;
+      if (statusEl) statusEl.textContent = "Not saved — see message above.";
+    }
   });
 }
 
@@ -1923,7 +1939,8 @@ function renderLedger(root, session) {
     const newState = JSON.parse(JSON.stringify(state));
     newState.ledger.push({ id: uid("l"), date, studentId, type, amount, note, enteredBy: session.record.name, enteredAt: Date.now() });
     const res = await saveState(newState, { stashKey: "ledger:new", stashData: { date, studentId, type, amount, note } });
-    if (!res.ok && !res.local) submitBtn.disabled = false;
+    if (res.ok || res.local) { toast("Saved.", "good"); renderAll(); }
+    else { submitBtn.disabled = false; }
   });
 }
 
@@ -2170,9 +2187,14 @@ function renderAdminSchedule(root) {
   html += '<div class="field-row" style="align-items:flex-end;max-width:480px;">' +
     '<div class="field" style="flex:1;"><label for="np-name">New class name</label><input type="text" id="np-name" placeholder="e.g. Chavrusa"></div>' +
     '<div class="field" style="flex-shrink:0;"><button class="btn btn-ghost btn-sm" id="np-add" type="button">Add class</button></div></div>';
-  html += '<div class="table-wrap"><table><thead><tr><th style="min-width:150px;">Period</th>' + DAY_NAMES.map((d) => "<th>" + d.slice(0, 3) + "</th>").join("") + "<th></th></tr></thead><tbody>";
-  state.settings.periods.forEach((p) => {
-    html += '<tr><td><input type="text" class="period-name-input" data-original="' + escapeHtml(p) + '" value="' + escapeHtml(p) + '"></td>';
+  html += '<p class="help-text" style="margin-top:-6px;">The order below is the order classes appear in every dropdown (Today’s Class/period picker, reports, etc.) — use the arrows to reorder.</p>';
+  html += '<div class="table-wrap"><table><thead><tr><th style="width:70px;">Order</th><th style="min-width:150px;">Period</th>' + DAY_NAMES.map((d) => "<th>" + d.slice(0, 3) + "</th>").join("") + "<th></th></tr></thead><tbody>";
+  state.settings.periods.forEach((p, i) => {
+    html += '<tr><td style="white-space:nowrap;">' +
+      '<button class="btn btn-ghost btn-sm" data-move-period-up="' + escapeHtml(p) + '" type="button" title="Move up"' + (i === 0 ? " disabled" : "") + '>&uarr;</button> ' +
+      '<button class="btn btn-ghost btn-sm" data-move-period-down="' + escapeHtml(p) + '" type="button" title="Move down"' + (i === state.settings.periods.length - 1 ? " disabled" : "") + '>&darr;</button>' +
+      "</td>";
+    html += '<td><input type="text" class="period-name-input" data-original="' + escapeHtml(p) + '" value="' + escapeHtml(p) + '"></td>';
     DAY_NAMES.forEach((d) => {
       const checked = (state.settings.schedule[p] || []).includes(d);
       html += '<td style="text-align:center;"><input type="checkbox" data-period="' + escapeHtml(p) + '" data-day="' + d + '" ' + (checked ? "checked" : "") + "></td>";
@@ -2244,6 +2266,20 @@ function renderAdminSchedule(root) {
     const res = await saveState(newState);
     if (res.ok || res.local) { toast("Removed " + name + " from the schedule.", "good"); renderAll(); }
   }));
+  function movePeriod(name, delta) {
+    return async () => {
+      const newState = JSON.parse(JSON.stringify(state));
+      const arr = newState.settings.periods;
+      const i = arr.indexOf(name);
+      const j = i + delta;
+      if (i === -1 || j < 0 || j >= arr.length) return;
+      const tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+      const res = await saveState(newState);
+      if (res.ok || res.local) renderAll();
+    };
+  }
+  root.querySelectorAll("[data-move-period-up]").forEach((btn) => btn.addEventListener("click", movePeriod(btn.getAttribute("data-move-period-up"), -1)));
+  root.querySelectorAll("[data-move-period-down]").forEach((btn) => btn.addEventListener("click", movePeriod(btn.getAttribute("data-move-period-down"), 1)));
 }
 
 let bulkStaffResult = null;
