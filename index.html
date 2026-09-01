@@ -278,13 +278,17 @@ main.view {
   font-size: 0.85rem; overflow: hidden; white-space: nowrap;
 }
 .student-row-compact .src-name .student-link { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.student-row-compact .src-pills { flex: 0 0 auto; display: flex; gap: 8px; }
-.student-row-compact .src-pill-slot { display: flex; align-items: center; gap: 3px; }
-.student-row-compact .src-pill-tag { font-size: 0.6rem; color: var(--muted); font-weight: 700; }
-.student-row-compact .score-pill-wrap { gap: 4px; }
-.student-row-compact .score-pill-track { height: 20px; width: 42px; flex: none; }
-.student-row-compact .score-pill-wrap .score-input { width: 30px; padding: 2px; flex-shrink: 0; }
+/* Plain-text A/P values (not the draggable bar from Cards) -- this, not a narrower track,
+   is what actually keeps every row to one line: no slider is anywhere near as narrow as a
+   couple of digits. The real draggable inputs still exist off-screen (see .src-hidden-inputs
+   in the markup) purely so Save/Present/Fill-all keep working unchanged. */
+.student-row-compact .src-vals { flex: 0 0 auto; display: flex; align-items: center; gap: 3px; font-family: var(--font-mono); font-size: 0.82rem; }
+.student-row-compact .src-val-tag { font-size: 0.62rem; color: var(--muted); font-weight: 700; margin-left: 6px; }
+.student-row-compact .src-val-tag:first-child { margin-left: 0; }
+.student-row-compact .src-val { min-width: 2.4em; text-align: right; color: var(--ink); }
 .student-row-compact .src-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.student-row-compact .src-actions .note-toggle-btn { width: 26px; height: 26px; }
+.student-row-compact .src-actions .btn-sm { padding: 4px 9px; font-size: 0.74rem; }
 .student-row-compact .src-actions .btn { white-space: nowrap; }
 
 /* ===================== cards / surfaces ===================== */
@@ -1581,11 +1585,19 @@ function renderToday(root, session) {
       const note = pair[2] || "";
       html += '<div class="student-card student-row-compact" data-student="' + student.id + '">';
       html += '<span class="src-name">' + studentLink(student) + markedByBadge(pair) + "</span>";
-      html += '<span class="src-pills">' +
-        '<span class="src-pill-slot"><span class="src-pill-tag">A</span>' + scorePillHtml("att", pair[0], null, !canWrite) + "</span>" +
-        '<span class="src-pill-slot"><span class="src-pill-tag">P</span>' + scorePillHtml("part", pair[1], null, !canWrite, 'data-linked="' + (linked ? "1" : "0") + '"') + "</span>" +
+      // Plain text values (not the drag-to-set pill bar from Cards view) -- this is what
+      // keeps every row to one line even on a phone. The real, draggable score inputs still
+      // exist just below, visually hidden, so Save/Present/Fill-all all keep working exactly
+      // as they do in Cards view; only the on-screen control differs.
+      html += '<span class="src-vals">' +
+        '<span class="src-val-tag">A</span><span class="src-val" data-slot="att">' + (pair[0] === null || pair[0] === undefined ? "—" : num2(pair[0])) + "</span>" +
+        '<span class="src-val-tag">P</span><span class="src-val" data-slot="part">' + (pair[1] === null || pair[1] === undefined ? "—" : num2(pair[1])) + "</span>" +
         "</span>";
       html += '<span class="src-actions">' + notePopoverHtml(note, !canWrite) + (canWrite ? '<button class="btn btn-ghost btn-sm row-present" type="button">Present</button>' : "") + "</span>";
+      html += '<span class="src-hidden-inputs" style="display:none;">' +
+        scorePillHtml("att", pair[0], null, !canWrite) +
+        scorePillHtml("part", pair[1], null, !canWrite, 'data-linked="' + (linked ? "1" : "0") + '"') +
+        "</span>";
       html += "</div>";
     });
     html += "</div>";
@@ -1732,20 +1744,30 @@ function wireTodayGrid(root, teacherName) {
   body.querySelectorAll(".student-card").forEach((card) => {
     const attInp = card.querySelector('.score-input[data-slot="att"]');
     const partInp = card.querySelector('.score-input[data-slot="part"]');
+    // Compact view shows plain-text values (.src-val) instead of the draggable bar, so
+    // whatever changes the real (hidden there) inputs needs to keep that text in sync.
+    const updateSrcVals = () => {
+      const attValEl = card.querySelector('.src-val[data-slot="att"]');
+      const partValEl = card.querySelector('.src-val[data-slot="part"]');
+      if (attValEl && attInp) attValEl.textContent = attInp.value === "" ? "—" : num2(attInp.value);
+      if (partValEl && partInp) partValEl.textContent = partInp.value === "" ? "—" : num2(partInp.value);
+    };
     if (attInp && partInp) {
       const syncPart = () => {
         if (partInp.dataset.linked !== "0") { partInp.value = attInp.value; refreshPillForInput(partInp); }
         refreshPillForInput(attInp);
+        updateSrcVals();
       };
       attInp.addEventListener("input", syncPart);
       attInp.addEventListener("blur", () => { const v = clampScore(attInp.value); attInp.value = v === null ? "" : v; syncPart(); });
-      partInp.addEventListener("input", () => { partInp.dataset.linked = "0"; refreshPillForInput(partInp); });
-      partInp.addEventListener("blur", () => { const v = clampScore(partInp.value); partInp.value = v === null ? "" : v; refreshPillForInput(partInp); });
+      partInp.addEventListener("input", () => { partInp.dataset.linked = "0"; refreshPillForInput(partInp); updateSrcVals(); });
+      partInp.addEventListener("blur", () => { const v = clampScore(partInp.value); partInp.value = v === null ? "" : v; refreshPillForInput(partInp); updateSrcVals(); });
     }
     const presentBtn = card.querySelector(".row-present");
     if (presentBtn) presentBtn.addEventListener("click", () => {
       if (attInp) { attInp.value = "1"; refreshPillForInput(attInp); }
       if (partInp) { partInp.value = "1"; partInp.dataset.linked = "1"; refreshPillForInput(partInp); }
+      updateSrcVals();
     });
   });
   const fillAllBtn = document.getElementById("fill-all");
@@ -2325,12 +2347,25 @@ let bulkStudentResult = null;
 let showBulkStudentForm = false;
 let showArchivedStudents = false;
 let confirmDeleteStudentId = null;
+let editingStudentId = null;
 function studentRow(s, archived) {
+  if (editingStudentId === s.id) {
+    return "<tr>" +
+      '<td><input type="text" id="edit-last-' + s.id + '" value="' + escapeHtml(s.last) + '" style="width:100%;"></td>' +
+      '<td><input type="text" id="edit-first-' + s.id + '" value="' + escapeHtml(s.first) + '" style="width:100%;"></td>' +
+      '<td class="num">' + escapeHtml(s.username || "—") + '</td><td class="num">' + escapeHtml(s.password || "—") + "</td><td>" +
+      (archived ? '<span class="pill pill-muted">Archived</span>' : '<span class="pill pill-good">Active</span>') +
+      '</td><td style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
+      '<button class="btn btn-primary btn-sm" data-save-student="' + s.id + '">Save</button>' +
+      '<button class="btn btn-ghost btn-sm" data-cancel-edit-student="' + s.id + '">Cancel</button>' +
+      "</td></tr>";
+  }
   const actions = confirmDeleteStudentId === s.id
     ? '<span style="color:var(--warn);font-weight:600;">Delete permanently?</span> ' +
       '<button class="btn btn-danger btn-sm" data-confirm-delete-student="' + s.id + '">Yes, delete everything</button>' +
       '<button class="btn btn-ghost btn-sm" data-cancel-delete-student="' + s.id + '">Cancel</button>'
-    : '<button class="btn btn-ghost btn-sm" data-toggle="' + s.id + '">' + (archived ? "Unarchive" : "Archive") + '</button>' +
+    : '<button class="btn btn-ghost btn-sm" data-edit-student="' + s.id + '">Edit</button>' +
+      '<button class="btn btn-ghost btn-sm" data-toggle="' + s.id + '">' + (archived ? "Unarchive" : "Archive") + '</button>' +
       '<button class="btn btn-ghost btn-sm" data-reset-student="' + s.id + '">Reset pw</button>' +
       '<button class="btn btn-ghost btn-sm" data-delete-student="' + s.id + '" style="color:var(--warn);">Delete</button>';
   return "<tr><td>" + escapeHtml(s.last) + "</td><td>" + escapeHtml(s.first) + '</td><td class="num">' + escapeHtml(s.username || "—") + '</td><td class="num">' + escapeHtml(s.password || "—") + "</td><td>" +
@@ -2424,6 +2459,30 @@ function renderAdminStudents(root) {
     rec.password = np;
     const res = await saveState(newState);
     if (res.ok || res.local) { toast("New password for " + rec.first + " " + rec.last + ": " + np, "good"); renderAll(); }
+  }));
+  root.querySelectorAll("[data-edit-student]").forEach((btn) => btn.addEventListener("click", () => {
+    editingStudentId = btn.getAttribute("data-edit-student");
+    confirmDeleteStudentId = null;
+    renderAdminStudents(root);
+  }));
+  root.querySelectorAll("[data-cancel-edit-student]").forEach((btn) => btn.addEventListener("click", () => {
+    editingStudentId = null;
+    renderAdminStudents(root);
+  }));
+  root.querySelectorAll("[data-save-student]").forEach((btn) => btn.addEventListener("click", async () => {
+    const id = btn.getAttribute("data-save-student");
+    const lastInput = document.getElementById("edit-last-" + id);
+    const firstInput = document.getElementById("edit-first-" + id);
+    const last = lastInput ? lastInput.value.trim() : "";
+    const first = firstInput ? firstInput.value.trim() : "";
+    if (!last || !first) { toast("Enter both a first and last name.", "warn"); return; }
+    const newState = JSON.parse(JSON.stringify(state));
+    const rec = newState.roster.find((s) => s.id === id);
+    if (rec) { rec.last = last; rec.first = first; }
+    editingStudentId = null;
+    const res = await saveState(newState);
+    if (res.ok || res.local) { toast("Updated name to " + first + " " + last + ".", "good"); renderAll(); }
+    else { editingStudentId = id; renderAdminStudents(root); }
   }));
   root.querySelectorAll("[data-delete-student]").forEach((btn) => btn.addEventListener("click", () => {
     confirmDeleteStudentId = btn.getAttribute("data-delete-student");
