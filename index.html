@@ -209,6 +209,94 @@ main.view {
 .page-head p { margin: 4px 0 0; max-width: 62ch; }
 .page-head .actions { display: flex; gap: 8px; flex-shrink: 0; }
 
+/* ===================== Today page: date/hebrew-date/parsha controls =====================
+   Gregorian + Hebrew date sit side by side; Parsha always gets its own row underneath
+   (rather than wrapping to the far right of a single flex row) so nothing needs a
+   horizontal scroll to reach on a phone. */
+.today-head-controls { margin: 14px 0 18px; display: flex; flex-direction: column; gap: 10px; max-width: 560px; }
+.thc-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.thc-row > .field { flex: 1 1 150px; min-width: 130px; }
+.today-head-controls > .field { width: 100%; }
+.hcal-field { position: relative; }
+.hcal-trigger {
+  width: 100%; text-align: left; padding: 9px 11px; border-radius: var(--radius-sm);
+  border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink);
+  font-size: 0.85rem; cursor: pointer; font-family: inherit;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.hcal-trigger:hover { border-color: var(--brand); }
+.hcal-pop {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 15; width: 258px; max-width: calc(100vw - 40px);
+  background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 10px;
+}
+.hcal-pop-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 8px; }
+.hcal-pop-title { font-weight: 700; font-size: 0.82rem; }
+.hcal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.hcal-dow { text-align: center; font-size: 0.6rem; color: var(--muted); font-weight: 700; text-transform: uppercase; padding-bottom: 2px; }
+.hcal-cell { aspect-ratio: 1; }
+.hcal-day {
+  width: 100%; height: 100%; border: 1px solid transparent; border-radius: var(--radius-sm);
+  background: var(--surface-2); font-family: var(--font-mono); font-size: 0.76rem; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; color: var(--ink); padding: 0;
+}
+.hcal-day:hover { border-color: var(--brand); }
+.hcal-day.hcal-today { border-color: var(--gold); }
+.hcal-day.hcal-sel { background: var(--brand); color: #fff; }
+.hcal-blank { visibility: hidden; }
+
+/* ===================== Today page: view toggle + alternate list views ===================== */
+.view-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+.view-toggle-hint { font-size: 0.78rem; color: var(--muted); }
+.view-toggle { display: inline-flex; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); overflow: hidden; }
+.today-view-btn { padding: 6px 12px; border: none; background: var(--surface); color: var(--muted); font-size: 0.78rem; font-weight: 600; cursor: pointer; border-right: 1px solid var(--line-strong); }
+.today-view-btn:last-child { border-right: none; }
+.today-view-btn.active { background: var(--brand-soft); color: var(--brand-ink); }
+.today-view-btn:hover { color: var(--brand); }
+
+.marked-by {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  min-width: 20px; height: 20px; padding: 0 4px; border-radius: 999px; background: var(--surface-2);
+  border: 1px solid var(--line); color: var(--muted); font-size: 0.62rem; font-weight: 700;
+  letter-spacing: 0.02em; font-family: var(--font-mono);
+}
+.sc-head .marked-by { margin-left: 6px; }
+.marked-by-sm { min-width: 16px; height: 16px; font-size: 0.58rem; vertical-align: middle; }
+
+/* Compact rows: same score-pill controls as Cards, laid out in a single dense line. */
+.student-rows { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.student-row-compact {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px; flex-direction: row;
+}
+.student-row-compact .src-name { flex: 0 0 128px; min-width: 0; display: flex; align-items: center; gap: 6px; font-size: 0.86rem; }
+.student-row-compact .src-name .student-link { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.student-row-compact .src-pills { flex: 1; min-width: 0; display: flex; gap: 10px; }
+.student-row-compact .src-pills .score-pill-row { flex: 1; min-width: 70px; gap: 3px; }
+.student-row-compact .score-pill-track { height: 22px; }
+.student-row-compact .score-pill-wrap .score-input { width: 38px; }
+.student-row-compact .src-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+
+/* Checklist: maximum density, name chips colored by whether they're marked yet, meant
+   to answer "who hasn't been marked" at a glance without scrolling. */
+.student-checklist { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.check-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px; border-radius: 999px;
+  border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--ink);
+  font-size: 0.82rem; font-weight: 600; cursor: pointer; position: relative;
+}
+.check-chip:disabled { cursor: default; opacity: 0.75; }
+.check-chip .check-val { font-family: var(--font-mono); font-size: 0.74rem; color: var(--muted); }
+.check-chip .check-val.check-dash { color: var(--muted); }
+.check-chip.check-unmarked { border-style: dashed; }
+.check-chip.check-good { background: var(--good-soft); border-color: var(--good); color: var(--good); }
+.check-chip.check-good .check-val { color: var(--good); }
+.check-chip.check-caution { background: var(--caution-soft); border-color: var(--caution); color: var(--caution); }
+.check-chip.check-caution .check-val { color: var(--caution); }
+.check-chip.check-warn { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
+.check-chip.check-warn .check-val { color: var(--warn); }
+.check-chip .note-dot { position: static; width: 6px; height: 6px; border: none; }
+.check-chip .marked-by { margin-left: 2px; }
+
 /* ===================== cards / surfaces ===================== */
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
 .card-pad { padding: 20px 22px; }
@@ -478,10 +566,26 @@ td.num, th.num { font-family: var(--font-mono); text-align: right; }
   /* The student-grid's own minmax() sizing already collapses to a single
      column on phone widths, so cards get the full row width — no per-column
      squeezing needed the way the old table required. */
+  /* Hebrew-date popover: anchoring it under its narrow trigger button would push it past
+     the right edge of a phone screen, so on phone widths it drops into normal flow (full
+     width, below the date row) instead of floating. */
+  .hcal-pop { position: static; width: 100%; max-width: none; margin-top: 8px; }
+  .student-row-compact { flex-wrap: wrap; }
+  .student-row-compact .src-name { flex: 1 1 100%; }
+  .student-row-compact .src-pills { flex: 1 1 100%; }
 }
 @media (max-width: 360px) {
   main.view { padding: 20px 10px 50px; }
   .student-card { padding: 12px; gap: 10px; }
+}
+
+/* Report card printing: hitting Print on a student's report card should print
+   just that card, not the sidebar, nav, or the rest of the page around it. */
+@media print {
+  body * { visibility: hidden; }
+  .report-card-print, .report-card-print * { visibility: visible; }
+  .report-card-print { position: absolute; left: 0; top: 0; width: 100%; box-shadow: none; border: none; }
+  .report-card-print .no-print { display: none !important; }
 }
 
 </style>
@@ -538,6 +642,7 @@ const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Frid
 const TX_TYPES = ["Manual Grant", "Spent/Redeemed", "Transfer Out", "Transfer In"];
 const SESSION_KEY = "tagacademy_session_v2";
 const LAST_DATE_KEY = "tagacademy_last_date_v1";
+const TODAY_VIEW_KEY = "tagacademy_today_view_v1";
 
 /* ---------- tiny utilities ---------- */
 function uid(prefix) { return prefix + "_" + Math.random().toString(36).slice(2, 9); }
@@ -584,6 +689,22 @@ function parshaFor(dateStr) {
     const r = sedra.lookup(hd);
     return r.chag ? "" : "Parshas " + r.parsha.join("-");
   } catch (e) { return ""; }
+}
+/* Just the day numeral out of a full Hebrew date render — renderGematriya() always puts
+   it before the first space (e.g. "י״ח אלול תשפ״ו" -> "י״ח"), so no need to hand-roll a
+   separate gematriya table for the calendar-grid picker below. */
+function hebrewDayNumeral(dateStr) {
+  const full = hebrewDateFor(dateStr);
+  return full ? full.split(" ")[0] : "";
+}
+/* Short initials for attributing an attendance entry to the staff member who marked it
+   (e.g. "Chaim Friedman" -> "CF", "Admin" -> "AD"). */
+function initialsFor(name) {
+  if (!name) return "";
+  const parts = String(name).trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 function pct(n) { return (n === null || n === undefined || isNaN(n)) ? "—" : (n * 100).toFixed(1) + "%"; }
 /* Percentage color-coding: 90%+ good, 75-89% caution, below 75% needs attention. */
@@ -1302,6 +1423,9 @@ function renderLogin(root) {
    ================================================================ */
 let todayDate = (localStorage.getItem(LAST_DATE_KEY) || todayISO());
 let selectedPeriod = "";
+let showAddExtraPeriod = false;
+let showHebrewCal = false;
+let todayView = (function () { try { return localStorage.getItem(TODAY_VIEW_KEY) || "cards"; } catch (e) { return "cards"; } })();
 
 function periodMarkedCount(date, period, roster) {
   return roster.filter((s) => {
@@ -1321,38 +1445,56 @@ function renderToday(root, session) {
   const hdayOptions = hebrewDayOptionsFor(todayDate);
   const parshaOptions = parshaOptionsFor(todayDate);
   const todayWeekSunday = weekRangeFor(todayDate).from;
+  const monthRange = hebrewMonthRangeFor(todayDate);
+  const hebLabel = hebrewDateFor(todayDate);
+  const todayGregISO = todayISO();
 
   let html = '<div class="page-head"><div><span class="eyebrow">Class by class</span><h1>Attendance &amp; Participation</h1>' +
-    '<p>Pick a class below, mark each student, and save — then move to the next class as the day goes on.</p></div>' +
-    '<div class="actions" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;">' +
-    '<div class="field" style="min-width:150px;"><label for="today-date">Date</label><input type="date" id="today-date" value="' + todayDate + '"></div>' +
-    (hdayOptions.length ? '<div class="field" style="min-width:220px;"><label for="today-hdate">Hebrew date</label><select id="today-hdate">' +
-      hdayOptions.map((o) => '<option value="' + o.date + '"' + (o.date === todayDate ? " selected" : "") + '>' + escapeHtml(o.label) + "</option>").join("") +
-      "</select></div>" +
-      '<div class="field" style="flex-shrink:0;"><label>&nbsp;</label><div style="display:flex;gap:4px;">' +
-      '<button class="btn btn-ghost btn-sm" id="hmonth-prev" type="button" title="Previous Hebrew month">&larr;</button>' +
-      '<button class="btn btn-ghost btn-sm" id="hmonth-next" type="button" title="Next Hebrew month">&rarr;</button></div></div>' : "") +
-    (parshaOptions.length ? '<div class="field" style="min-width:220px;"><label for="today-parsha">Parsha</label><select id="today-parsha">' +
+    '<p>Pick a class below, mark each student, and save — then move to the next class as the day goes on.</p></div></div>';
+
+  html += '<div class="today-head-controls">';
+  html += '<div class="thc-row">';
+  html += '<div class="field" style="margin-bottom:0;"><label for="today-date">Date</label><input type="date" id="today-date" value="' + todayDate + '"></div>';
+  if (hdayOptions.length) {
+    html += '<div class="field hcal-field" style="margin-bottom:0;"><label for="hcal-trigger">Hebrew date</label>' +
+      '<button type="button" class="hcal-trigger" id="hcal-trigger">' + escapeHtml(hebLabel || "Pick a date") + "</button>";
+    if (showHebrewCal) {
+      const firstDow = jsDateFor(hdayOptions[0].date).getDay();
+      html += '<div class="hcal-pop" id="hcal-pop">' +
+        '<div class="hcal-pop-head">' +
+        '<button class="btn btn-ghost btn-sm" id="hmonth-prev" type="button" title="Previous Hebrew month">&larr;</button>' +
+        '<span class="hcal-pop-title">' + escapeHtml(monthRange ? monthRange.monthName + " " + monthRange.year : "") + "</span>" +
+        '<button class="btn btn-ghost btn-sm" id="hmonth-next" type="button" title="Next Hebrew month">&rarr;</button>' +
+        "</div>" +
+        '<div class="hcal-grid">' +
+        DAY_NAMES.map((n) => '<div class="hcal-dow">' + escapeHtml(n.slice(0, 2)) + "</div>").join("") +
+        Array(firstDow).fill('<div class="hcal-cell hcal-blank"></div>').join("") +
+        hdayOptions.map((o) => {
+          const dayNum = hebrewDayNumeral(o.date) || "?";
+          const isSel = o.date === todayDate;
+          const isToday = o.date === todayGregISO;
+          return '<button type="button" class="hcal-cell hcal-day' + (isSel ? " hcal-sel" : "") + (isToday ? " hcal-today" : "") + '" data-hcal-date="' + o.date + '" title="' + escapeHtml(fmtDateShort(o.date)) + '">' + escapeHtml(dayNum) + "</button>";
+        }).join("") +
+        "</div></div>";
+    }
+    html += "</div>";
+  }
+  html += "</div>"; // .thc-row
+  if (parshaOptions.length) {
+    html += '<div class="field" style="margin-bottom:0;"><label for="today-parsha">Parsha</label><select id="today-parsha">' +
       '<option value="">— pick a parsha —</option>' +
       parshaOptions.map((o) => '<option value="' + o.date + '"' + (o.date === todayWeekSunday ? " selected" : "") + '>' + escapeHtml(o.label) + "</option>").join("") +
-      "</select></div>" : "") +
-    "</div></div>";
+      "</select></div>";
+  }
+  html += "</div>"; // .today-head-controls
 
   if (!canWrite) html += '<div class="banner banner-warn">Read-only view — changes here won’t be saved.</div>';
   if (restored) html += '<div class="banner banner-warn">Your last save may not have gone through (someone else saved first). We’ve restored what you typed below — check it and save again.</div>';
 
-  const heb = hebrewDateFor(todayDate);
-  const parsha = parshaFor(todayDate);
-  html += '<div class="card card-pad"><div class="section-title" style="align-items:flex-start;">' +
-    '<div>' +
-    '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-family:var(--font-display);font-weight:800;font-size:1.3rem;color:var(--ink);">' +
-    '<span>' + escapeHtml(heb || fmtDateLong(todayDate)) + '</span>' +
-    (parsha ? '<span class="pill pill-gold">' + escapeHtml(parsha) + '</span>' : "") +
-    '</div>' +
-    (heb ? '<div style="margin-top:4px;font-size:0.86rem;color:var(--muted);font-weight:400;">' + fmtDateLong(todayDate) + '</div>' : "") +
-    '</div></div></div>';
-
   const extraPeriodHtml = canWrite ? (() => {
+    if (!showAddExtraPeriod) {
+      return '<div style="margin-top:10px;"><button class="btn btn-ghost btn-sm" id="extra-period-open" type="button">+ Add a class just for today</button></div>';
+    }
     const otherPeriods = state.settings.periods.filter((p) => !periods.includes(p));
     return '<div class="field-row" style="margin-top:10px;align-items:flex-end;">' +
       '<div class="field" style="min-width:220px;"><label for="extra-period-select">Add a class just for today</label><select id="extra-period-select">' +
@@ -1361,17 +1503,19 @@ function renderToday(root, session) {
       '<option value="__new__">New one-off class…</option>' +
       "</select></div>" +
       '<div class="field" id="extra-period-new-wrap" style="display:none;min-width:200px;"><label for="extra-period-new">Class name</label><input type="text" id="extra-period-new" placeholder="e.g. Guest Speaker"></div>' +
-      '<div class="field" style="flex-shrink:0;"><button class="btn btn-ghost btn-sm" id="extra-period-add" type="button">Add</button></div>' +
+      '<div class="field" style="flex-shrink:0;display:flex;gap:6px;">' +
+      '<button class="btn btn-ghost btn-sm" id="extra-period-add" type="button">Add</button>' +
+      '<button class="btn btn-ghost btn-sm" id="extra-period-cancel" type="button">Cancel</button></div>' +
       "</div>" +
       '<p class="help-text" style="margin-top:4px;">This adds the class for ' + escapeHtml(fmtDateShort(todayDate)) + ' only — it won\'t change the regular weekly schedule.</p>';
   })() : "";
 
   if (periods.length === 0) {
-    html += '<div class="empty-state">No periods are scheduled on ' + dayNameFor(todayDate) + '.</div>' + extraPeriodHtml + '</div>';
+    html += '<div class="empty-state">No periods are scheduled on ' + dayNameFor(todayDate) + '.</div>' + extraPeriodHtml;
     root.innerHTML = html; wireTodayHeader(root); wireExtraPeriod(root); return;
   }
   if (roster.length === 0) {
-    html += '<div class="empty-state">No active students on the roster yet — ask an admin to add them.</div></div>';
+    html += '<div class="empty-state">No active students on the roster yet — ask an admin to add them.</div>';
     root.innerHTML = html; wireTodayHeader(root); return;
   }
 
@@ -1393,26 +1537,82 @@ function renderToday(root, session) {
 
   html += extraPeriodHtml;
 
-  html += (canWrite ? '<div style="margin-top:10px;"><button class="btn btn-ghost btn-sm" id="fill-all">Mark whole class present</button></div>' : "");
+  html += (canWrite && todayView !== "checklist" ? '<div style="margin-top:10px;"><button class="btn btn-ghost btn-sm" id="fill-all">Mark whole class present</button></div>' : "");
 
-  html += '<div class="student-grid" id="period-entry-body">';
-  roster.forEach((student) => {
+  const VIEW_LABELS = { cards: "Cards", compact: "Compact", checklist: "Checklist" };
+  html += '<div class="view-toggle-row"><span class="view-toggle-hint">' +
+    (todayView === "checklist" ? "Tap a name to mark present at a glance." : "View") + "</span>" +
+    '<div class="view-toggle" role="group" aria-label="Student list view">' +
+    Object.keys(VIEW_LABELS).map((v) => '<button type="button" class="today-view-btn' + (todayView === v ? " active" : "") + '" data-view="' + v + '">' + VIEW_LABELS[v] + "</button>").join("") +
+    "</div></div>";
+
+  function pairFor(student) {
     const existing = attendanceRecord(todayDate, student.id);
     const draftPair = restored && restored[student.id];
-    const pair = draftPair || (existing && existing.scores && existing.scores[selectedPeriod]) || [null, null];
-    // Participation starts "linked" to Attendance (whatever mark Attendance gets, Participation
-    // mirrors it) unless the two already differ, which means someone deliberately set Participation
-    // separately — in that case leave the link broken so we don't clobber their override.
-    const linked = !(pair[0] !== null && pair[0] !== undefined && pair[1] !== null && pair[1] !== undefined && pair[0] !== pair[1]);
-    const note = pair[2] || "";
-    html += '<div class="student-card" data-student="' + student.id + '">';
-    html += '<div class="sc-head">' + studentLink(student) + '<div class="sc-head-actions">' + notePopoverHtml(note, !canWrite) + (canWrite ? '<button class="btn btn-ghost btn-sm row-present" type="button">Present</button>' : "") + "</div></div>";
-    html += scorePillHtml("att", pair[0], "Attendance", !canWrite);
-    html += scorePillHtml("part", pair[1], "Participation", !canWrite, 'data-linked="' + (linked ? "1" : "0") + '"');
+    return draftPair || (existing && existing.scores && existing.scores[selectedPeriod]) || [null, null];
+  }
+  function markedByBadge(pair) {
+    const by = pair[3];
+    if (!by) return "";
+    return '<span class="marked-by" title="Marked by ' + escapeHtml(by) + '">' + escapeHtml(initialsFor(by)) + "</span>";
+  }
+
+  if (todayView === "compact") {
+    html += '<div class="student-rows" id="period-entry-body">';
+    roster.forEach((student) => {
+      const pair = pairFor(student);
+      const linked = !(pair[0] !== null && pair[0] !== undefined && pair[1] !== null && pair[1] !== undefined && pair[0] !== pair[1]);
+      const note = pair[2] || "";
+      html += '<div class="student-card student-row-compact" data-student="' + student.id + '">';
+      html += '<div class="src-name">' + studentLink(student) + markedByBadge(pair) + "</div>";
+      html += '<div class="src-pills">' +
+        scorePillHtml("att", pair[0], "Att", !canWrite) +
+        scorePillHtml("part", pair[1], "Part", !canWrite, 'data-linked="' + (linked ? "1" : "0") + '"') +
+        "</div>";
+      html += '<div class="src-actions">' + notePopoverHtml(note, !canWrite) + (canWrite ? '<button class="btn btn-ghost btn-sm row-present" type="button">Present</button>' : "") + "</div>";
+      html += "</div>";
+    });
     html += "</div>";
-  });
-  html += "</div>";
-  html += '<div class="legend-note"><span><span class="sw" style="background:var(--brand)"></span>Tap or slide the bar for a quick mark, or type an exact decimal for partial credit. Blank = didn’t run. Participation copies Attendance until you edit it.</span></div>';
+    html += '<div class="legend-note"><span><span class="sw" style="background:var(--brand)"></span>Tap or slide either bar for a quick mark. Blank = didn’t run.</span></div>';
+  } else if (todayView === "checklist") {
+    html += '<div class="student-checklist" id="period-entry-body">';
+    roster.forEach((student) => {
+      const pair = pairFor(student);
+      const linked = !(pair[0] !== null && pair[0] !== undefined && pair[1] !== null && pair[1] !== undefined && pair[0] !== pair[1]);
+      const note = pair[2] || "";
+      const has = pair[0] !== null && pair[0] !== undefined;
+      const tone = has ? pctTone(pair[0]) : "";
+      html += '<button type="button" class="check-chip' + (tone ? " check-" + tone : " check-unmarked") + '" data-student="' + student.id + '"' + (canWrite ? "" : " disabled") + '>' +
+        '<span class="check-name">' + escapeHtml(fullName(student)) + "</span>" +
+        (has ? '<span class="check-val">' + num2(pair[0]) + "</span>" : '<span class="check-val check-dash">—</span>') +
+        (note ? '<span class="note-dot" title="' + escapeHtml(note) + '"></span>' : "") +
+        markedByBadge(pair) +
+        "</button>" +
+        // hidden inputs so the existing save logic (which reads .score-input elements
+        // inside each .student-card) keeps working unchanged for this view too.
+        '<span class="student-card hidden-inputs" data-student="' + student.id + '" style="display:none;">' +
+        scorePillHtml("att", pair[0], "Attendance", !canWrite) +
+        scorePillHtml("part", pair[1], "Participation", !canWrite, 'data-linked="' + (linked ? "1" : "0") + '"') +
+        notePopoverHtml(note, !canWrite) +
+        "</span>";
+    });
+    html += "</div>";
+    html += '<div class="legend-note"><span><span class="sw" style="background:var(--good)"></span>Marked · <span class="sw" style="background:var(--surface-2);border:1px solid var(--line-strong);"></span>Not marked yet — tap a name to mark present. Numbers and notes stay editable in Cards or Compact view.</span></div>';
+  } else {
+    html += '<div class="student-grid" id="period-entry-body">';
+    roster.forEach((student) => {
+      const pair = pairFor(student);
+      const linked = !(pair[0] !== null && pair[0] !== undefined && pair[1] !== null && pair[1] !== undefined && pair[0] !== pair[1]);
+      const note = pair[2] || "";
+      html += '<div class="student-card" data-student="' + student.id + '">';
+      html += '<div class="sc-head">' + studentLink(student) + markedByBadge(pair) + '<div class="sc-head-actions">' + notePopoverHtml(note, !canWrite) + (canWrite ? '<button class="btn btn-ghost btn-sm row-present" type="button">Present</button>' : "") + "</div></div>";
+      html += scorePillHtml("att", pair[0], "Attendance", !canWrite);
+      html += scorePillHtml("part", pair[1], "Participation", !canWrite, 'data-linked="' + (linked ? "1" : "0") + '"');
+      html += "</div>";
+    });
+    html += "</div>";
+    html += '<div class="legend-note"><span><span class="sw" style="background:var(--brand)"></span>Tap or slide the bar for a quick mark, or type an exact decimal for partial credit. Blank = didn’t run. Participation copies Attendance until you edit it.</span></div>';
+  }
   html += '<div style="margin-top:16px;display:flex;gap:10px;align-items:center;">' +
     '<button class="btn btn-primary" id="save-today"' + (canWrite ? "" : " disabled") + '>Save ' + escapeHtml(selectedPeriod) + "</button>" +
     '<span id="today-save-status" style="font-size:0.8rem;color:var(--muted);"></span></div>';
@@ -1442,9 +1642,13 @@ function renderTodaySummary(date, periods, roster) {
       const pair = rec && rec.scores && rec.scores[p];
       const has = pair && pair[0] !== null && pair[0] !== undefined;
       const note = pair && pair[2];
+      const by = pair && pair[3];
       const text = has ? num2(pair[0]) : "—";
       html += '<td class="num' + (p === selectedPeriod ? " col-active" : "") + '"' + (has ? "" : ' style="color:var(--muted);"') +
-        (note ? ' title="' + escapeHtml(note) + '"' : "") + ">" + text + (note ? ' <span class="note-dot" title="' + escapeHtml(note) + '"></span>' : "") + "</td>";
+        (note ? ' title="' + escapeHtml(note) + '"' : "") + ">" + text +
+        (note ? ' <span class="note-dot" title="' + escapeHtml(note) + '"></span>' : "") +
+        (by ? ' <span class="marked-by marked-by-sm" title="Marked by ' + escapeHtml(by) + '">' + escapeHtml(initialsFor(by)) + "</span>" : "") +
+        "</td>";
     });
     html += "</tr>";
   });
@@ -1454,15 +1658,29 @@ function renderTodaySummary(date, periods, roster) {
 
 function wireTodayHeader(root) {
   const dateInput = document.getElementById("today-date");
-  if (dateInput) dateInput.addEventListener("change", () => { todayDate = dateInput.value; localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
-  const hdateSel = document.getElementById("today-hdate");
-  if (hdateSel) hdateSel.addEventListener("change", () => { if (hdateSel.value) { todayDate = hdateSel.value; localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); } });
+  if (dateInput) dateInput.addEventListener("change", () => { todayDate = dateInput.value; showAddExtraPeriod = false; showHebrewCal = false; localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
+  const hcalTrigger = document.getElementById("hcal-trigger");
+  if (hcalTrigger) hcalTrigger.addEventListener("click", () => { showHebrewCal = !showHebrewCal; renderAll(); });
+  root.querySelectorAll(".hcal-day").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      todayDate = btn.getAttribute("data-hcal-date");
+      showAddExtraPeriod = false; showHebrewCal = false;
+      localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll();
+    });
+  });
   const hmonthPrev = document.getElementById("hmonth-prev");
-  if (hmonthPrev) hmonthPrev.addEventListener("click", () => { todayDate = shiftHebrewMonth(todayDate, -1); localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
+  if (hmonthPrev) hmonthPrev.addEventListener("click", () => { todayDate = shiftHebrewMonth(todayDate, -1); showAddExtraPeriod = false; localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
   const hmonthNext = document.getElementById("hmonth-next");
-  if (hmonthNext) hmonthNext.addEventListener("click", () => { todayDate = shiftHebrewMonth(todayDate, 1); localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
+  if (hmonthNext) hmonthNext.addEventListener("click", () => { todayDate = shiftHebrewMonth(todayDate, 1); showAddExtraPeriod = false; localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
   const parshaSel = document.getElementById("today-parsha");
-  if (parshaSel) parshaSel.addEventListener("change", () => { if (parshaSel.value) { todayDate = parshaSel.value; localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); } });
+  if (parshaSel) parshaSel.addEventListener("change", () => { if (parshaSel.value) { todayDate = parshaSel.value; showAddExtraPeriod = false; showHebrewCal = false; localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); } });
+  root.querySelectorAll(".today-view-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      todayView = btn.getAttribute("data-view");
+      try { localStorage.setItem(TODAY_VIEW_KEY, todayView); } catch (e) {}
+      renderAll();
+    });
+  });
 }
 function wirePeriodSelect(root) {
   const sel = document.getElementById("period-select");
@@ -1472,6 +1690,10 @@ function wirePeriodSelect(root) {
   });
 }
 function wireExtraPeriod(root) {
+  const openBtn = document.getElementById("extra-period-open");
+  if (openBtn) openBtn.addEventListener("click", () => { showAddExtraPeriod = true; renderAll(); });
+  const cancelBtn = document.getElementById("extra-period-cancel");
+  if (cancelBtn) cancelBtn.addEventListener("click", () => { showAddExtraPeriod = false; renderAll(); });
   const sel = document.getElementById("extra-period-select");
   const newWrap = document.getElementById("extra-period-new-wrap");
   if (sel) sel.addEventListener("change", () => {
@@ -1497,7 +1719,7 @@ function wireExtraPeriod(root) {
     if (!newState.settings.extraPeriods[todayDate]) newState.settings.extraPeriods[todayDate] = [];
     if (!newState.settings.extraPeriods[todayDate].includes(name)) newState.settings.extraPeriods[todayDate].push(name);
     const res = await saveState(newState);
-    if (res.ok || res.local) { selectedPeriod = name; toast("Added " + name + " for today.", "good"); renderAll(); }
+    if (res.ok || res.local) { selectedPeriod = name; showAddExtraPeriod = false; toast("Added " + name + " for today.", "good"); renderAll(); }
   });
   const removeBtn = document.getElementById("remove-extra-period");
   if (removeBtn) removeBtn.addEventListener("click", async () => {
@@ -1534,6 +1756,24 @@ function wireTodayGrid(root, teacherName) {
       if (partInp) { partInp.value = "1"; partInp.dataset.linked = "1"; refreshPillForInput(partInp); }
     });
   });
+  // Checklist view: each chip is a quick "mark present" tap — the actual score fields
+  // live in a hidden sibling .student-card (built during render) so the shared Save
+  // logic below (which reads every .student-card on the page) picks them up unchanged.
+  body.querySelectorAll(".check-chip").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      const sid = chip.getAttribute("data-student");
+      const hidden = body.querySelector('.hidden-inputs[data-student="' + sid + '"]');
+      if (!hidden) return;
+      const attInp = hidden.querySelector('.score-input[data-slot="att"]');
+      const partInp = hidden.querySelector('.score-input[data-slot="part"]');
+      if (attInp) { attInp.value = "1"; refreshPillForInput(attInp); }
+      if (partInp) { partInp.value = "1"; partInp.dataset.linked = "1"; refreshPillForInput(partInp); }
+      chip.classList.remove("check-unmarked", "check-good", "check-caution", "check-warn");
+      chip.classList.add("check-good");
+      const valEl = chip.querySelector(".check-val");
+      if (valEl) { valEl.textContent = "1"; valEl.classList.remove("check-dash"); }
+    });
+  });
   const fillAllBtn = document.getElementById("fill-all");
   if (fillAllBtn) fillAllBtn.addEventListener("click", () => {
     body.querySelectorAll(".student-card").forEach((card) => {
@@ -1564,7 +1804,10 @@ function wireTodayGrid(root, teacherName) {
       let rec = newState.attendance.find((r) => r.date === todayDate && r.studentId === studentId);
       if (!rec) { rec = { id: uid("a"), date: todayDate, studentId, scores: {}, notes: "" }; newState.attendance.push(rec); }
       if (pair[0] === null && pair[1] === null && !note) { delete rec.scores[selectedPeriod]; }
-      else { rec.scores[selectedPeriod] = pair; }
+      else { pair[3] = teacherName; rec.scores[selectedPeriod] = pair; }
+      // Record-level enteredBy/enteredAt stay as "who last touched this student's record"
+      // (used in CSV exports); pair[3] above is the per-period marker shown in the UI, since
+      // different staff can mark different classes for the same student on the same day.
       rec.enteredBy = teacherName; rec.enteredAt = Date.now();
     });
     const res = await saveState(newState, { stashKey: "today:" + todayDate + ":" + selectedPeriod, stashData: draftForStash });
@@ -2322,6 +2565,155 @@ function sdRange() {
   }
   return { from: null, to: null, title: "All time", sub: "Since the start of the year" };
 }
+/* ================================================================
+   REPORT CARD — turns the free-text notes teachers leave on attendance
+   entries into a short honest, positive-leaning written summary. Built
+   entirely client-side: groups similar comments (exact match, or sharing
+   most of their meaningful words), weighs them by how often they came up,
+   and writes plain-language sentences from that — no AI involved.
+   ================================================================ */
+const REPORT_STOPWORDS = new Set(["the","a","an","was","were","is","are","he","she","they","him","her","his","hers",
+  "today","in","class","very","so","really","and","with","to","had","has","have","being","it","this","that","of",
+  "on","for","during","but","not","did","does","been","be","at","by","up","out","again","still","also","just","as"]);
+const REPORT_POSITIVE_WORDS = new Set(["great","excellent","wonderful","amazing","fantastic","awesome","engaged",
+  "engaging","focused","attentive","helpful","hardworking","hard-working","respectful","kind","energetic","energy",
+  "energized","enthusiastic","enthusiasm","participating","participated","active","prepared","sharp","insightful",
+  "motivated","positive","improved","improving","improvement","leader","leadership","cheerful","punctual","polite",
+  "diligent","curious","thoughtful","strong","excellent","proud","confident","cooperative","friendly","eager"]);
+const REPORT_NEGATIVE_WORDS = new Set(["sleeping","asleep","tired","sleepy","distracted","disruptive","talking",
+  "late","unprepared","unfocused","disengaged","absent","disrespectful","rude","struggling","struggled","struggles",
+  "difficult","inattentive","phone","texting","arguing","argued","complaining","complained","negative","withdrawn",
+  "quiet","disruptive","missing","forgot","tardy","unmotivated","distracting","zoned","zoning"]);
+
+function reportNormalize(s) { return String(s || "").toLowerCase().replace(/[.,!?;:'"()\-]/g, " ").replace(/\s+/g, " ").trim(); }
+function reportSignificantWords(norm) {
+  return new Set(norm.split(" ").filter((w) => w.length > 2 && !REPORT_STOPWORDS.has(w)));
+}
+function reportJaccard(a, b) {
+  if (!a.size && !b.size) return 1;
+  let inter = 0;
+  a.forEach((w) => { if (b.has(w)) inter++; });
+  const union = a.size + b.size - inter;
+  return union === 0 ? 0 : inter / union;
+}
+/* Groups similar notes together (same normalized text, or >=50% overlap in
+   their meaningful words) so "great energy" and "had great energy today"
+   land in the same bucket instead of being counted as unrelated comments. */
+function clusterNotes(notes) {
+  const clusters = [];
+  notes.forEach((n) => {
+    const norm = reportNormalize(n.text);
+    if (!norm) return;
+    const words = reportSignificantWords(norm);
+    let best = null, bestScore = 0;
+    clusters.forEach((c) => {
+      const score = reportJaccard(words, c.words);
+      if (score > bestScore) { bestScore = score; best = c; }
+    });
+    if (best && bestScore >= 0.5) {
+      best.items.push(n);
+      words.forEach((w) => best.words.add(w));
+      const counts = best.textCounts;
+      counts[norm] = (counts[norm] || 0) + 1;
+      if (counts[norm] > counts[best.repNorm]) { best.repNorm = norm; best.repText = n.text.trim(); }
+    } else {
+      clusters.push({ repNorm: norm, repText: n.text.trim(), words, items: [n], textCounts: { [norm]: 1 } });
+    }
+  });
+  return clusters.sort((a, b) => b.items.length - a.items.length);
+}
+function clusterSentiment(cluster) {
+  let pos = 0, neg = 0;
+  cluster.words.forEach((w) => { if (REPORT_POSITIVE_WORDS.has(w)) pos++; if (REPORT_NEGATIVE_WORDS.has(w)) neg++; });
+  if (pos > neg) return "positive";
+  if (neg > pos) return "negative";
+  return "neutral";
+}
+function reportPronouns(gender) {
+  // No gender field on students, so this stays neutral ("they") — accurate for every student without guessing.
+  return { subj: "they", obj: "them", poss: "their" };
+}
+/* Builds the written paragraph. Always honest about the dominant pattern in
+   the actual comments (never hides a mostly-negative trend), but leads with
+   constructive framing and closes on a forward-looking, positive note. */
+function generateReportNarrative(firstName, clusters, stats, totalDays) {
+  const totalNotes = clusters.reduce((s, c) => s + c.items.length, 0);
+  const pn = reportPronouns();
+  const hasStats = stats.attPct !== null || stats.partPct !== null;
+  const statsLine = hasStats
+    ? "Over this period, " + firstName + "'s attendance was " + pct(stats.attPct) +
+      " and participation was " + pct(stats.partPct) +
+      (totalDays ? " across " + totalDays + " " + (totalDays === 1 ? "class" : "classes") + "." : ".")
+    : "";
+
+  if (totalNotes === 0) {
+    if (!hasStats) return "There’s no attendance, participation, or comment data recorded for " + pn.obj + " in this period yet.";
+    return statsLine + " No specific comments were logged for " + pn.obj + " this period, so this summary is based on the numbers alone.";
+  }
+
+  const positive = clusters.filter((c) => clusterSentiment(c) === "positive").sort((a, b) => b.items.length - a.items.length);
+  const negative = clusters.filter((c) => clusterSentiment(c) === "negative").sort((a, b) => b.items.length - a.items.length);
+  const topPos = positive[0], topNeg = negative[0];
+  // Nothing repeated more than once on either side — every comment was phrased
+  // a little differently, so "most often" would overstate a pattern that isn't
+  // really there. Speak to what was said rather than how often.
+  const noRealRepeat = (!topPos || topPos.items.length <= 1) && (!topNeg || topNeg.items.length <= 1);
+  const sentences = [];
+
+  if (topNeg && topPos && topNeg.items.length > topPos.items.length) {
+    // Dominant negative theme, with a real positive counter-example — the exact "mostly sleeping,
+    // but great energy when awake" pattern this feature was built around.
+    sentences.push("Most days this period, comments described " + firstName + " as “" + topNeg.repText.toLowerCase() +
+      "” (" + topNeg.items.length + " of " + totalNotes + " comments).");
+    sentences.push("On the days that wasn’t the case, though, " + pn.subj + " showed real promise — comments noted " +
+      pn.obj + " as “" + topPos.repText.toLowerCase() + "” (" + topPos.items.length + " " + (topPos.items.length === 1 ? "time" : "times") + ").");
+    sentences.push("That contrast is worth paying attention to: whatever’s different on the good days seems to work well — more of that would likely help across the board.");
+  } else if (topPos && (!topNeg || topPos.items.length >= topNeg.items.length)) {
+    // Positive is the dominant or tied pattern.
+    if (noRealRepeat) {
+      sentences.push("Comments this period were consistently positive for " + firstName + ", including being described as “" + topPos.repText.toLowerCase() + "”.");
+    } else {
+      sentences.push("Comments this period were mostly positive — " + firstName + " was most often described as “" +
+        topPos.repText.toLowerCase() + "” (" + topPos.items.length + " of " + totalNotes + " comments).");
+    }
+    if (topNeg) {
+      sentences.push("A smaller number of comments (" + topNeg.items.length + ") also mentioned “" + topNeg.repText.toLowerCase() +
+        "” — worth keeping an eye on, though it wasn’t the dominant pattern.");
+    } else {
+      sentences.push("Keep it up — that’s a strong, consistent pattern to build on.");
+    }
+  } else if (topNeg && !topPos) {
+    // Only negative comments logged, no positive counter-example this period.
+    sentences.push("Most comments this period noted " + firstName + " as “" + topNeg.repText.toLowerCase() +
+      "” (" + topNeg.items.length + " of " + totalNotes + " comments) — worth a direct, supportive conversation about what’s getting in the way.");
+    sentences.push("The good news: patterns like this are usually fixable once the underlying cause (tiredness, something going on at home, etc.) is understood — it doesn’t reflect a lack of ability.");
+  } else {
+    // Neutral / no clear sentiment either way — just report the most common theme factually.
+    const top = clusters[0];
+    sentences.push("The most common note this period was “" + top.repText.toLowerCase() + "” (" + top.items.length +
+      " of " + totalNotes + " comments) — " + statsLine.charAt(0).toLowerCase() + statsLine.slice(1));
+    return sentences.join(" ");
+  }
+  if (statsLine) sentences.push(statsLine);
+  return sentences.join(" ");
+}
+
+function notesForStudent(studentId, from, to) {
+  const notes = [];
+  state.attendance.forEach((rec) => {
+    if (rec.studentId !== studentId) return;
+    if (from && rec.date < from) return;
+    if (to && rec.date > to) return;
+    if (!rec.scores) return;
+    Object.keys(rec.scores).forEach((p) => {
+      const pair = rec.scores[p];
+      const note = pair && pair[2];
+      if (note && String(note).trim()) notes.push({ date: rec.date, period: p, text: String(note).trim() });
+    });
+  });
+  return notes;
+}
+
 function renderStudentDetail(root, student) {
   const allTimeSt = studentStats(student.id);
   const range = sdRange();
@@ -2364,6 +2756,19 @@ function renderStudentDetail(root, student) {
     statTile("Attendance" + (sdScope === "all" ? " (all time)" : ""), pct(rangeSt.attPct), pctTone(rangeSt.attPct)) +
     statTile("Participation" + (sdScope === "all" ? " (all time)" : ""), pct(rangeSt.partPct), pctTone(rangeSt.partPct)) + "</div>";
 
+  const reportNotes = notesForStudent(student.id, range.from, range.to);
+  const reportClusters = clusterNotes(reportNotes);
+  const narrative = generateReportNarrative(student.first, reportClusters, rangeSt, rangeSt.attPoss);
+  html += '<div class="card card-pad report-card-print" style="margin-top:16px;">' +
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">' +
+    '<div><span class="eyebrow">Report card</span><h3 style="margin:2px 0 0;">' + escapeHtml(fullName(student)) + '</h3>' +
+    '<div style="font-size:0.82rem;color:var(--muted);margin-top:2px;">' + escapeHtml(sdScope === "all" ? "All time" : range.title + (range.sub ? " · " + range.sub : "")) + '</div></div>' +
+    '<button class="btn btn-ghost btn-sm no-print" id="sd-print" type="button">Print</button>' +
+    '</div>' +
+    '<p style="margin-top:14px;line-height:1.65;max-width:65ch;">' + escapeHtml(narrative) + '</p>' +
+    (reportNotes.length ? '<p class="help-text" style="margin-top:10px;">Based on ' + reportNotes.length + ' comment' + (reportNotes.length === 1 ? "" : "s") + ' logged in this period.</p>' : "") +
+    "</div>";
+
   html += '<div class="card card-pad" style="margin-top:16px;"><h3>By class</h3>';
   const classRows = periods.map((p) => ({ p: p, cs: computeStats(student.id, { period: p, from: range.from, to: range.to }) })).filter((r) => r.cs.attPoss > 0 || r.cs.partPoss > 0);
   if (classRows.length === 0) {
@@ -2399,7 +2804,7 @@ function renderStudentDetail(root, student) {
     Object.keys(rec.scores).forEach((p) => {
       const pair = rec.scores[p];
       if (!pair || (pair[0] === null || pair[0] === undefined)) return;
-      logRows.push({ date: rec.date, period: p, att: pair[0], part: pair[1], note: pair[2] || "" });
+      logRows.push({ date: rec.date, period: p, att: pair[0], part: pair[1], note: pair[2] || "", by: pair[3] || "" });
     });
   });
   logRows.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : a.period.localeCompare(b.period)));
@@ -2407,10 +2812,11 @@ function renderStudentDetail(root, student) {
   if (logRows.length === 0) {
     html += '<p class="help-text">' + (sdScope === "all" ? "Nothing entered for this student yet." : "Nothing entered for this student in this range.") + '</p>';
   } else {
-    html += '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Class</th><th class="num">Attendance</th><th class="num">Participation</th><th>Note</th></tr></thead><tbody>';
+    html += '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Class</th><th class="num">Attendance</th><th class="num">Participation</th><th>Note</th><th>By</th></tr></thead><tbody>';
     logRows.slice(0, 150).forEach((r) => {
       html += "<tr><td>" + fmtDateShort(r.date) + "</td><td>" + escapeHtml(r.period) + '</td><td class="num">' + num2(r.att) +
-        '</td><td class="num">' + (r.part === null || r.part === undefined ? "—" : num2(r.part)) + "</td><td>" + escapeHtml(r.note) + "</td></tr>";
+        '</td><td class="num">' + (r.part === null || r.part === undefined ? "—" : num2(r.part)) + "</td><td>" + escapeHtml(r.note) +
+        '</td><td>' + (r.by ? '<span class="marked-by marked-by-sm" title="' + escapeHtml(r.by) + '">' + escapeHtml(initialsFor(r.by)) + "</span>" : "") + "</td></tr>";
     });
     html += "</tbody></table></div>";
     if (logRows.length > 150) html += '<p class="help-text" style="margin-top:8px;">Showing the most recent 150 of ' + logRows.length + ' entries.</p>';
@@ -2441,6 +2847,8 @@ function renderStudentDetail(root, student) {
   if (sdFromInput) sdFromInput.addEventListener("change", () => { sdFrom = sdFromInput.value || sdFrom; renderAll(); });
   const sdToInput = document.getElementById("sd-to");
   if (sdToInput) sdToInput.addEventListener("change", () => { sdTo = sdToInput.value || sdTo; renderAll(); });
+  const printBtn = document.getElementById("sd-print");
+  if (printBtn) printBtn.addEventListener("click", () => window.print());
 }
 
 /* ================================================================
