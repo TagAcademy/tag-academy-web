@@ -893,28 +893,14 @@ function hebrewDayNumeral(dateStr) {
   const full = hebrewDateFor(dateStr);
   return full ? stripHebrewPunct(full.split(" ")[0]) : "";
 }
-const DOW_SHORT_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const HEBREW_DOW = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
-/* "Mon 9/01" -- weekday abbreviation + month/day (day zero-padded, month not), so the Today
-   page's Gregorian date field clearly shows the day of week at a glance. */
-function fmtDateDow(dateStr) {
+const HEBREW_DOW = ["יום ראשון", "יום שני", "יום שלישי", "יום רביעי", "יום חמישי", "יום שישי", "שבת"];
+/* Hebrew day-of-week label for the Today page's Hebrew-date field -- e.g. "יום שלישי". The
+   picker itself (hebLabel, built from hebrewDateFor) shows the actual Hebrew date; this is
+   just the heading above it, same job as dayNameFor() does for the Gregorian side. */
+function hebrewDowLabelFor(dateStr) {
   if (!dateStr) return "";
   const [y, m, d] = dateStr.split("-").map(Number);
-  const dow = new Date(y, m - 1, d).getDay();
-  return DOW_SHORT_EN[dow] + " " + m + "/" + String(d).padStart(2, "0");
-}
-/* Hebrew weekday + day/month, no year -- e.g. "שני יח אלול". Drops only the last
-   space-separated token (the year) rather than assuming exactly two remain, so this still
-   comes out right for Adar I/II ("כ׳ אדר א׳ תשפ״ד" -> "שני כ אדר א"). */
-function hebrewDateDowFor(dateStr) {
-  if (!HebcalMini || !dateStr) return "";
-  const full = hebrewDateFor(dateStr);
-  if (!full) return "";
-  const parts = full.split(" ");
-  const dayMonth = stripHebrewPunct(parts.slice(0, -1).join(" "));
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const dow = new Date(y, m - 1, d).getDay();
-  return HEBREW_DOW[dow] + " " + dayMonth;
+  return HEBREW_DOW[new Date(y, m - 1, d).getDay()];
 }
 /* Short initials for attributing an attendance entry to the staff member who marked it
    (e.g. "Chaim Friedman" -> "CF", "Admin" -> "AD"). */
@@ -1775,7 +1761,7 @@ function renderToday(root, session) {
   const hdayOptions = hebrewDayOptionsFor(todayDate);
   const parshaHebLabel = parshaHebrewFor(todayDate);
   const monthRange = hebrewMonthRangeFor(todayDate);
-  const hebLabel = hebrewDateDowFor(todayDate);
+  const hebLabel = stripHebrewPunct(hebrewDateFor(todayDate));
   const todayGregISO = todayISO();
 
   let html = '<div class="page-head"><div><span class="eyebrow">Class by class</span><h1>Attendance &amp; Participation</h1>' +
@@ -1783,9 +1769,9 @@ function renderToday(root, session) {
 
   html += '<div class="today-head-controls">';
   html += '<div class="thc-row">';
-  html += '<div class="field" style="margin-bottom:0;"><label for="today-date">' + escapeHtml(fmtDateDow(todayDate)) + '</label><input type="date" id="today-date" value="' + todayDate + '"></div>';
+  html += '<div class="field" style="margin-bottom:0;"><label for="today-date">' + escapeHtml(dayNameFor(todayDate)) + '</label><input type="date" id="today-date" value="' + todayDate + '"></div>';
   if (hdayOptions.length) {
-    html += '<div class="field hcal-field" style="margin-bottom:0;"><label for="hcal-trigger" dir="rtl">היום</label>' +
+    html += '<div class="field hcal-field" style="margin-bottom:0;"><label for="hcal-trigger" dir="rtl">' + escapeHtml(hebrewDowLabelFor(todayDate)) + '</label>' +
       '<button type="button" class="hcal-trigger" id="hcal-trigger" dir="rtl">' + escapeHtml(hebLabel || "Pick a date") + "</button>";
     if (showHebrewCal) {
       const firstDow = jsDateFor(hdayOptions[0].date).getDay();
