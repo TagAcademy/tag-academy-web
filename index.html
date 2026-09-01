@@ -289,6 +289,10 @@ main.view {
 .sd-class-row-sel td { background: var(--brand-soft); }
 
 /* ===================== Today page: view toggle + alternate list views ===================== */
+/* "Mark as bonus", "+ Add a class", and "Mark whole class present" used to each be their own
+   stacked line; grouping them into one wrapping row reads as a single toolbar instead of a
+   scroll of separate one-off buttons. */
+.today-quick-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .view-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
 .view-toggle-hint { font-size: 0.78rem; color: var(--muted); }
 .view-toggle { display: inline-flex; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); overflow: hidden; }
@@ -587,10 +591,35 @@ td.num, th.num { font-family: var(--font-mono); text-align: right; }
 .att-grid th:first-child, .att-grid td.student-cell { width: 150px; }
 .att-grid th:not(:first-child), .att-grid td:not(.student-cell) { width: 112px; }
 .att-grid td.num { font-size: 0.82rem; text-align: center; padding-left: 4px; padding-right: 4px; position: relative; }
-.att-glance-att { font-weight: 600; }
-.att-glance-sep { color: var(--muted); margin: 0 1px; }
-.att-glance-part { color: var(--gold); }
 .att-glance-excused { color: var(--gold); font-weight: 600; font-size: 0.76rem; }
+/* "Today at a glance": each marked cell is three small columns -- an Attendance circle, a
+   Participation circle, then who marked it plus a dot if there's a note -- instead of a
+   "0.8/0.7" pair of numbers with a marked-by badge and note dot tacked on after. The circles
+   reuse the same fill-and-color language as the A/P dials in the Today grid above (see
+   compactSlotHtml) so a glance at this table reads the same way as the marking view. Tapping a
+   circle reveals its exact number in place of the letter; tapping again puts the letter back. */
+.glance-row { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+.glance-circle {
+  position: relative; width: 20px; height: 20px; flex-shrink: 0; border-radius: 50%; border: none;
+  padding: 0; cursor: pointer; background: transparent;
+}
+.glance-circle-ring {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: conic-gradient(var(--circle-color, var(--line-strong)) var(--fill, 0%), var(--surface-2) 0);
+  border: 1px solid var(--line-strong);
+}
+.glance-circle-label {
+  position: absolute; inset: 2px; border-radius: 50%; background: var(--surface);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.56rem; font-weight: 700; color: var(--ink);
+}
+.glance-circle-label.is-revealed { font-size: 0.46rem; }
+.glance-circle:hover .glance-circle-ring { border-color: var(--brand); }
+.glance-circle-empty {
+  display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px;
+  border-radius: 50%; border: 1px dashed var(--line-strong); color: var(--muted); font-size: 0.6rem; flex-shrink: 0;
+}
+.glance-meta { display: inline-flex; align-items: center; gap: 2px; margin-left: 1px; }
 
 /* ===================== Admin "view as" preview banner ===================== */
 .preview-banner-bar {
@@ -711,35 +740,39 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
 .lb-medal.lb-bronze { background: var(--caution-soft); color: var(--caution); border-color: transparent; }
 
 /* Each student is a column: a badge (trophy for 1st, a medal for 2nd/3rd, a plain numbered
-   badge below that) sits above a bar sized to their value, on one shared baseline so the
-   columns read as a single chart. Ties in value share the same badge/rank (see
+   badge otherwise) and their value sit above a bar colored by rank tier, with their name run
+   vertically inside the bar itself. Ties in value share the same badge/rank/color (see
    competitionRanks) instead of being pulled apart into 1st/2nd/3rd by coincidence of sort
-   order. Horizontal scroll (rather than shrinking columns to fit) keeps bars legible on a
-   phone with a big roster, the same tradeoff the data tables elsewhere already make. */
-.lb-chart-wrap { overflow-x: auto; padding-bottom: 4px; }
-.lb-chart { display: flex; align-items: flex-end; gap: 14px; min-width: min-content; padding: 10px 4px 0; }
-.lb-chart-col { display: flex; flex-direction: column; align-items: center; flex: 0 0 76px; width: 76px; text-align: center; }
-.lb-chart-col-top .lb-chart-name, .lb-chart-col-top .lb-chart-name .student-link { font-weight: 800; color: var(--ink); }
-.lb-chart-topper { height: 30px; display: flex; align-items: flex-end; justify-content: center; margin-bottom: 2px; }
+   order. Every bar is the same height regardless of value -- putting the name inside the bar
+   is what lets a column go thin, and columns split the full card width evenly (no fixed
+   per-column width, no horizontal scroll) so the whole roster fits on screen at once, however
+   many students there are. */
+.lb-chart-wrap { width: 100%; }
+.lb-chart { display: flex; align-items: flex-start; gap: 6px; padding-top: 10px; }
+.lb-chart-col { display: flex; flex-direction: column; align-items: center; flex: 1 1 0; min-width: 0; text-align: center; }
+.lb-chart-topper { height: 26px; display: flex; align-items: flex-end; justify-content: center; margin-bottom: 2px; }
 .lb-chart-trophy { color: var(--gold); }
-.lb-chart-trophy svg { width: 28px; height: 28px; }
-.lb-chart-medal { width: 24px; height: 24px; font-size: 0.72rem; }
-.lb-chart-value { font-size: 0.78rem; margin-bottom: 6px; min-height: 1.1em; }
+.lb-chart-trophy svg { width: 22px; height: 22px; }
+.lb-chart-medal { width: 20px; height: 20px; font-size: 0.62rem; }
+.lb-chart-value { font-size: 0.66rem; margin-bottom: 5px; min-height: 1.1em; max-width: 100%; overflow: hidden; }
 .lb-chart-value-text { font-weight: 800; }
-.lb-chart-value-text.tone-good { color: var(--good); }
-.lb-chart-value-text.tone-caution { color: var(--caution); }
-.lb-chart-value-text.tone-warn { color: var(--warn); }
-.lb-chart-track {
-  width: 100%; height: 130px; background: var(--surface-2); border: 1px solid var(--line);
-  border-bottom: 2px solid var(--line-strong); border-radius: var(--radius-sm) var(--radius-sm) 2px 2px;
-  display: flex; align-items: flex-end; overflow: hidden;
+.lb-chart-bar {
+  width: 100%; height: 130px; border-radius: var(--radius-sm) var(--radius-sm) 3px 3px;
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
 }
-.lb-chart-fill { width: 100%; border-radius: 3px 3px 0 0; min-height: 4px; }
-.lb-chart-fill.tone-good { background: var(--good); }
-.lb-chart-fill.tone-caution { background: var(--caution); }
-.lb-chart-fill.tone-warn { background: var(--warn); }
-.lb-chart-fill.tone-gold { background: var(--gold); }
-.lb-chart-name { font-size: 0.76rem; margin-top: 7px; line-height: 1.25; word-break: break-word; }
+.lb-chart-bar.rank-1 { background: var(--gold); }
+.lb-chart-bar.rank-2 { background: var(--ink-2); }
+.lb-chart-bar.rank-3 { background: var(--caution); }
+.lb-chart-bar.rank-other { background: var(--brand); }
+/* Rotated to read bottom-to-top like a spine label; a fixed small size (rather than shrinking
+   per name) is what keeps every column reading as the same chart instead of a jumble of type
+   sizes -- a name too long for the bar's height quietly ellipsizes instead of overflowing it. */
+.lb-chart-bar-name {
+  writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-height: 100%; padding: 8px 0; font-size: 0.68rem; font-weight: 700; color: #fff; letter-spacing: 0.01em;
+}
+.lb-chart-bar-name.student-link { color: #fff; text-decoration-color: rgba(255,255,255,0.55); }
+.lb-chart-bar-name.student-link:hover, .lb-chart-bar-name.student-link:focus-visible { text-decoration-color: #fff; }
 
 /* ===================== desktop (>900px) =====================
    Everything above is tuned mobile-first: small type, tight padding, and rows built to just
@@ -793,15 +826,16 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
   .student-row-compact .src-actions .note-toggle-btn { width: 32px; height: 32px; }
   .marked-by { min-width: 22px; height: 22px; font-size: 0.68rem; }
 
-  /* Leaderboard chart: more room on a monitor for taller, wider bars and a bigger trophy. */
-  .lb-chart { gap: 22px; padding-top: 14px; }
-  .lb-chart-col { flex-basis: 96px; width: 96px; }
-  .lb-chart-track { height: 220px; }
+  /* Leaderboard chart: more room on a monitor for a taller bar and a bigger trophy. Columns
+     still split the available width evenly (no fixed width) so a big roster keeps fitting with
+     no scrolling -- only the type and bar height scale up here, not the column count logic. */
+  .lb-chart { gap: 10px; padding-top: 14px; }
+  .lb-chart-bar { height: 220px; }
   .lb-chart-topper { height: 40px; }
-  .lb-chart-trophy svg { width: 38px; height: 38px; }
-  .lb-chart-medal { width: 30px; height: 30px; font-size: 0.85rem; }
-  .lb-chart-value { font-size: 0.92rem; }
-  .lb-chart-name { font-size: 0.88rem; }
+  .lb-chart-trophy svg { width: 34px; height: 34px; }
+  .lb-chart-medal { width: 28px; height: 28px; font-size: 0.8rem; }
+  .lb-chart-value { font-size: 0.8rem; }
+  .lb-chart-bar-name { font-size: 0.8rem; }
 
   /* Attendance calendar (Reports overview + a student's own detail page): the mobile-first
      cells left a lot of dead space on a wide monitor -- taller cells and bigger type put that
@@ -2110,10 +2144,13 @@ function renderToday(root, session) {
   if (!canWrite) html += '<div class="banner banner-warn">Read-only view — changes here won’t be saved.</div>';
   if (restored) html += '<div class="banner banner-warn">Your last save may not have gone through (someone else saved first). We’ve restored what you typed below — check it and save again.</div>';
 
-  const extraPeriodHtml = canWrite ? (() => {
-    if (!showAddExtraPeriod) {
-      return '<div style="margin-top:10px;"><button class="btn btn-ghost btn-sm" id="extra-period-open" type="button">+ Add a class just for today</button></div>';
-    }
+  // "+ Add a class" has two shapes: a single button that sits inline with the other quick
+  // actions below, or -- once clicked -- a wider field-row (select, name input, Add/Cancel)
+  // that needs its own full-width line instead. extraPeriodButtonHtml is the inline piece;
+  // extraPeriodFormHtml (only non-empty while the form is open) renders below the action row.
+  const extraPeriodButtonHtml = canWrite && !showAddExtraPeriod
+    ? '<button class="btn btn-ghost btn-sm" id="extra-period-open" type="button">+ Add a class just for today</button>' : "";
+  const extraPeriodFormHtml = canWrite && showAddExtraPeriod ? (() => {
     const otherPeriods = state.settings.periods.filter((p) => !periods.includes(p));
     return '<div class="field-row" style="margin-top:10px;align-items:flex-end;">' +
       '<div class="field" style="min-width:220px;"><label for="extra-period-select">Add a class just for today</label><select id="extra-period-select">' +
@@ -2130,7 +2167,9 @@ function renderToday(root, session) {
   })() : "";
 
   if (periods.length === 0) {
-    html += '<div class="empty-state">No periods are scheduled on ' + dayNameFor(todayDate) + '.</div>' + extraPeriodHtml + "</div>";
+    html += '<div class="empty-state">No periods are scheduled on ' + dayNameFor(todayDate) + '.</div>' +
+      (extraPeriodButtonHtml ? '<div style="margin-top:10px;">' + extraPeriodButtonHtml + "</div>" : "") +
+      extraPeriodFormHtml + "</div>";
     root.innerHTML = html; wireTodayHeader(root); wireExtraPeriod(root); return;
   }
   if (roster.length === 0) {
@@ -2158,16 +2197,19 @@ function renderToday(root, session) {
   // marking it too, so a teacher isn't left guessing why a student's average moved.
   const periodIsBonus = selectedPeriod && isBonusPeriod(todayDate, selectedPeriod);
   const canToggleBonus = canWrite && isAdmin(session);
-  if (periodIsBonus || canToggleBonus) {
-    html += '<div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
-      (periodIsBonus ? '<span class="pill pill-gold" title="Marked scores help this average; a missed or low mark leaves it unchanged.">★ Bonus today — only helps, never hurts</span>' : "") +
-      (canToggleBonus ? '<button class="btn btn-ghost btn-sm" id="toggle-bonus" type="button">' + (periodIsBonus ? "Unmark as bonus" : "Mark " + escapeHtml(selectedPeriod) + " as bonus today") + "</button>" : "") +
-      "</div>";
+  const bonusPieceHtml = (periodIsBonus ? '<span class="pill pill-gold" title="Marked scores help this average; a missed or low mark leaves it unchanged.">★ Bonus today — only helps, never hurts</span>' : "") +
+    (canToggleBonus ? '<button class="btn btn-ghost btn-sm" id="toggle-bonus" type="button">' + (periodIsBonus ? "Unmark as bonus" : "Mark " + escapeHtml(selectedPeriod) + " as bonus today") + "</button>" : "");
+
+  const fillAllHtml = canWrite ? '<button class="btn btn-ghost btn-sm" id="fill-all">Mark whole class present</button>' : "";
+
+  // These three used to each sit on their own stacked line; now they share one row (wrapping
+  // on narrow screens) so they read as a single group of quick actions instead of a scroll of
+  // separate buttons. The "+ Add a class" form itself, when open, still gets its own full-width
+  // line right below -- there's no reasonable way to fit a select + text input inline with these.
+  if (bonusPieceHtml || extraPeriodButtonHtml || fillAllHtml) {
+    html += '<div class="today-quick-actions">' + bonusPieceHtml + extraPeriodButtonHtml + fillAllHtml + "</div>";
   }
-
-  html += extraPeriodHtml;
-
-  html += (canWrite ? '<div style="margin-top:10px;"><button class="btn btn-ghost btn-sm" id="fill-all">Mark whole class present</button></div>' : "");
+  html += extraPeriodFormHtml;
 
   const VIEW_LABELS = { cards: "Cards", compact: "Compact" };
   html += '<div class="view-toggle-row"><span class="view-toggle-hint">View</span>' +
@@ -2253,11 +2295,36 @@ function renderToday(root, session) {
   wireExtraPeriod(root);
   wireBonusToggle(root);
   wireTodayGrid(root, teacherName);
+  wireGlanceCircles(root);
+}
+
+/* A read-only circle for the "Today at a glance" table: same fill+color language as
+   compactSlotHtml's A/P dials, but no drag/slider -- just a letter that a tap swaps for the
+   exact number (see wireGlanceCircles), and swaps back on a second tap. */
+function glanceCircleHtml(slot, value) {
+  const label = slot === "att" ? "A" : "P";
+  if (value === null || value === undefined) return '<span class="glance-circle-empty">–</span>';
+  const pct = Math.max(0, Math.min(1, Number(value))) * 100;
+  const tone = scoreTone(value);
+  const toneVar = tone ? ("--circle-color:var(--" + tone + ");") : "";
+  return '<button type="button" class="glance-circle" data-label="' + label + '" data-value="' + escapeHtml(num2(value)) + '" style="--fill:' + pct + '%;' + toneVar + '">' +
+    '<span class="glance-circle-ring"></span><span class="glance-circle-label">' + label + "</span></button>";
+}
+function wireGlanceCircles(root) {
+  const grid = root.querySelector(".att-grid");
+  if (!grid) return;
+  grid.addEventListener("click", (evt) => {
+    const btn = evt.target.closest(".glance-circle");
+    if (!btn || !grid.contains(btn)) return;
+    const labelEl = btn.querySelector(".glance-circle-label");
+    const revealed = labelEl.classList.toggle("is-revealed");
+    labelEl.textContent = revealed ? btn.getAttribute("data-value") : btn.getAttribute("data-label");
+  });
 }
 
 function renderTodaySummary(date, periods, roster) {
   let html = '<div class="card card-pad" style="margin-top:18px;"><div class="section-title"><span>Today at a glance</span></div>' +
-    '<p style="margin:2px 0 12px;font-size:0.82rem;color:var(--muted);">Every class entered so far for this day — click a class name to jump to it. Each cell shows attendance / participation.</p>';
+    '<p style="margin:2px 0 12px;font-size:0.82rem;color:var(--muted);">Every class entered so far for this day — click a class name to jump to it. Tap a circle for the exact number; A/P are colored the same as the marking dials above.</p>';
   html += '<div class="att-grid-scroll"><table class="att-grid"><thead><tr><th style="position:sticky;left:0;background:var(--surface-2);z-index:2;">Student</th>';
   periods.forEach((p) => {
     html += '<th class="' + (p === selectedPeriod ? "col-active" : "") + '"><button type="button" class="summary-period-btn" data-period="' + escapeHtml(p) + '">' + escapeHtml(p) + "</button></th>";
@@ -2273,16 +2340,18 @@ function renderTodaySummary(date, periods, roster) {
       const note = pair && pair[2];
       const by = pair && pair[3];
       const excused = pair && !!pair[4];
+      const meta = (by || note)
+        ? '<span class="glance-meta">' +
+          (by ? '<span class="marked-by marked-by-sm" title="Marked by ' + escapeHtml(by) + '">' + escapeHtml(initialsFor(by)) + "</span>" : "") +
+          (note ? '<span class="note-dot" title="' + escapeHtml(note) + '"></span>' : "") +
+          "</span>"
+        : "";
       const text = excused
-        ? '<span class="att-glance-excused">Excused</span>'
-        : has
-        ? '<span class="att-glance-att">' + num2(pair[0]) + '</span><span class="att-glance-sep">/</span><span class="att-glance-part">' + (hasPart ? num2(pair[1]) : "—") + "</span>"
+        ? '<span class="att-glance-excused">Excused</span>' + meta
+        : has || meta
+        ? '<span class="glance-row">' + glanceCircleHtml("att", has ? pair[0] : null) + glanceCircleHtml("part", has && hasPart ? pair[1] : null) + meta + "</span>"
         : "—";
-      html += '<td class="num' + (p === selectedPeriod ? " col-active" : "") + '"' + (has ? "" : ' style="color:var(--muted);"') +
-        (note ? ' title="' + escapeHtml(note) + '"' : "") + ">" + text +
-        (note ? ' <span class="note-dot" title="' + escapeHtml(note) + '"></span>' : "") +
-        (by ? ' <span class="marked-by marked-by-sm" title="Marked by ' + escapeHtml(by) + '">' + escapeHtml(initialsFor(by)) + "</span>" : "") +
-        "</td>";
+      html += '<td class="num' + (p === selectedPeriod ? " col-active" : "") + '">' + text + "</td>";
     });
     html += "</tr>";
   });
@@ -3259,28 +3328,29 @@ function renderLeaderboard(root, session) {
   if (!ranked.length) {
     html += '<p class="help-text" style="margin:0;">Nobody has data for ' + escapeHtml(cat.label) + (lbAgeBand !== "all" ? " in the ages " + escapeHtml(lbAgeBand) + " group" : "") + " yet.</p>";
   } else {
-    // Bar heights are relative to the spread actually on the board (lowest to highest value)
-    // rather than an absolute 0-100 scale, so differences stay visible even when everyone's
-    // clustered up near 95-100%. Coin balances can go negative, so 0 isn't necessarily the
-    // floor -- min() folds that in too, and a value below it just shows as the shortest bar.
-    const maxVal = Math.max(0, ...ranked.map((e) => e.value));
-    const minVal = Math.min(0, ...ranked.map((e) => e.value));
-    const range = maxVal - minVal || 1;
+    // Every bar is the same fixed height -- the ranking already comes across through sort
+    // order, the color tier, and the number printed above each bar, so the bar itself doesn't
+    // also need to stretch by value. That's what lets a column go as thin as it needs to
+    // (student names run vertically, inside the bar) and the whole board fit on screen with no
+    // sideways scrolling, no matter how many students are on it.
     const ranks = competitionRanks(ranked);
     html += '<div class="lb-chart-wrap"><div class="lb-chart">';
     ranked.forEach((e, i) => {
       const rank = ranks[i];
-      const barPct = Math.max(4, Math.round(((e.value - minVal) / range) * 100));
-      const nameHtml = (role === "admin" || role === "teacher") ? studentLink(e.student) : fullName(e.student);
-      const tone = cat.id === "coins" ? "gold" : (pctTone(e.value) || "good");
+      const rankTier = rank === 1 ? "rank-1" : rank === 2 ? "rank-2" : rank === 3 ? "rank-3" : "rank-other";
+      // The name element itself (not a wrapper around it) carries lb-chart-bar-name, so the
+      // vertical-text styling and the clickable-link styling both land on the one real element
+      // whichever case applies, rather than one of them being stranded on an outer <span>.
+      const nameHtml = (role === "admin" || role === "teacher")
+        ? '<button type="button" class="student-link lb-chart-bar-name" data-student-link="' + e.student.id + '">' + fullName(e.student) + "</button>"
+        : '<span class="lb-chart-bar-name">' + fullName(e.student) + "</span>";
       const valueHtml = cat.id === "coins"
         ? '<span class="coin-inline">' + coinBadge("sm") + '<span style="font-weight:800;color:var(--gold);">' + e.display + "</span></span>"
-        : '<span class="lb-chart-value-text tone-' + tone + '">' + e.display + "</span>";
-      html += '<div class="lb-chart-col' + (rank <= 3 ? " lb-chart-col-top" : "") + '">' +
+        : '<span class="lb-chart-value-text">' + e.display + "</span>";
+      html += '<div class="lb-chart-col">' +
         '<div class="lb-chart-topper">' + lbRankBadgeHtml(rank) + "</div>" +
         '<div class="lb-chart-value">' + valueHtml + "</div>" +
-        '<div class="lb-chart-track"><div class="lb-chart-fill tone-' + tone + '" style="height:' + barPct + '%"></div></div>' +
-        '<div class="lb-chart-name">' + nameHtml + "</div>" +
+        '<div class="lb-chart-bar ' + rankTier + '">' + nameHtml + "</div>" +
         "</div>";
     });
     html += "</div></div>";
