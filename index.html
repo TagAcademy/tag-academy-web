@@ -630,6 +630,16 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
 .admin-tab:hover { color: var(--ink); }
 .admin-tab.active { color: var(--brand); border-bottom-color: var(--brand); }
 
+/* ===================== leaderboard ===================== */
+.lb-top-row td { font-weight: 700; }
+.lb-medal {
+  display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px;
+  border-radius: 50%; font-family: var(--font-mono); font-weight: 700; font-size: 0.82rem; color: var(--muted);
+}
+.lb-medal.lb-gold { background: var(--gold-soft); color: var(--gold); }
+.lb-medal.lb-silver { background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--line-strong); }
+.lb-medal.lb-bronze { background: var(--caution-soft); color: var(--caution); }
+
 /* ===================== mobile ===================== */
 @media (max-width: 880px) {
   #app { flex-direction: column; }
@@ -740,6 +750,29 @@ const TX_TYPES = ["Manual Grant", "Spent/Redeemed", "Transfer Out", "Transfer In
 const SESSION_KEY = "tagacademy_session_v2";
 const LAST_DATE_KEY = "tagacademy_last_date_v1";
 const TODAY_VIEW_KEY = "tagacademy_today_view_v1";
+
+/* Leaderboard categories a class can be tagged with, in the order they're offered in Admin
+   and on the Leaderboard's own category tabs. "other" (untagged) classes still count toward
+   the overall Attendance/Participation boards but not toward Torah/Avoda/GC. */
+const PERIOD_CATEGORIES = [
+  { id: "torah", label: "Torah" },
+  { id: "avoda", label: "Avoda" },
+  { id: "gc", label: "Gemilas Chassidim" },
+  { id: "other", label: "Other" },
+];
+/* Best-guess starting tags for the seeded/typical class names, used only as a fallback when
+   a school hasn't explicitly tagged a class yet in Admin > Schedule (see categoryFor). */
+const DEFAULT_PERIOD_CATEGORY = {
+  "Chassidus": "torah", "Nigleh": "torah", "Chitas": "torah", "Kriah": "torah",
+  "Shacharis": "avoda", "Mincha": "avoda", "Maariv": "avoda", "Musaf": "avoda", "Selichos": "avoda",
+  "GC": "gc",
+};
+function categoryFor(period) {
+  const explicit = state.settings.periodCategories && state.settings.periodCategories[period];
+  if (explicit) return explicit;
+  return DEFAULT_PERIOD_CATEGORY[period] || "other";
+}
+function categoryLabel(catId) { const c = PERIOD_CATEGORIES.find((x) => x.id === catId); return c ? c.label : catId; }
 
 /* ---------- tiny utilities ---------- */
 function uid(prefix) { return prefix + "_" + Math.random().toString(36).slice(2, 9); }
@@ -1118,6 +1151,33 @@ function activeRoster() {
 }
 function studentById(id) { return state.roster.find((s) => s.id === id); }
 function staffById(id) { return state.staff.find((s) => s.id === id); }
+
+/* ---------- age groups (Leaderboard) ---------- */
+/* Only a year of birth is collected (not a full birthdate), so age is approximate — good
+   enough for grouping into bands, not for anything that needs to be exact to the day. Bands
+   are a fixed 2-year width, even-anchored (8–9, 10–11, ...) and computed on the fly from
+   whatever birth years are actually in the roster, so there's nothing to configure up front;
+   a school can always widen AGE_BAND_WIDTH later if 2-year bands feel too fine. */
+const AGE_BAND_WIDTH = 2;
+function ageForYearOfBirth(yob) {
+  if (!yob) return null;
+  return new Date().getFullYear() - Number(yob);
+}
+function ageBandFor(age) {
+  if (age === null || age === undefined) return null;
+  const start = age - (age % AGE_BAND_WIDTH);
+  return { start, end: start + AGE_BAND_WIDTH - 1, label: start + "–" + (start + AGE_BAND_WIDTH - 1) };
+}
+/* Every age band actually present among active students who have a year of birth set,
+   oldest first — this is what populates the Leaderboard's age-group filter. */
+function ageBandsPresent(roster) {
+  const seen = new Map();
+  roster.forEach((s) => {
+    const band = ageBandFor(ageForYearOfBirth(s.yearOfBirth));
+    if (band) seen.set(band.label, band);
+  });
+  return Array.from(seen.values()).sort((a, b) => b.start - a.start);
+}
 function periodsForDate(dateStr) {
   const day = dayNameFor(dateStr);
   const scheduled = state.settings.periods.filter((p) => (state.settings.schedule[p] || []).includes(day));
@@ -1134,17 +1194,24 @@ function attendanceRecord(dateStr, studentId) {
   return state.attendance.find((r) => r.date === dateStr && r.studentId === studentId);
 }
 /* opts: { from, to } — inclusive ISO date bounds, either omittable; { period } — restrict to one
-   class/period (its own possible-count only counts days that period was actually scheduled). */
+   class/period (its own possible-count only counts days that period was actually scheduled);
+   { category } — restrict to every class tagged with that leaderboard category (see
+   categoryFor) instead of a single named period. period and category are mutually exclusive;
+   period wins if both are somehow passed. */
 function computeStats(studentId, opts) {
   opts = opts || {};
-  const from = opts.from, to = opts.to, onlyPeriod = opts.period;
+  const from = opts.from, to = opts.to, onlyPeriod = opts.period, onlyCategory = opts.category;
+  const scoped = !!(onlyPeriod || onlyCategory);
   let attPts = 0, attPoss = 0, partPts = 0, partPoss = 0;
   for (const rec of state.attendance) {
     if (rec.studentId !== studentId) continue;
     if (from && rec.date < from) continue;
     if (to && rec.date > to) continue;
     const scheduledToday = periodsForDate(rec.date);
-    const periods = onlyPeriod ? (scheduledToday.includes(onlyPeriod) ? [onlyPeriod] : []) : scheduledToday;
+    let periods;
+    if (onlyPeriod) periods = scheduledToday.includes(onlyPeriod) ? [onlyPeriod] : [];
+    else if (onlyCategory) periods = scheduledToday.filter((p) => categoryFor(p) === onlyCategory);
+    else periods = scheduledToday;
     for (const p of periods) {
       const pair = rec.scores && rec.scores[p];
       if (!pair) continue;
@@ -1160,7 +1227,7 @@ function computeStats(studentId, opts) {
   const pointsPerCoin = state.settings.pointsPerCoin || 10;
   const coinsEarned = Math.floor((attPts + partPts) / pointsPerCoin);
   let ledgerNet = 0;
-  if (!onlyPeriod) {
+  if (!scoped) {
     for (const tx of state.ledger) {
       if (tx.studentId !== studentId) continue;
       if (from && tx.date < from) continue;
@@ -1169,10 +1236,14 @@ function computeStats(studentId, opts) {
       ledgerNet += sign * Number(tx.amount || 0);
     }
   }
+  const blendedPoss = attPoss + partPoss;
   return {
     attPts, attPoss, attPct: attPoss ? attPts / attPoss : null,
     partPts, partPoss, partPct: partPoss ? partPts / partPoss : null,
     points: attPts + partPts,
+    // Attendance and participation blended into one percentage — used for the Torah/Avoda/GC
+    // leaderboards, where a single combined score per category reads more cleanly than two.
+    blendedPct: blendedPoss ? (attPts + partPts) / blendedPoss : null,
     coinsEarned, ledgerNet, balance: coinsEarned + ledgerNet,
   };
 }
@@ -1445,6 +1516,7 @@ const ROUTES = [
   { id: "today", label: "Today", icon: "check", roles: ["teacher", "admin"] },
   { id: "ledger", label: "Coin Ledger", icon: "coin", roles: ["teacher", "admin"] },
   { id: "overview", label: "Reports", icon: "grid", roles: ["teacher", "admin"] },
+  { id: "leaderboard", label: "Leaderboard", icon: "trophy", roles: ["teacher", "admin", "student"] },
   { id: "admin", label: "Admin", icon: "gear", roles: ["admin"] },
   { id: "balance", label: "My Balance", icon: "search", roles: ["student"] },
 ];
@@ -1495,6 +1567,7 @@ const ICONS = {
   gear: '<circle cx="9" cy="9" r="2.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9 1.8v2.1M9 14.1v2.1M16.2 9h-2.1M3.9 9H1.8M14.1 3.9l-1.5 1.5M4.9 13.1l-1.5 1.5M14.1 14.1l-1.5-1.5M4.9 4.9L3.4 3.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
   note: '<path d="M3.5 2.5h11a1 1 0 0 1 1 1v9l-3.5 3.5h-8.5a1 1 0 0 1-1-1v-11.5a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M12 16v-3a1 1 0 0 1 1-1h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><line x1="6" y1="6.5" x2="12.5" y2="6.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><line x1="6" y1="9.5" x2="12.5" y2="9.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>',
   download: '<path d="M9 2.5v9.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M5 8.2 9 12.2 13 8.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 14.5v.6a1.4 1.4 0 0 0 1.4 1.4h9.2a1.4 1.4 0 0 0 1.4-1.4v-.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
+  trophy: '<path d="M6 2.5h6v5a3 3 0 0 1-6 0v-5z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M6 3.3H3.3a1 1 0 0 0-1 1.1c.15 1.7 1 3 3.2 3.2M12 3.3h2.7a1 1 0 0 1 1 1.1c-.15 1.7-1 3-3.2 3.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M9 10.3v2.4M6.3 15.5c0-1.5 1.1-2 2.7-2.1 1.6.1 2.7.6 2.7 2.1" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
 };
 function icon(name) { return '<svg viewBox="0 0 18 18">' + (ICONS[name] || "") + "</svg>"; }
 
@@ -2489,6 +2562,144 @@ function renderOverview(root) {
 }
 
 /* ================================================================
+   VIEW: LEADERBOARD (everyone can see this one, including students)
+   ================================================================ */
+const LEADERBOARD_CATEGORIES = [
+  { id: "attendance", label: "Attendance" },
+  { id: "participation", label: "Participation" },
+  { id: "torah", label: "Torah" },
+  { id: "avoda", label: "Avoda" },
+  { id: "gc", label: "Gemilas Chassidim" },
+  { id: "coins", label: "TAG Coins" },
+];
+let lbCategory = "attendance";
+let lbScope = "all"; // "all" | "week" | "hmonth" | "custom"
+let lbAnchor = todayISO();
+let lbFrom = todayISO();
+let lbTo = todayISO();
+let lbAgeBand = "all"; // "all" or an ageBandFor().label string
+
+function lbRange() {
+  if (lbScope === "week") {
+    const r = weekRangeFor(lbAnchor);
+    return { from: r.from, to: r.to, title: "This week", sub: fmtDateShort(r.from) + " – " + fmtDateShort(r.to) };
+  }
+  if (lbScope === "hmonth") {
+    const r = hebrewMonthRangeFor(lbAnchor);
+    if (!r) return { from: null, to: null, title: "This month", sub: "" };
+    return { from: r.from, to: r.to, title: r.monthName + " " + r.year, sub: fmtDateShort(r.from) + " – " + fmtDateShort(r.to) };
+  }
+  if (lbScope === "custom") {
+    const from = lbFrom <= lbTo ? lbFrom : lbTo;
+    const to = lbFrom <= lbTo ? lbTo : lbFrom;
+    return { from, to, title: "Custom range", sub: fmtDateShort(from) + " – " + fmtDateShort(to) };
+  }
+  return { from: null, to: null, title: "All time", sub: "Since the start of the year" };
+}
+/* One student's raw value + a formatted display string for a given leaderboard category —
+   the single place that ties each category id to the stat that ranks it. */
+function leaderboardEntryFor(studentId, catId, range) {
+  if (catId === "attendance") { const st = computeStats(studentId, { from: range.from, to: range.to }); return { value: st.attPct, display: pct(st.attPct) }; }
+  if (catId === "participation") { const st = computeStats(studentId, { from: range.from, to: range.to }); return { value: st.partPct, display: pct(st.partPct) }; }
+  if (catId === "coins") { const st = computeStats(studentId, { from: range.from, to: range.to }); return { value: st.balance, display: num2(st.balance) }; }
+  // torah / avoda / gc — a blended attendance+participation percentage across every class
+  // tagged with that category (see categoryFor / PERIOD_CATEGORIES, set in Admin > Schedule).
+  const st = computeStats(studentId, { from: range.from, to: range.to, category: catId });
+  return { value: st.blendedPct, display: pct(st.blendedPct) };
+}
+function medalClass(rank) { return rank === 1 ? "lb-medal lb-gold" : rank === 2 ? "lb-medal lb-silver" : rank === 3 ? "lb-medal lb-bronze" : ""; }
+function renderLeaderboard(root, session) {
+  const role = roleOf(session);
+  const roster = activeRoster();
+  const bands = ageBandsPresent(roster);
+  const range = lbRange();
+  const cat = LEADERBOARD_CATEGORIES.find((c) => c.id === lbCategory) || LEADERBOARD_CATEGORIES[0];
+
+  let html = '<div class="page-head"><div><span class="eyebrow">Everyone, ranked</span><h1>Leaderboard</h1>' +
+    "<p>Attendance, participation, Torah, Avoda, Gemilas Chassidim, and TAG coins — ranked for the whole roster, or narrowed to one age group.</p></div></div>";
+
+  html += '<div class="admin-tabs lb-cat-tabs">' + LEADERBOARD_CATEGORIES.map((c) =>
+    '<button class="admin-tab' + (lbCategory === c.id ? " active" : "") + '" data-lbcat="' + c.id + '">' + escapeHtml(c.label) + "</button>"
+  ).join("") + "</div>";
+
+  html += '<div class="card card-pad" style="margin-bottom:16px;"><div class="field-row">' +
+    '<div class="field" style="min-width:170px;"><label for="lb-scope">Time range</label><select id="lb-scope">' +
+    '<option value="all"' + (lbScope === "all" ? " selected" : "") + '>All time</option>' +
+    '<option value="week"' + (lbScope === "week" ? " selected" : "") + '>This week</option>' +
+    '<option value="hmonth"' + (lbScope === "hmonth" ? " selected" : "") + '>This Hebrew month</option>' +
+    '<option value="custom"' + (lbScope === "custom" ? " selected" : "") + '>Custom range</option>' +
+    "</select></div>" +
+    (lbScope === "week" || lbScope === "hmonth" ? '<div class="field" style="flex-shrink:0;"><label>&nbsp;</label><div style="display:flex;gap:6px;">' +
+      '<button class="btn btn-ghost btn-sm" id="lb-prev" type="button">&larr;</button>' +
+      '<button class="btn btn-ghost btn-sm" id="lb-today" type="button">Today</button>' +
+      '<button class="btn btn-ghost btn-sm" id="lb-next" type="button">&rarr;</button></div></div>' : "") +
+    (lbScope === "custom" ? '<div class="field" style="min-width:150px;"><label for="lb-from">From</label><input type="date" id="lb-from" value="' + escapeHtml(lbFrom) + '"></div>' +
+      '<div class="field" style="min-width:150px;"><label for="lb-to">To</label><input type="date" id="lb-to" value="' + escapeHtml(lbTo) + '"></div>' : "") +
+    '<div class="field" style="min-width:170px;"><label for="lb-age">Age group</label><select id="lb-age">' +
+    '<option value="all"' + (lbAgeBand === "all" ? " selected" : "") + '>All ages</option>' +
+    bands.map((b) => '<option value="' + escapeHtml(b.label) + '"' + (lbAgeBand === b.label ? " selected" : "") + '>Ages ' + escapeHtml(b.label) + "</option>").join("") +
+    "</select></div>" +
+    "</div>";
+  if (lbScope === "week" || lbScope === "hmonth") {
+    html += '<div style="margin-top:2px;font-family:var(--font-display);font-weight:800;font-size:1.1rem;">' + escapeHtml(range.title) + "</div>" +
+      '<div style="font-size:0.82rem;color:var(--muted);margin-top:2px;">' + escapeHtml(range.sub) + "</div>";
+  }
+  if (!bands.length) {
+    html += '<p class="help-text" style="margin:10px 0 0;">No students have a year of birth on file yet — add one in Admin &gt; Students to unlock age-group boards.</p>';
+  }
+  html += "</div>";
+
+  // Rank every active student (in the selected age band, if any) by this category's value,
+  // dropping anyone with no data at all in this category/range rather than showing them tied
+  // at the bottom looking like a real 0%.
+  const inBand = lbAgeBand === "all" ? roster : roster.filter((s) => {
+    const band = ageBandFor(ageForYearOfBirth(s.yearOfBirth));
+    return band && band.label === lbAgeBand;
+  });
+  const entries = inBand.map((s) => Object.assign({ student: s }, leaderboardEntryFor(s.id, cat.id, range)));
+  const ranked = entries.filter((e) => e.value !== null && e.value !== undefined).sort((a, b) => b.value - a.value);
+  const noData = entries.length - ranked.length;
+
+  html += '<div class="card card-pad">';
+  if (!ranked.length) {
+    html += '<p class="help-text" style="margin:0;">Nobody has data for ' + escapeHtml(cat.label) + (lbAgeBand !== "all" ? " in the ages " + escapeHtml(lbAgeBand) + " group" : "") + " yet.</p>";
+  } else {
+    html += '<div class="table-wrap"><table><thead><tr><th style="width:56px;">Rank</th><th>Student</th><th class="num">' + escapeHtml(cat.label) + "</th></tr></thead><tbody>";
+    ranked.forEach((e, i) => {
+      const rank = i + 1;
+      const nameHtml = (role === "admin" || role === "teacher") ? studentLink(e.student) : fullName(e.student);
+      const valueHtml = cat.id === "coins"
+        ? '<span class="coin-inline">' + coinBadge("sm") + '<span style="font-weight:700;color:var(--gold);">' + e.display + "</span></span>"
+        : pctPill(e.value);
+      html += '<tr class="' + (rank <= 3 ? "lb-top-row" : "") + '"><td><span class="' + medalClass(rank) + '">' + rank + "</span></td><td>" + nameHtml + '</td><td class="num">' + valueHtml + "</td></tr>";
+    });
+    html += "</tbody></table></div>";
+  }
+  if (noData > 0) {
+    html += '<p class="help-text" style="margin:12px 0 0;">' + noData + " student" + (noData === 1 ? "" : "s") + " with no " + escapeHtml(cat.label.toLowerCase()) + " record yet in this range" + (lbAgeBand !== "all" ? " and age group" : "") + " — not shown above.</p>";
+  }
+  html += "</div>";
+
+  root.innerHTML = html;
+
+  root.querySelectorAll("[data-lbcat]").forEach((btn) => btn.addEventListener("click", () => { lbCategory = btn.getAttribute("data-lbcat"); renderAll(); }));
+  const ageSel = document.getElementById("lb-age");
+  if (ageSel) ageSel.addEventListener("change", () => { lbAgeBand = ageSel.value; renderAll(); });
+  const scopeSel = document.getElementById("lb-scope");
+  if (scopeSel) scopeSel.addEventListener("change", () => { lbScope = scopeSel.value; renderAll(); });
+  const prevBtn = document.getElementById("lb-prev");
+  if (prevBtn) prevBtn.addEventListener("click", () => { lbAnchor = lbScope === "week" ? shiftDate(lbAnchor, -7) : shiftHebrewMonth(lbAnchor, -1); renderAll(); });
+  const nextBtn = document.getElementById("lb-next");
+  if (nextBtn) nextBtn.addEventListener("click", () => { lbAnchor = lbScope === "week" ? shiftDate(lbAnchor, 7) : shiftHebrewMonth(lbAnchor, 1); renderAll(); });
+  const todayBtn = document.getElementById("lb-today");
+  if (todayBtn) todayBtn.addEventListener("click", () => { lbAnchor = todayISO(); renderAll(); });
+  const fromInput = document.getElementById("lb-from");
+  if (fromInput) fromInput.addEventListener("change", () => { lbFrom = fromInput.value || lbFrom; renderAll(); });
+  const toInput = document.getElementById("lb-to");
+  if (toInput) toInput.addEventListener("change", () => { lbTo = toInput.value || lbTo; renderAll(); });
+}
+
+/* ================================================================
    VIEW: ADMIN (Schedule · Staff · Students · Coins & Privileges)
    ================================================================ */
 let adminTab = "schedule";
@@ -2513,13 +2724,17 @@ function renderAdminSchedule(root) {
   html += '<div class="field-row" style="align-items:flex-end;max-width:480px;">' +
     '<div class="field" style="flex:1;"><label for="np-name">New class name</label><input type="text" id="np-name" placeholder="e.g. Chavrusa"></div>' +
     '<div class="field" style="flex-shrink:0;"><button class="btn btn-ghost btn-sm" id="np-add" type="button">Add class</button></div></div>';
-  html += '<p class="help-text" style="margin-top:-6px;">The order below is the order classes appear in every dropdown (Today’s Class/period picker, reports, etc.) — drag the handle to reorder.</p>';
-  html += '<div class="table-wrap"><table><thead><tr><th style="width:36px;">Order</th><th style="min-width:150px;">Period</th>' + DAY_NAMES.map((d) => "<th>" + d.slice(0, 3) + "</th>").join("") + "<th></th></tr></thead><tbody>";
+  html += '<p class="help-text" style="margin-top:-6px;">The order below is the order classes appear in every dropdown (Today’s Class/period picker, reports, etc.) — drag the handle to reorder. Category controls which Leaderboard(s) a class counts toward — Torah, Avoda, or Gemilas Chassidim classes are combined into one score there; “Other” classes still count toward the overall Attendance/Participation boards.</p>';
+  html += '<div class="table-wrap"><table><thead><tr><th style="width:36px;">Order</th><th style="min-width:150px;">Period</th><th style="min-width:130px;">Category</th>' + DAY_NAMES.map((d) => "<th>" + d.slice(0, 3) + "</th>").join("") + "<th></th></tr></thead><tbody>";
   state.settings.periods.forEach((p, i) => {
     html += '<tr data-period-row="' + escapeHtml(p) + '"><td style="white-space:nowrap;">' +
       '<button class="btn btn-ghost btn-sm drag-handle" type="button" data-drag-handle title="Drag to reorder">⠿</button>' +
       "</td>";
     html += '<td><input type="text" class="period-name-input" data-original="' + escapeHtml(p) + '" value="' + escapeHtml(p) + '"></td>';
+    const currentCat = categoryFor(p);
+    html += '<td><select class="period-category-input" data-original="' + escapeHtml(p) + '">' +
+      PERIOD_CATEGORIES.map((c) => '<option value="' + c.id + '"' + (c.id === currentCat ? " selected" : "") + '>' + escapeHtml(c.label) + "</option>").join("") +
+      "</select></td>";
     DAY_NAMES.forEach((d) => {
       const checked = (state.settings.schedule[p] || []).includes(d);
       html += '<td style="text-align:center;"><input type="checkbox" data-period="' + escapeHtml(p) + '" data-day="' + d + '" ' + (checked ? "checked" : "") + "></td>";
@@ -2546,12 +2761,16 @@ function renderAdminSchedule(root) {
     const schedByOriginal = {};
     state.settings.periods.forEach((p) => { schedByOriginal[p] = []; });
     root.querySelectorAll("input[data-period]").forEach((cb) => { if (cb.checked) schedByOriginal[cb.getAttribute("data-period")].push(cb.getAttribute("data-day")); });
+    const categoryByOriginal = {};
+    root.querySelectorAll(".period-category-input").forEach((sel) => { categoryByOriginal[sel.getAttribute("data-original")] = sel.value; });
 
     const newState = JSON.parse(JSON.stringify(state));
     newState.settings.periods = finalNames;
     const newSched = {};
-    state.settings.periods.forEach((p) => { newSched[renameOf[p]] = schedByOriginal[p]; });
+    const newCategories = {};
+    state.settings.periods.forEach((p) => { newSched[renameOf[p]] = schedByOriginal[p]; newCategories[renameOf[p]] = categoryByOriginal[p] || categoryFor(p); });
     newState.settings.schedule = newSched;
+    newState.settings.periodCategories = newCategories;
     // Carry past attendance over to the new name for anything actually renamed.
     state.settings.periods.forEach((p) => {
       const next = renameOf[p];
@@ -2757,7 +2976,8 @@ function studentRow(s, archived) {
     return "<tr>" +
       '<td><input type="text" id="edit-last-' + s.id + '" value="' + escapeHtml(s.last) + '" style="width:100%;"></td>' +
       '<td><input type="text" id="edit-first-' + s.id + '" value="' + escapeHtml(s.first) + '" style="width:100%;"></td>' +
-      '<td class="num">' + escapeHtml(s.username || "—") + '</td><td class="num">' + escapeHtml(s.password || "—") + "</td><td>" +
+      '<td class="num">' + escapeHtml(s.username || "—") + '</td><td class="num">' + escapeHtml(s.password || "—") + "</td>" +
+      '<td class="num"><input type="number" id="edit-yob-' + s.id + '" value="' + (s.yearOfBirth ? escapeHtml(String(s.yearOfBirth)) : "") + '" placeholder="e.g. 2013" style="width:88px;"></td><td>' +
       (archived ? '<span class="pill pill-muted">Archived</span>' : '<span class="pill pill-good">Active</span>') +
       '</td><td style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
       '<button class="btn btn-primary btn-sm" data-save-student="' + s.id + '">Save</button>' +
@@ -2773,7 +2993,7 @@ function studentRow(s, archived) {
       '<button class="btn btn-ghost btn-sm" data-toggle="' + s.id + '">' + (archived ? "Unarchive" : "Archive") + '</button>' +
       '<button class="btn btn-ghost btn-sm" data-reset-student="' + s.id + '">Reset pw</button>' +
       '<button class="btn btn-ghost btn-sm" data-delete-student="' + s.id + '" style="color:var(--warn);">Delete</button>';
-  return "<tr><td>" + escapeHtml(s.last) + "</td><td>" + escapeHtml(s.first) + '</td><td class="num">' + escapeHtml(s.username || "—") + '</td><td class="num">' + escapeHtml(s.password || "—") + "</td><td>" +
+  return "<tr><td>" + escapeHtml(s.last) + "</td><td>" + escapeHtml(s.first) + '</td><td class="num">' + escapeHtml(s.username || "—") + '</td><td class="num">' + escapeHtml(s.password || "—") + '</td><td class="num">' + (s.yearOfBirth ? escapeHtml(String(s.yearOfBirth)) : "—") + "</td><td>" +
     (archived ? '<span class="pill pill-muted">Archived</span>' : '<span class="pill pill-good">Active</span>') + '</td><td style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
     actions + "</td></tr>";
 }
@@ -2783,6 +3003,7 @@ function renderAdminStudents(root) {
     '<div class="field"><label for="r-first">First name</label><input type="text" id="r-first"></div>' +
     '<div class="field"><label for="r-username">Username</label><input type="text" id="r-username" placeholder="auto-suggested"></div>' +
     '<div class="field"><label for="r-password">Password</label><input type="text" id="r-password" placeholder="leave blank to auto-generate"></div>' +
+    '<div class="field" style="max-width:130px;"><label for="r-yob">Year of birth</label><input type="number" id="r-yob" placeholder="optional"></div>' +
     '</div><button class="btn btn-primary btn-sm" id="r-submit">Add to roster</button>' +
     (showBulkStudentForm ? "" : '<button class="btn btn-ghost btn-sm" id="r-bulk-toggle" style="margin-left:8px;">Bulk add multiple students…</button>') +
     "</div>";
@@ -2808,15 +3029,15 @@ function renderAdminStudents(root) {
   const activeStudents = state.roster.filter((s) => s.active !== false).sort((a, b) => (a.last + a.first).localeCompare(b.last + b.first));
   const archivedStudents = state.roster.filter((s) => s.active === false).sort((a, b) => (a.last + a.first).localeCompare(b.last + b.first));
 
-  html += '<div class="card card-pad"><div class="table-wrap"><table><thead><tr><th>Last</th><th>First</th><th>Username</th><th>Password</th><th>Status</th><th></th></tr></thead><tbody>';
+  html += '<div class="card card-pad"><div class="table-wrap"><table><thead><tr><th>Last</th><th>First</th><th>Username</th><th>Password</th><th>Born</th><th>Status</th><th></th></tr></thead><tbody>';
   activeStudents.forEach((s) => { html += studentRow(s, false); });
   html += "</tbody></table></div>";
   html += '<button class="btn btn-ghost btn-sm" id="archived-toggle" style="margin-top:12px;">' +
     (showArchivedStudents ? "Hide" : "Show") + " archived students (" + archivedStudents.length + ")</button>";
   if (showArchivedStudents) {
-    html += '<div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>Last</th><th>First</th><th>Username</th><th>Password</th><th>Status</th><th></th></tr></thead><tbody>';
+    html += '<div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>Last</th><th>First</th><th>Username</th><th>Password</th><th>Born</th><th>Status</th><th></th></tr></thead><tbody>';
     if (archivedStudents.length) archivedStudents.forEach((s) => { html += studentRow(s, true); });
-    else html += '<tr><td colspan="6" class="help-text">No archived students.</td></tr>';
+    else html += '<tr><td colspan="7" class="help-text">No archived students.</td></tr>';
     html += "</tbody></table></div>";
   }
   html += "</div>";
@@ -2838,13 +3059,15 @@ function renderAdminStudents(root) {
     const last = lastInput.value.trim(), first = firstInput.value.trim();
     let username = userInput.value.trim();
     let password = document.getElementById("r-password").value.trim();
+    const yobRaw = document.getElementById("r-yob").value.trim();
     if (!last || !first) { toast("Enter both a first and last name.", "warn"); return; }
     const taken = new Set(state.staff.map((s) => s.username.toLowerCase()).concat(state.roster.map((s) => (s.username || "").toLowerCase())));
     if (!username) username = uniqueUsername(slugUsername(first, last), taken);
     if (taken.has(username.toLowerCase())) { toast("That username is already taken.", "warn"); return; }
     if (!password) password = randomPassword();
+    const yearOfBirth = yobRaw ? Number(yobRaw) : null;
     const newState = JSON.parse(JSON.stringify(state));
-    newState.roster.push({ id: uid("s"), last, first, username, password, active: true });
+    newState.roster.push({ id: uid("s"), last, first, username, password, active: true, yearOfBirth });
     const res = await saveState(newState);
     if (res.ok || res.local) { toast("Added " + first + " " + last + " — username: " + username + ", password: " + password, "good"); renderAll(); }
   });
@@ -2886,12 +3109,14 @@ function renderAdminStudents(root) {
     const id = btn.getAttribute("data-save-student");
     const lastInput = document.getElementById("edit-last-" + id);
     const firstInput = document.getElementById("edit-first-" + id);
+    const yobInput = document.getElementById("edit-yob-" + id);
     const last = lastInput ? lastInput.value.trim() : "";
     const first = firstInput ? firstInput.value.trim() : "";
+    const yobRaw = yobInput ? yobInput.value.trim() : "";
     if (!last || !first) { toast("Enter both a first and last name.", "warn"); return; }
     const newState = JSON.parse(JSON.stringify(state));
     const rec = newState.roster.find((s) => s.id === id);
-    if (rec) { rec.last = last; rec.first = first; }
+    if (rec) { rec.last = last; rec.first = first; rec.yearOfBirth = yobRaw ? Number(yobRaw) : null; }
     editingStudentId = null;
     const res = await saveState(newState);
     if (res.ok || res.local) { toast("Updated name to " + first + " " + last + ".", "good"); renderAll(); }
@@ -3357,7 +3582,7 @@ function renderAll() {
   // building its HTML/wiring, so restoring it right after is safe).
   const savedCanWrite = canWrite;
   if (previewing) canWrite = false;
-  ({ today: renderToday, ledger: renderLedger, overview: renderOverview, admin: renderAdmin, balance: renderBalance })[route](root, session);
+  ({ today: renderToday, ledger: renderLedger, overview: renderOverview, leaderboard: renderLeaderboard, admin: renderAdmin, balance: renderBalance })[route](root, session);
   canWrite = savedCanWrite;
   wireStudentLinks(root);
 }
