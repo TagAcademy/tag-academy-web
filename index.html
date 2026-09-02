@@ -19,6 +19,10 @@
   --brand-soft: #e8edff;
   --gold: #a3781f;
   --gold-soft: #f6ecd4;
+  --silver: #74809a;
+  --silver-soft: #eef0f4;
+  --bronze: #a86a3d;
+  --bronze-soft: #f7e8da;
   --good: #2f8558;
   --good-soft: #e4f3ea;
   --caution: #c17a12;
@@ -56,6 +60,10 @@
     --brand-soft: #1c2747;
     --gold: #dcb45f;
     --gold-soft: #332a15;
+    --silver: #aab4c4;
+    --silver-soft: #2b3040;
+    --bronze: #c98a56;
+    --bronze-soft: #3a2a1c;
     --good: #57b787;
     --good-soft: #17301f;
     --caution: #e0aa4e;
@@ -82,6 +90,10 @@
   --brand-soft: #1c2747;
   --gold: #dcb45f;
   --gold-soft: #332a15;
+  --silver: #aab4c4;
+  --silver-soft: #2b3040;
+  --bronze: #c98a56;
+  --bronze-soft: #3a2a1c;
   --good: #57b787;
   --good-soft: #17301f;
   --caution: #e0aa4e;
@@ -729,50 +741,89 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
 .admin-tab:hover { color: var(--ink); }
 .admin-tab.active { color: var(--brand); border-bottom-color: var(--brand); }
 
-/* ===================== leaderboard: bar chart ===================== */
+/* ===================== leaderboard: podium + ranked list ===================== */
 .lb-medal {
   display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px;
   border-radius: 50%; font-family: var(--font-mono); font-weight: 700; font-size: 0.82rem; color: var(--muted);
-  background: var(--surface-2); border: 1px solid var(--line);
+  background: var(--surface-2); border: 1px solid var(--line); flex-shrink: 0;
 }
 .lb-medal.lb-gold { background: var(--gold-soft); color: var(--gold); border-color: transparent; }
 .lb-medal.lb-silver { background: var(--surface-2); color: var(--ink-2); border-color: var(--line-strong); }
 .lb-medal.lb-bronze { background: var(--caution-soft); color: var(--caution); border-color: transparent; }
 
-/* Each student is a column: a badge (trophy for 1st, a medal for 2nd/3rd, a plain numbered
-   badge otherwise) and their value sit above a bar colored by rank tier, with their name run
-   vertically inside the bar itself. Ties in value share the same badge/rank/color (see
-   competitionRanks) instead of being pulled apart into 1st/2nd/3rd by coincidence of sort
-   order. Every bar is the same height regardless of value -- putting the name inside the bar
-   is what lets a column go thin, and columns split the full card width evenly (no fixed
-   per-column width, no horizontal scroll) so the whole roster fits on screen at once, however
-   many students there are. */
-.lb-chart-wrap { width: 100%; }
-.lb-chart { display: flex; align-items: flex-start; gap: 6px; padding-top: 10px; }
-.lb-chart-col { display: flex; flex-direction: column; align-items: center; flex: 1 1 0; min-width: 0; text-align: center; }
-.lb-chart-topper { height: 26px; display: flex; align-items: flex-end; justify-content: center; margin-bottom: 2px; }
-.lb-chart-trophy { color: var(--gold); }
-.lb-chart-trophy svg { width: 22px; height: 22px; }
-.lb-chart-medal { width: 20px; height: 20px; font-size: 0.62rem; }
-.lb-chart-value { font-size: 0.66rem; margin-bottom: 5px; min-height: 1.1em; max-width: 100%; overflow: hidden; }
-.lb-chart-value-text { font-weight: 800; }
-.lb-chart-bar {
-  width: 100%; height: 130px; border-radius: var(--radius-sm) var(--radius-sm) 3px 3px;
-  display: flex; align-items: center; justify-content: center; overflow: hidden;
+/* A student's avatar -- initials in a colored circle for now (see avatarColorFor/avatarHtml);
+   the color comes from a hash of the student's id, so it's stable across renders without
+   needing to store anything. Ready to show a real photo instead the moment one exists
+   (avatarHtml already checks for student.photoUrl), without any caller needing to change. */
+.lb-avatar {
+  display: inline-flex; align-items: center; justify-content: center; border-radius: 50%;
+  color: #fff; font-weight: 800; font-family: var(--font-display); flex-shrink: 0; overflow: hidden;
+  width: 34px; height: 34px; font-size: 0.74rem; letter-spacing: 0.01em;
 }
-.lb-chart-bar.rank-1 { background: var(--gold); }
-.lb-chart-bar.rank-2 { background: var(--ink-2); }
-.lb-chart-bar.rank-3 { background: var(--caution); }
-.lb-chart-bar.rank-other { background: var(--brand); }
-/* Rotated to read bottom-to-top like a spine label; a fixed small size (rather than shrinking
-   per name) is what keeps every column reading as the same chart instead of a jumble of type
-   sizes -- a name too long for the bar's height quietly ellipsizes instead of overflowing it. */
-.lb-chart-bar-name {
-  writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  max-height: 100%; padding: 8px 0; font-size: 0.68rem; font-weight: 700; color: #fff; letter-spacing: 0.01em;
+.lb-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.lb-avatar-md { width: 46px; height: 46px; font-size: 0.92rem; border: 3px solid var(--line-strong); }
+.lb-avatar-lg { width: 54px; height: 54px; font-size: 1.05rem; border: 3px solid var(--gold); }
+
+/* Top 3 PLACES as a podium, everyone else as a plain ranked list below (see renderLeaderboard).
+   A "place" is a distinct-value group, not a single person or a raw competitionRank number --
+   five students tied for 1st all sit in the place-1 column together, and whoever has the next
+   highest (distinct) value still gets a real 2nd-place column of their own, exactly like a real
+   awards podium: a crowded 1st place doesn't erase 2nd and 3rd. Columns split the row evenly
+   (flex:1 1 0, no fixed width) so the podium fits on screen with no sideways scroll no matter
+   the roster size; a big tie just wraps to more rows inside its column instead of overflowing
+   sideways. 2nd/1st/3rd left-to-right (matching a real podium), lined up on a shared "ground"
+   (align-items:flex-end on .lb-podium) so the riser heights below actually read as steps of a
+   podium instead of three equal boxes. With fewer than 3 distinct values in play, places just
+   render in order instead of forcing a stagger that no longer applies. This mobile-first block
+   is the same design used at every width -- see the min-width:901px block below for the larger
+   desktop sizes only, not a different layout. */
+.lb-podium { display: flex; align-items: flex-end; gap: 8px; padding: 6px 0 0; }
+.lb-podium-col {
+  display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 1 1 0; min-width: 0;
+  padding: 12px 6px 14px; border-radius: var(--radius) var(--radius) 6px 6px; border: 1px solid var(--line);
+  position: relative; overflow: hidden;
 }
-.lb-chart-bar-name.student-link { color: #fff; text-decoration-color: rgba(255,255,255,0.55); }
-.lb-chart-bar-name.student-link:hover, .lb-chart-bar-name.student-link:focus-visible { text-decoration-color: #fff; }
+/* The riser itself: a full, solid place color at the top fading down into the ordinary card
+   background, with the column's own height (shortest for 3rd, tallest for 1st) standing in
+   for the physical step a real podium would have, rather than a separate block layered
+   underneath the person. */
+.lb-podium-col.rank-1 { order: 2; min-height: 208px; background: linear-gradient(180deg, var(--gold) 0%, var(--gold-soft) 44%, var(--surface) 90%); border-color: var(--gold); }
+.lb-podium-col.rank-2 { order: 1; min-height: 164px; background: linear-gradient(180deg, var(--silver) 0%, var(--silver-soft) 44%, var(--surface) 90%); border-color: var(--silver); }
+.lb-podium-col.rank-3 { order: 3; min-height: 138px; background: linear-gradient(180deg, var(--bronze) 0%, var(--bronze-soft) 44%, var(--surface) 90%); border-color: var(--bronze); }
+/* A trophy plus "1st"/"2nd"/"3rd" in plain white, sitting right on the vivid, full-color top
+   edge of the riser (see above) where white reads clearly regardless of which of the three
+   colors is behind it -- no separate badge background needed. */
+.lb-podium-badge { display: flex; flex-direction: column; align-items: center; gap: 2px; color: #fff; }
+.lb-podium-trophy svg { display: block; width: 22px; height: 22px; }
+.lb-podium-place { font-size: 0.72rem; font-weight: 800; letter-spacing: 0.03em; text-transform: uppercase; }
+/* Per person, top to bottom: avatar, name, value. By the time content reaches the name/value
+   the riser's gradient has already faded pale for all three places (the vivid solid color is
+   only at the very top, behind the trophy/place badge), so plain ink/muted text -- the same as
+   everywhere else in the app -- stays legible without any per-place color override. */
+.lb-podium-people { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: center; gap: 10px 10px; max-width: 100%; }
+.lb-podium-person { display: flex; flex-direction: column; align-items: center; gap: 3px; max-width: 92px; }
+.lb-podium-col.rank-1 .lb-podium-person { max-width: 118px; }
+.lb-podium-name {
+  font-size: 0.72rem; font-weight: 700; text-align: center; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; max-width: 100%; background: none; border: none; padding: 0; font-family: inherit;
+  color: var(--ink); cursor: default; text-decoration-color: transparent; margin-top: 2px;
+}
+.lb-podium-name.student-link { color: var(--ink); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.lb-podium-name.student-link:hover, .lb-podium-name.student-link:focus-visible { color: var(--brand); text-decoration-color: var(--brand); }
+.lb-podium-value { font-size: 0.72rem; font-weight: 800; color: var(--muted); }
+
+.lb-list { display: flex; flex-direction: column; gap: 2px; margin-top: 14px; }
+.lb-row { display: flex; align-items: center; gap: 10px; padding: 8px 6px; border-radius: var(--radius-sm); }
+.lb-row:hover { background: var(--surface-2); }
+.lb-row-main { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.lb-row-name {
+  font-size: 0.86rem; font-weight: 700; background: none; border: none; padding: 0; font-family: inherit;
+  text-align: left; color: var(--ink); cursor: default; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+}
+.lb-row-name.student-link { cursor: pointer; text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 2px; }
+.lb-row-name.student-link:hover, .lb-row-name.student-link:focus-visible { color: var(--brand); text-decoration-color: var(--brand); }
+.lb-row-value { font-size: 0.76rem; color: var(--muted); }
+.lb-row-rank { margin-left: auto; }
 
 /* ===================== desktop (>900px) =====================
    Everything above is tuned mobile-first: small type, tight padding, and rows built to just
@@ -826,16 +877,27 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
   .student-row-compact .src-actions .note-toggle-btn { width: 32px; height: 32px; }
   .marked-by { min-width: 22px; height: 22px; font-size: 0.68rem; }
 
-  /* Leaderboard chart: more room on a monitor for a taller bar and a bigger trophy. Columns
-     still split the available width evenly (no fixed width) so a big roster keeps fitting with
-     no scrolling -- only the type and bar height scale up here, not the column count logic. */
-  .lb-chart { gap: 10px; padding-top: 14px; }
-  .lb-chart-bar { height: 220px; }
-  .lb-chart-topper { height: 40px; }
-  .lb-chart-trophy svg { width: 34px; height: 34px; }
-  .lb-chart-medal { width: 28px; height: 28px; font-size: 0.8rem; }
-  .lb-chart-value { font-size: 0.8rem; }
-  .lb-chart-bar-name { font-size: 0.8rem; }
+  /* Leaderboard podium: more room on a monitor for bigger avatars, a bigger trophy/place badge,
+     and taller risers. Columns still split the available width evenly (no fixed width) so a big
+     roster -- or a big tie -- keeps fitting with no scrolling; only sizes scale up here, the
+     design (height tiers, trophy + ordinal, gold/silver/bronze fade) is exactly the same as on
+     mobile. */
+  .lb-podium { gap: 16px; padding: 10px 0 0; }
+  .lb-podium-col { gap: 8px; padding: 18px 10px 20px; }
+  .lb-podium-col.rank-1 { min-height: 280px; }
+  .lb-podium-col.rank-2 { min-height: 220px; }
+  .lb-podium-col.rank-3 { min-height: 184px; }
+  .lb-avatar { width: 40px; height: 40px; font-size: 0.84rem; }
+  .lb-avatar-md { width: 58px; height: 58px; font-size: 1.1rem; }
+  .lb-avatar-lg { width: 72px; height: 72px; font-size: 1.3rem; }
+  .lb-podium-trophy svg { width: 28px; height: 28px; }
+  .lb-podium-place { font-size: 0.8rem; }
+  .lb-podium-value { font-size: 0.84rem; }
+  .lb-podium-name { font-size: 0.82rem; }
+  .lb-podium-person { max-width: 112px; }
+  .lb-podium-col.rank-1 .lb-podium-person { max-width: 140px; }
+  .lb-row-name { font-size: 0.92rem; }
+  .lb-row-value { font-size: 0.8rem; }
 
   /* Attendance calendar (Reports overview + a student's own detail page): the mobile-first
      cells left a lot of dead space on a wide monitor -- taller cells and bigger type put that
@@ -1983,6 +2045,7 @@ const ICONS = {
   note: '<path d="M3.5 2.5h11a1 1 0 0 1 1 1v9l-3.5 3.5h-8.5a1 1 0 0 1-1-1v-11.5a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M12 16v-3a1 1 0 0 1 1-1h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><line x1="6" y1="6.5" x2="12.5" y2="6.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><line x1="6" y1="9.5" x2="12.5" y2="9.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>',
   download: '<path d="M9 2.5v9.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M5 8.2 9 12.2 13 8.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 14.5v.6a1.4 1.4 0 0 0 1.4 1.4h9.2a1.4 1.4 0 0 0 1.4-1.4v-.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
   trophy: '<path d="M6 2.5h6v5a3 3 0 0 1-6 0v-5z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M6 3.3H3.3a1 1 0 0 0-1 1.1c.15 1.7 1 3 3.2 3.2M12 3.3h2.7a1 1 0 0 1 1 1.1c-.15 1.7-1 3-3.2 3.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M9 10.3v2.4M6.3 15.5c0-1.5 1.1-2 2.7-2.1 1.6.1 2.7.6 2.7 2.1" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+  crown: '<path d="M2.7 13.2h12.6l1-7.3-3.9 2.9-2.7-4.8-2.7 4.8-3.9-2.9 1 7.3z" fill="currentColor" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/><rect x="2.7" y="13.2" width="12.6" height="1.9" rx="0.5" fill="currentColor"/>',
 };
 function icon(name) { return '<svg viewBox="0 0 18 18">' + (ICONS[name] || "") + "</svg>"; }
 
@@ -3314,7 +3377,25 @@ function leaderboardEntryFor(studentId, catId, range) {
   const st = computeStats(studentId, { from: range.from, to: range.to, category: catId });
   return { value: st.blendedPct, display: pct(st.blendedPct) };
 }
-function medalClass(rank) { return rank === 1 ? "lb-medal lb-gold" : rank === 2 ? "lb-medal lb-silver" : rank === 3 ? "lb-medal lb-bronze" : ""; }
+/* A student's avatar -- initials in a colored circle today, but built so a real photo can
+   slot in later without touching any caller: the moment a student record has a photoUrl, this
+   is the one place that switches to rendering it. The background color is picked from a small
+   fixed palette by hashing the student's id, so a given student's color stays the same across
+   renders/sessions without storing anything extra. */
+const AVATAR_PALETTE = ["#2f6fed", "#7c3aed", "#0e9488", "#d6396b", "#c2780c", "#2f8558", "#a3781f", "#5b5fc7"];
+function avatarColorFor(id) {
+  let h = 0;
+  const s = String(id);
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
+}
+function studentInitials(student) { return initialsFor(student.first + " " + student.last); }
+function avatarHtml(student, sizeClass) {
+  const cls = "lb-avatar" + (sizeClass ? " " + sizeClass : "");
+  if (student.photoUrl) return '<span class="' + cls + '"><img src="' + escapeHtml(student.photoUrl) + '" alt="" /></span>';
+  return '<span class="' + cls + '" style="background:' + avatarColorFor(student.id) + ';">' + escapeHtml(studentInitials(student)) + "</span>";
+}
+const PODIUM_ORDINALS = ["1st", "2nd", "3rd"];
 /* Standard "competition ranking": students tied on value share the same rank, and the rank
    right after a tie skips ahead by however many people just shared it (1, 1, 3 — not 1, 2, 3),
    the same convention leaderboards and races use. `sortedDesc` must already be sorted by value,
@@ -3323,14 +3404,6 @@ function competitionRanks(sortedDesc) {
   const ranks = [];
   sortedDesc.forEach((e, i) => { ranks.push(i > 0 && e.value === sortedDesc[i - 1].value ? ranks[i - 1] : i + 1); });
   return ranks;
-}
-/* The badge shown above each bar in the leaderboard chart: a trophy for whoever's in 1st
-   (everyone tied for it gets their own trophy), silver/bronze medals for 2nd/3rd, and a plain
-   numbered badge below that. */
-function lbRankBadgeHtml(rank) {
-  if (rank === 1) return '<span class="lb-chart-trophy" title="1st place">' + icon("trophy") + "</span>";
-  if (rank === 2 || rank === 3) return '<span class="' + medalClass(rank) + ' lb-chart-medal" title="Rank ' + rank + '">' + rank + "</span>";
-  return '<span class="lb-medal lb-chart-medal" title="Rank ' + rank + '">' + rank + "</span>";
 }
 function renderLeaderboard(root, session) {
   const role = roleOf(session);
@@ -3388,32 +3461,64 @@ function renderLeaderboard(root, session) {
   if (!ranked.length) {
     html += '<p class="help-text" style="margin:0;">Nobody has data for ' + escapeHtml(cat.label) + (lbAgeBand !== "all" ? " in the ages " + escapeHtml(lbAgeBand) + " group" : "") + " yet.</p>";
   } else {
-    // Every bar is the same fixed height -- the ranking already comes across through sort
-    // order, the color tier, and the number printed above each bar, so the bar itself doesn't
-    // also need to stretch by value. That's what lets a column go as thin as it needs to
-    // (student names run vertically, inside the bar) and the whole board fit on screen with no
-    // sideways scrolling, no matter how many students are on it.
     const ranks = competitionRanks(ranked);
-    html += '<div class="lb-chart-wrap"><div class="lb-chart">';
-    ranked.forEach((e, i) => {
-      const rank = ranks[i];
-      const rankTier = rank === 1 ? "rank-1" : rank === 2 ? "rank-2" : rank === 3 ? "rank-3" : "rank-other";
-      // The name element itself (not a wrapper around it) carries lb-chart-bar-name, so the
-      // vertical-text styling and the clickable-link styling both land on the one real element
-      // whichever case applies, rather than one of them being stranded on an outer <span>.
-      const nameHtml = (role === "admin" || role === "teacher")
-        ? '<button type="button" class="student-link lb-chart-bar-name" data-student-link="' + e.student.id + '">' + fullName(e.student) + "</button>"
-        : '<span class="lb-chart-bar-name">' + fullName(e.student) + "</span>";
-      const valueHtml = cat.id === "coins"
-        ? '<span class="coin-inline">' + coinBadge("sm") + '<span style="font-weight:800;color:var(--gold);">' + e.display + "</span></span>"
-        : '<span class="lb-chart-value-text">' + e.display + "</span>";
-      html += '<div class="lb-chart-col">' +
-        '<div class="lb-chart-topper">' + lbRankBadgeHtml(rank) + "</div>" +
-        '<div class="lb-chart-value">' + valueHtml + "</div>" +
-        '<div class="lb-chart-bar ' + rankTier + '">' + nameHtml + "</div>" +
-        "</div>";
-    });
-    html += "</div></div>";
+    const nameHtmlFor = (student, cls) => (role === "admin" || role === "teacher")
+      ? '<button type="button" class="student-link ' + cls + '" data-student-link="' + student.id + '">' + fullName(student) + "</button>"
+      : '<span class="' + cls + '">' + fullName(student) + "</span>";
+    const valueHtmlFor = (display, bigClass) => cat.id === "coins"
+      ? '<span class="coin-inline">' + coinBadge("sm") + '<span style="font-weight:800;color:var(--gold);">' + display + "</span></span>"
+      : '<span class="' + bigClass + '">' + display + "</span>";
+    // The podium's 3 places are the top 3 DISTINCT values, not the top 3 rank numbers -- a
+    // 5-way tie for 1st still leaves a 2nd and 3rd place open for whoever comes next, exactly
+    // like a real awards podium (the trophy for 2nd place doesn't disappear just because 1st
+    // was crowded). This is deliberately different from the rank NUMBER shown in the list below
+    // (competitionRanks, skip-ahead: 1,1,1,1,1,6,6,6,9…) -- that skip-ahead number is what a
+    // student's own rank badge should say once they're off the podium, but it's not what decides
+    // who gets a place ON the podium in the first place.
+    const distinctValues = [];
+    ranked.forEach((e) => { if (!distinctValues.length || distinctValues[distinctValues.length - 1] !== e.value) distinctValues.push(e.value); });
+    const podiumGroups = distinctValues.slice(0, 3).map((v, i) => ({
+      place: i + 1,
+      entries: ranked.filter((e) => e.value === v),
+    }));
+    const onPodium = new Set();
+    podiumGroups.forEach((g) => g.entries.forEach((e) => onPodium.add(e)));
+    const listEntries = ranked.map((e, i) => ({ e: e, rank: ranks[i] })).filter((x) => !onPodium.has(x.e));
+
+    if (podiumGroups.length) {
+      // 2nd/1st/3rd left-to-right like a real podium -- only when all three places are actually
+      // in play; with fewer (a small roster, or ties eating into the distinct-value count) they
+      // render in plain place order instead.
+      const order = podiumGroups.length === 3 ? [podiumGroups[1], podiumGroups[0], podiumGroups[2]] : podiumGroups;
+      html += '<div class="lb-podium">';
+      order.forEach((g) => {
+        const ordinal = PODIUM_ORDINALS[g.place - 1];
+        const badgeHtml = '<span class="lb-podium-trophy">' + icon("trophy") + "</span>" +
+          '<span class="lb-podium-place">' + ordinal + "</span>";
+        const avatarSizeClass = g.place === 1 ? "lb-avatar-lg" : "lb-avatar-md";
+        html += '<div class="lb-podium-col rank-' + g.place + '">' +
+          '<div class="lb-podium-badge" title="' + ordinal + ' place">' + badgeHtml + "</div>" +
+          '<div class="lb-podium-people">' +
+          g.entries.map((e) => '<div class="lb-podium-person">' +
+            avatarHtml(e.student, avatarSizeClass) +
+            nameHtmlFor(e.student, "lb-podium-name") +
+            valueHtmlFor(e.display, "lb-podium-value") +
+            "</div>").join("") +
+          "</div>" +
+          "</div>";
+      });
+      html += "</div>";
+    }
+    if (listEntries.length) {
+      html += '<div class="lb-list">';
+      listEntries.forEach((x) => {
+        html += '<div class="lb-row">' + avatarHtml(x.e.student, "") +
+          '<div class="lb-row-main">' + nameHtmlFor(x.e.student, "lb-row-name") + valueHtmlFor(x.e.display, "lb-row-value") + "</div>" +
+          '<span class="lb-medal lb-row-rank" title="Rank ' + x.rank + '">' + x.rank + "</span>" +
+          "</div>";
+      });
+      html += "</div>";
+    }
   }
   if (noData > 0) {
     html += '<p class="help-text" style="margin:12px 0 0;">' + noData + " student" + (noData === 1 ? "" : "s") + " with no " + escapeHtml(cat.label.toLowerCase()) + " record yet in this range" + (lbAgeBand !== "all" ? " and age group" : "") + " — not shown above.</p>";
