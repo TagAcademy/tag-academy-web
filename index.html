@@ -988,6 +988,21 @@ function categoryFor(period) {
 }
 function categoryLabel(catId) { const c = PERIOD_CATEGORIES.find((x) => x.id === catId); return c ? c.label : catId; }
 
+/* Most classes are marked out of a full point (a "1" for attendance/participation is worth
+   1 full point toward the average), but some -- a short davening, a supplementary class -- are
+   worth less. periodMaxFor is that class's ceiling: attendance/participation for it are marked
+   and stored on a 0..max scale (so "fully present" in a 0.3-max class stores 0.3, not 1) and
+   that same 0.3 is what it can ever contribute, per mark, to the blended average (see
+   computeStats) -- a lower max means the class simply counts for less, exactly like a
+   lower-weight assignment would in a gradebook. Unset/invalid/out-of-range falls back to a
+   normal full-weight 1. */
+function periodMaxFor(period) {
+  const raw = state.settings.periodMax && state.settings.periodMax[period];
+  const n = Number(raw);
+  if (raw === null || raw === undefined || raw === "" || isNaN(n) || n <= 0 || n > 1) return 1;
+  return n;
+}
+
 /* ---------- tiny utilities ---------- */
 function uid(prefix) { return prefix + "_" + Math.random().toString(36).slice(2, 9); }
 function escapeHtml(str) {
@@ -1102,15 +1117,18 @@ function pctTone(n) {
   return "warn";
 }
 /* Score-based coloring (distinct from pctTone's period-percentage bands above): a single
-   mark's own value, 0 = warn/red, 1 = good/green, anything between = caution/yellow. null
-   ("blank"/unmarked) deliberately returns no tone at all -- callers render blank as neutral
-   grey rather than picking a color, which is what keeps an unmarked student visually
-   different from one explicitly marked absent (0). */
-function scoreTone(v) {
+   mark's own value relative to that class's own max (see periodMaxFor) -- 0 = warn/red, at-max
+   = good/green, anything between = caution/yellow. null ("blank"/unmarked) deliberately
+   returns no tone at all -- callers render blank as neutral grey rather than picking a color,
+   which is what keeps an unmarked student visually different from one explicitly marked
+   absent (0). max defaults to 1 (a normal full-weight class) so every existing call site that
+   doesn't pass one keeps working unchanged. */
+function scoreTone(v, max) {
   if (v === null || v === undefined || v === "") return "";
   const n = Number(v);
   if (isNaN(n)) return "";
-  if (n >= 1) return "good";
+  const m = Number(max) || 1;
+  if (n >= m - 1e-9) return "good";
   if (n <= 0) return "warn";
   return "caution";
 }
@@ -1120,26 +1138,28 @@ function pctPill(n) {
   return '<span class="pill pill-' + tone + '">' + pct(n) + "</span>";
 }
 function num2(n) { return (n === null || n === undefined || isNaN(n)) ? "—" : Number(n).toFixed(2).replace(/\.00$/, ""); }
-function clampScore(v) {
+function clampScore(v, max) {
   if (v === "" || v === null || v === undefined) return null;
   let n = Number(v);
   if (isNaN(n)) return null;
-  n = Math.max(0, Math.min(1, n));
+  const m = Number(max) || 1;
+  n = Math.max(0, Math.min(m, n));
   return Math.round(n * 100) / 100;
 }
 /* ---------- tap-or-drag "pill" score control: a horizontal bar you tap or
    slide to set a value 0–1 in one seamless motion, snapped to the nearest
    1/20th (0.05) for a clean number. The small field beside it shows the
    exact value and stays directly editable for odd partial-credit numbers. ---------- */
-function scorePillHtml(slot, value, label, disabled, extraAttrs, step) {
+function scorePillHtml(slot, value, label, disabled, extraAttrs, step, max) {
+  const m = Number(max) || 1;
   const v = (value === null || value === undefined) ? "" : value;
-  const pct = v === "" ? 0 : Math.max(0, Math.min(1, Number(v))) * 100;
-  const tone = v === "" ? "" : scoreTone(v);
-  const core = '<div class="score-pill-wrap">' +
+  const pct = v === "" ? 0 : Math.max(0, Math.min(1, Number(v) / m)) * 100;
+  const tone = v === "" ? "" : scoreTone(v, m);
+  const core = '<div class="score-pill-wrap" data-max="' + m + '">' +
     '<div class="score-pill-track' + (disabled ? " score-pill-disabled" : "") + '" data-slot="' + slot + '"' + (tone ? ' data-tone="' + tone + '"' : "") + '>' +
     '<div class="score-pill-fill" style="width:' + pct + '%"' + (tone ? ' data-tone="' + tone + '"' : "") + "></div>" +
     "</div>" +
-    '<input class="score-input" type="number" min="0" max="1" step="' + (step || "0.05") + '" data-slot="' + slot + '" value="' + v + '" ' + (extraAttrs || "") + (disabled ? " disabled" : "") + ">" +
+    '<input class="score-input" type="number" min="0" max="' + m + '" step="' + (step || "0.05") + '" data-slot="' + slot + '" value="' + v + '" ' + (extraAttrs || "") + (disabled ? " disabled" : "") + ">" +
     "</div>";
   // label === null skips the label/row wrapper entirely -- used by the Compact view, where
   // every student is one line and there's no room for "ATTENDANCE" / "PARTICIPATION" headers.
@@ -1150,14 +1170,17 @@ function refreshPillForInput(input) {
   if (!input) return;
   // .score-pill-wrap (not .score-pill-row): the row wrapper only exists when scorePillHtml
   // was called with a real label. Anchoring on the wrap instead means this also works for
-  // label:null pills (Compact view's tap-to-reveal slider), which have no row wrapper.
+  // label:null pills (Compact view's tap-to-reveal slider), which have no row wrapper. data-max
+  // (set by scorePillHtml above) is how this recovers the class's max after the fact, since all
+  // it has here is the bare input value.
   const wrap = input.closest(".score-pill-wrap");
   const track = wrap ? wrap.querySelector(".score-pill-track") : null;
   const fill = wrap ? wrap.querySelector(".score-pill-fill") : null;
   if (!fill) return;
-  const v = input.value === "" ? 0 : Math.max(0, Math.min(1, Number(input.value) || 0));
-  fill.style.width = v * 100 + "%";
-  const tone = input.value === "" ? "" : scoreTone(input.value);
+  const m = Number(wrap && wrap.dataset.max) || 1;
+  const v = input.value === "" ? 0 : Math.max(0, Math.min(m, Number(input.value) || 0));
+  fill.style.width = (m > 0 ? (v / m) * 100 : 0) + "%";
+  const tone = input.value === "" ? "" : scoreTone(input.value, m);
   if (tone) { fill.setAttribute("data-tone", tone); if (track) track.setAttribute("data-tone", tone); }
   else { fill.removeAttribute("data-tone"); if (track) track.removeAttribute("data-tone"); }
 }
@@ -1165,20 +1188,21 @@ function refreshPillForInput(input) {
    Cards) -- a dial is barely wider than a letter, which is what keeps every row to one line.
    Tapping one reveals its own slider inline (see .src-slot/.src-slider-pop in the CSS), so
    the real draggable input lives right there instead of off-screen. The ring's own color now
-   reflects the score it holds (0=red, 1=green, in between=yellow -- see scoreTone), same as
-   the Cards-view bars; a blank dial falls back to its plain default color (brand for
-   Attendance, gold for Participation) since --fill is 0% either way and there's nothing to
-   tint. ---------- */
-function compactSlotHtml(slot, value, disabled, extraAttrs) {
+   reflects the score it holds (0=red, at this class's max=green, in between=yellow -- see
+   scoreTone), same as the Cards-view bars; a blank dial falls back to its plain default color
+   (brand for Attendance, gold for Participation) since --fill is 0% either way and there's
+   nothing to tint. ---------- */
+function compactSlotHtml(slot, value, disabled, extraAttrs, max) {
+  const m = Number(max) || 1;
   const v = (value === null || value === undefined) ? "" : value;
-  const pct = v === "" ? 0 : Math.max(0, Math.min(1, Number(v))) * 100;
+  const pct = v === "" ? 0 : Math.max(0, Math.min(1, Number(v) / m)) * 100;
   const label = slot === "att" ? "A" : "P";
-  const tone = v === "" ? "" : scoreTone(v);
+  const tone = v === "" ? "" : scoreTone(v, m);
   const toneVar = tone ? ("--circle-color:var(--" + tone + ");") : "";
   return '<span class="src-slot" data-slot-wrap="' + slot + '">' +
     '<button type="button" class="src-circle src-circle-' + slot + (disabled ? " src-circle-disabled" : "") + '" data-slot-toggle="' + slot + '" style="--fill:' + pct + '%;' + toneVar + '"' + (disabled ? " disabled" : "") + '>' +
     '<span class="src-circle-ring"></span><span class="src-circle-label">' + label + "</span></button>" +
-    '<span class="src-slider-pop">' + scorePillHtml(slot, value, null, disabled, extraAttrs, "0.1") + "</span>" +
+    '<span class="src-slider-pop">' + scorePillHtml(slot, value, null, disabled, extraAttrs, "0.1", m) + "</span>" +
     "</span>";
 }
 /* Present/Absent/Excused state of a pair, purely for lighting up the right quick-mark button
@@ -1187,21 +1211,24 @@ function compactSlotHtml(slot, value, disabled, extraAttrs) {
    dials themselves (computeStats already excludes true blanks from both the numerator and
    denominator; see its own comment). Anything that doesn't cleanly match one of the three
    (typically partial credit set via a dial's slider) lights up nothing -- the dials' own fill
-   is where that value shows. */
-function compactTriState(pair) {
+   is where that value shows. max defaults to 1 -- "present" means "at this class's max", not
+   literally 1, for a lower-weight class. */
+function compactTriState(pair, max) {
+  const m = Number(max) || 1;
   const att = pair[0], part = pair[1];
   if (pair[4]) return "excused";
   if (att === null || att === undefined) return "blank";
-  if (Number(att) === 1 && (part === null || part === undefined || Number(part) === 1)) return "present";
+  if (Number(att) >= m - 1e-9 && (part === null || part === undefined || Number(part) >= m - 1e-9)) return "present";
   if (Number(att) === 0 && (part === null || part === undefined || Number(part) === 0)) return "absent";
   return "partial";
 }
-function pillValueFromEvent(evt, trackEl) {
+function pillValueFromEvent(evt, trackEl, max) {
+  const m = Number(max) || 1;
   const rect = trackEl.getBoundingClientRect();
   const p = (evt.touches && evt.touches[0]) || (evt.changedTouches && evt.changedTouches[0]) || evt;
   let frac = rect.width > 0 ? (p.clientX - rect.left) / rect.width : 0;
   frac = Math.max(0, Math.min(1, frac));
-  return Math.round(frac * 20) / 20;
+  return Math.round(frac * 20) / 20 * m;
 }
 // Set while any Cards-view bar is actively being dragged, and checked by isViewBusy() -- the
 // drag targets the track div, not the underlying (often invisible) input, so
@@ -1215,10 +1242,11 @@ function wirePillTracks(root, onRelease) {
     const wrap = track.closest(".score-pill-wrap");
     const input = wrap ? wrap.querySelector('.score-input[data-slot="' + slot + '"]') : null;
     if (!input) return;
+    const trackMax = Number(wrap && wrap.dataset.max) || 1;
     let dragging = false;
     const apply = (evt) => {
       if (input.disabled) return;
-      input.value = pillValueFromEvent(evt, track);
+      input.value = pillValueFromEvent(evt, track, trackMax);
       input.dispatchEvent(new Event("input", { bubbles: true }));
     };
     track.addEventListener("pointerdown", (evt) => {
@@ -1538,7 +1566,7 @@ function computeStats(studentId, opts) {
   opts = opts || {};
   const from = opts.from, to = opts.to, onlyPeriod = opts.period, onlyCategory = opts.category;
   const scoped = !!(onlyPeriod || onlyCategory);
-  let attPts = 0, attPoss = 0, partPts = 0, partPoss = 0;
+  let attPts = 0, attPoss = 0, partPts = 0, partPoss = 0, attCount = 0, partCount = 0;
   for (const rec of state.attendance) {
     if (rec.studentId !== studentId) continue;
     if (from && rec.date < from) continue;
@@ -1553,14 +1581,25 @@ function computeStats(studentId, opts) {
       if (!pair) continue;
       const [a, pt] = pair;
       const bonus = isBonusPeriod(rec.date, p);
+      // A class's own max (see periodMaxFor, set in Admin > Schedule -- most classes are a
+      // normal full-weight 1) is what a fully-marked score there is possible-out-of: a lower
+      // max simply contributes less to the denominator (and, since the mark itself is stored
+      // already scaled to that max, less to the numerator too), so a short/supplementary class
+      // counts for proportionally less of the blended average instead of weighing the same as
+      // every other class.
+      const maxVal = periodMaxFor(p);
       // Percentages count only what was actually marked — a blank attendance or participation
       // score is left out of both the numerator and the denominator, rather than counting
       // against the student as a 0. A bonus class (admin-toggled per date+period) goes one
       // step further: whatever was marked still adds to the numerator as usual, but never
       // adds to the denominator — so a great score there raises the average, while a poor one
       // (or no mark at all) leaves it exactly where it was instead of dragging it down.
-      if (a !== null && a !== undefined && a !== "") { attPts += Number(a); if (!bonus) attPoss += 1; }
-      if (pt !== null && pt !== undefined && pt !== "") { partPts += Number(pt); if (!bonus) partPoss += 1; }
+      // Math.min(..., maxVal): a mark is always saved within its class's max at the time (see
+      // clampScore), but if an admin lowers a class's max after scores already exist under the
+      // old (higher) one, this keeps an old over-the-new-max mark from pushing a percentage
+      // past 100% -- it's simply worth this class's current max instead.
+      if (a !== null && a !== undefined && a !== "") { attPts += Math.min(Number(a), maxVal); if (!bonus) { attPoss += maxVal; attCount += 1; } }
+      if (pt !== null && pt !== undefined && pt !== "") { partPts += Math.min(Number(pt), maxVal); if (!bonus) { partPoss += maxVal; partCount += 1; } }
     }
   }
   // TAG coins are earned from Attendance AND Participation points combined.
@@ -1580,6 +1619,11 @@ function computeStats(studentId, opts) {
   return {
     attPts, attPoss, attPct: attPoss ? attPts / attPoss : null,
     partPts, partPoss, partPct: partPoss ? partPts / partPoss : null,
+    // Plain counts of how many times attendance/participation were actually marked -- unlike
+    // attPoss/partPoss above, NOT weighted by a class's max, so this is always a literal
+    // number of sessions regardless of which classes those sessions were (used for "times
+    // marked" displays, never for a percentage).
+    attCount, partCount,
     points: attPts + partPts,
     // Attendance and participation blended into one percentage — used for the Torah/Avoda/GC
     // leaderboards, where a single combined score per category reads more cleanly than two.
@@ -1590,14 +1634,16 @@ function computeStats(studentId, opts) {
 function studentStats(studentId) { return computeStats(studentId, {}); }
 /* Per-class aggregate across a roster, for the same optional date window. */
 function classStats(period, roster, opts) {
-  let attPts = 0, attPoss = 0, partPts = 0, partPoss = 0;
+  let attPts = 0, attPoss = 0, partPts = 0, partPoss = 0, attCount = 0, partCount = 0;
   roster.forEach((s) => {
     const st = computeStats(s.id, Object.assign({}, opts, { period }));
     attPts += st.attPts; attPoss += st.attPoss; partPts += st.partPts; partPoss += st.partPoss;
+    attCount += st.attCount; partCount += st.partCount;
   });
   return {
     attPts, attPoss, attPct: attPoss ? attPts / attPoss : null,
     partPts, partPoss, partPct: partPoss ? partPts / partPoss : null,
+    attCount, partCount,
   };
 }
 /* Whole-roster blended attendance+participation for a single day -- attendance and
@@ -2200,14 +2246,22 @@ function renderToday(root, session) {
   const bonusPieceHtml = (periodIsBonus ? '<span class="pill pill-gold" title="Marked scores help this average; a missed or low mark leaves it unchanged.">★ Bonus today — only helps, never hurts</span>' : "") +
     (canToggleBonus ? '<button class="btn btn-ghost btn-sm" id="toggle-bonus" type="button" title="' + (periodIsBonus ? "Unmark " + escapeHtml(selectedPeriod) + " as bonus" : "Mark " + escapeHtml(selectedPeriod) + " as bonus today") + '">' + (periodIsBonus ? "Unmark bonus" : "Mark bonus") + "</button>" : "");
 
+  // A class with a lower max (see periodMaxFor, set in Admin > Schedule) still marks as a full
+  // dial/bar when someone's fully present -- that's what makes marking it feel the same as any
+  // other class -- but it's worth calling out here, right where the marking happens, that a
+  // full mark here is worth less toward the blended average than a normal class.
+  const periodMax = selectedPeriod ? periodMaxFor(selectedPeriod) : 1;
+  const periodMaxPieceHtml = (selectedPeriod && periodMax !== 1)
+    ? '<span class="pill pill-muted" title="A full mark in ' + escapeHtml(selectedPeriod) + ' counts as ' + num2(periodMax) + ' toward the blended average, not a full 1.">Worth up to ' + num2(periodMax) + " pt" + (periodMax === 1 ? "" : "s") + "</span>" : "";
+
   const fillAllHtml = canWrite ? '<button class="btn btn-ghost btn-sm" id="fill-all" title="Mark whole class present">Mark all present</button>' : "";
 
   // These three used to each sit on their own stacked line; now they share one row (wrapping
   // on narrow screens) so they read as a single group of quick actions instead of a scroll of
   // separate buttons. The "+ Add a class" form itself, when open, still gets its own full-width
   // line right below -- there's no reasonable way to fit a select + text input inline with these.
-  if (bonusPieceHtml || extraPeriodButtonHtml || fillAllHtml) {
-    html += '<div class="today-quick-actions">' + bonusPieceHtml + extraPeriodButtonHtml + fillAllHtml + "</div>";
+  if (bonusPieceHtml || periodMaxPieceHtml || extraPeriodButtonHtml || fillAllHtml) {
+    html += '<div class="today-quick-actions">' + periodMaxPieceHtml + bonusPieceHtml + extraPeriodButtonHtml + fillAllHtml + "</div>";
   }
   html += extraPeriodFormHtml;
 
@@ -2235,15 +2289,15 @@ function renderToday(root, session) {
       const linked = !(pair[0] !== null && pair[0] !== undefined && pair[1] !== null && pair[1] !== undefined && pair[0] !== pair[1]);
       const note = pair[2] || "";
       const excused = !!pair[4];
-      const triState = compactTriState(pair);
+      const triState = compactTriState(pair, periodMax);
       html += '<div class="student-card student-row-compact' + (excused ? " is-excused" : "") + '" data-student="' + student.id + '" data-excused="' + (excused ? "1" : "0") + '">';
       html += '<span class="src-name">' + studentLink(student) + markedByBadge(pair) + "</span>";
       // Both the dials and the "Excused" text stay in the DOM always (CSS shows/hides by
       // .is-excused) so the Excused toggle can flip live without rebuilding this row.
       html += '<span class="src-vals">' +
         '<span class="src-val-normal">' +
-        compactSlotHtml("att", pair[0], !canWrite) +
-        compactSlotHtml("part", pair[1], !canWrite, 'data-linked="' + (linked ? "1" : "0") + '"') +
+        compactSlotHtml("att", pair[0], !canWrite, "", periodMax) +
+        compactSlotHtml("part", pair[1], !canWrite, 'data-linked="' + (linked ? "1" : "0") + '"', periodMax) +
         "</span>" +
         '<span class="src-val-excused">Excused</span>' +
         "</span>";
@@ -2272,8 +2326,8 @@ function renderToday(root, session) {
         (canWrite ? '<button class="btn btn-ghost btn-sm row-excuse' + (excused ? " active" : "") + '" type="button">Excused</button>' : "") +
         "</div></div>";
       html += '<div class="excused-note pill pill-muted">Excused — not counted toward attendance</div>';
-      html += scorePillHtml("att", pair[0], "Attendance", !canWrite);
-      html += scorePillHtml("part", pair[1], "Participation", !canWrite, 'data-linked="' + (linked ? "1" : "0") + '"');
+      html += scorePillHtml("att", pair[0], "Attendance", !canWrite, "", null, periodMax);
+      html += scorePillHtml("part", pair[1], "Participation", !canWrite, 'data-linked="' + (linked ? "1" : "0") + '"', null, periodMax);
       html += "</div>";
     });
     html += "</div>";
@@ -2301,11 +2355,12 @@ function renderToday(root, session) {
 /* A read-only circle for the "Today at a glance" table: same fill+color language as
    compactSlotHtml's A/P dials, but no drag/slider -- just a letter that a tap swaps for the
    exact number (see wireGlanceCircles), and swaps back on a second tap. */
-function glanceCircleHtml(slot, value) {
+function glanceCircleHtml(slot, value, max) {
+  const m = Number(max) || 1;
   const label = slot === "att" ? "A" : "P";
   if (value === null || value === undefined) return '<span class="glance-circle-empty">–</span>';
-  const pct = Math.max(0, Math.min(1, Number(value))) * 100;
-  const tone = scoreTone(value);
+  const pct = Math.max(0, Math.min(1, Number(value) / m)) * 100;
+  const tone = scoreTone(value, m);
   const toneVar = tone ? ("--circle-color:var(--" + tone + ");") : "";
   return '<button type="button" class="glance-circle" data-label="' + label + '" data-value="' + escapeHtml(num2(value)) + '" style="--fill:' + pct + '%;' + toneVar + '">' +
     '<span class="glance-circle-ring"></span><span class="glance-circle-label">' + label + "</span></button>";
@@ -2340,6 +2395,7 @@ function renderTodaySummary(date, periods, roster) {
       const note = pair && pair[2];
       const by = pair && pair[3];
       const excused = pair && !!pair[4];
+      const pMax = periodMaxFor(p);
       const meta = (by || note)
         ? '<span class="glance-meta">' +
           (by ? '<span class="marked-by marked-by-sm" title="Marked by ' + escapeHtml(by) + '">' + escapeHtml(initialsFor(by)) + "</span>" : "") +
@@ -2349,7 +2405,7 @@ function renderTodaySummary(date, periods, roster) {
       const text = excused
         ? '<span class="att-glance-excused">Excused</span>' + meta
         : has || meta
-        ? '<span class="glance-row">' + glanceCircleHtml("att", has ? pair[0] : null) + glanceCircleHtml("part", has && hasPart ? pair[1] : null) + meta + "</span>"
+        ? '<span class="glance-row">' + glanceCircleHtml("att", has ? pair[0] : null, pMax) + glanceCircleHtml("part", has && hasPart ? pair[1] : null, pMax) + meta + "</span>"
         : "—";
       html += '<td class="num' + (p === selectedPeriod ? " col-active" : "") + '">' + text + "</td>";
     });
@@ -2453,6 +2509,10 @@ function wireExtraPeriod(root) {
 function wireTodayGrid(root, teacherName) {
   const body = document.getElementById("period-entry-body");
   if (!body) return;
+  // Every card on this page marks the same currently-selected class, so one max (see
+  // periodMaxFor) covers every input wired below -- "present" means "at this class's max",
+  // whatever that is, not literally 1.
+  const periodMax = periodMaxFor(selectedPeriod);
   // Dragging a dial/bar to a value doesn't "commit" until the pointer lifts -- that's when
   // this fires, so a drag saves itself once at the end instead of on every intermediate
   // pointermove tick. (scheduleAutosave is declared further down but hoisted -- see its
@@ -2480,9 +2540,9 @@ function wireTodayGrid(root, teacherName) {
     const partInp = card.querySelector('.score-input[data-slot="part"]');
     const setCircle = (circle, input) => {
       if (!circle || !input) return;
-      const v = input.value === "" ? null : Math.max(0, Math.min(1, Number(input.value) || 0));
-      circle.style.setProperty("--fill", (v === null ? 0 : v * 100) + "%");
-      const tone = v === null ? "" : scoreTone(v);
+      const v = input.value === "" ? null : Math.max(0, Math.min(periodMax, Number(input.value) || 0));
+      circle.style.setProperty("--fill", (v === null ? 0 : (v / periodMax) * 100) + "%");
+      const tone = v === null ? "" : scoreTone(v, periodMax);
       if (tone) circle.style.setProperty("--circle-color", "var(--" + tone + ")");
       else circle.style.removeProperty("--circle-color");
     };
@@ -2502,7 +2562,7 @@ function wireTodayGrid(root, teacherName) {
     const partInp = card.querySelector('.score-input[data-slot="part"]');
     const a = attInp && attInp.value !== "" ? Number(attInp.value) : null;
     const p = partInp && partInp.value !== "" ? Number(partInp.value) : null;
-    const state = compactTriState([a, p, null, null, card.dataset.excused === "1"]);
+    const state = compactTriState([a, p, null, null, card.dataset.excused === "1"], periodMax);
     if (presentBtn) presentBtn.classList.toggle("active", state === "present");
     if (absentBtn) absentBtn.classList.toggle("active", state === "absent");
   }
@@ -2528,14 +2588,14 @@ function wireTodayGrid(root, teacherName) {
         if (attInp.value !== "") setExcused(false); else syncCheckButtons(card);
       };
       attInp.addEventListener("input", syncPart);
-      attInp.addEventListener("blur", () => { const v = clampScore(attInp.value); attInp.value = v === null ? "" : v; syncPart(); scheduleAutosave(card); });
+      attInp.addEventListener("blur", () => { const v = clampScore(attInp.value, periodMax); attInp.value = v === null ? "" : v; syncPart(); scheduleAutosave(card); });
       partInp.addEventListener("input", () => { partInp.dataset.linked = "0"; refreshPillForInput(partInp); updateSrcCircles(card); if (partInp.value !== "") setExcused(false); else syncCheckButtons(card); });
-      partInp.addEventListener("blur", () => { const v = clampScore(partInp.value); partInp.value = v === null ? "" : v; refreshPillForInput(partInp); updateSrcCircles(card); syncCheckButtons(card); scheduleAutosave(card); });
+      partInp.addEventListener("blur", () => { const v = clampScore(partInp.value, periodMax); partInp.value = v === null ? "" : v; refreshPillForInput(partInp); updateSrcCircles(card); syncCheckButtons(card); scheduleAutosave(card); });
     }
     const presentBtn = card.querySelector(".row-present");
     if (presentBtn) presentBtn.addEventListener("click", () => {
-      if (attInp) { attInp.value = "1"; refreshPillForInput(attInp); }
-      if (partInp) { partInp.value = "1"; partInp.dataset.linked = "1"; refreshPillForInput(partInp); }
+      if (attInp) { attInp.value = String(periodMax); refreshPillForInput(attInp); }
+      if (partInp) { partInp.value = String(periodMax); partInp.dataset.linked = "1"; refreshPillForInput(partInp); }
       updateSrcCircles(card);
       setExcused(false);
       scheduleAutosave(card);
@@ -2571,7 +2631,7 @@ function wireTodayGrid(root, teacherName) {
     // stays available by tapping a dial above to open its slider.
     const checkPresentBtn = card.querySelector(".src-check-present");
     if (checkPresentBtn) checkPresentBtn.addEventListener("click", () => {
-      const v = checkPresentBtn.classList.contains("active") ? "" : "1";
+      const v = checkPresentBtn.classList.contains("active") ? "" : String(periodMax);
       if (attInp) { attInp.value = v; refreshPillForInput(attInp); }
       if (partInp) { partInp.value = v; partInp.dataset.linked = "1"; refreshPillForInput(partInp); }
       updateSrcCircles(card);
@@ -2593,12 +2653,12 @@ function wireTodayGrid(root, teacherName) {
     body.querySelectorAll(".student-card").forEach((card) => {
       const attInp = card.querySelector('.score-input[data-slot="att"]');
       const partInp = card.querySelector('.score-input[data-slot="part"]');
-      if (attInp && attInp.value === "") { attInp.value = "1"; refreshPillForInput(attInp); }
-      if (partInp && partInp.value === "") { partInp.value = "1"; if (!partInp.dataset.linked) partInp.dataset.linked = "1"; refreshPillForInput(partInp); }
+      if (attInp && attInp.value === "") { attInp.value = String(periodMax); refreshPillForInput(attInp); }
+      if (partInp && partInp.value === "") { partInp.value = String(periodMax); if (!partInp.dataset.linked) partInp.dataset.linked = "1"; refreshPillForInput(partInp); }
       updateSrcCircles(card);
       syncCheckButtons(card);
     });
-    toast("Filled every blank score with 1 — adjust any exceptions, then save.", "good");
+    toast("Filled every blank score with " + num2(periodMax) + " — adjust any exceptions, then save.", "good");
   });
 
   // Builds the Firestore patch for either every visible card (bulk Save / note "Done") or
@@ -2618,7 +2678,7 @@ function wireTodayGrid(root, teacherName) {
       const noteInp = card.querySelector('.note-input');
       const note = noteInp ? noteInp.value.trim() : "";
       const excused = card.dataset.excused === "1";
-      const pair = [clampScore(attInp ? attInp.value : ""), clampScore(partInp ? partInp.value : ""), note];
+      const pair = [clampScore(attInp ? attInp.value : "", periodMax), clampScore(partInp ? partInp.value : "", periodMax), note];
       if (excused) pair[4] = true;
       draftForStash[studentId] = pair;
       // What this student's pair looked like right before this save -- captured from `base`
@@ -3068,9 +3128,9 @@ function renderOverview(root) {
     html += '<div class="table-wrap"><table><thead><tr><th>Class</th><th class="num">Attendance</th><th class="num">Participation</th><th class="num">Times marked (avg)</th></tr></thead><tbody>';
     periods.forEach((p) => {
       const cs = classStats(p, roster, { from: range.from, to: range.to });
-      const sessions = roster.length ? Math.round(cs.attPoss / roster.length) : 0;
+      const sessions = roster.length ? Math.round(cs.attCount / roster.length) : 0;
       html += "<tr><td>" + escapeHtml(p) + '</td><td class="num">' + pctPill(cs.attPct) + '</td><td class="num">' + pctPill(cs.partPct) +
-        '</td><td class="num">' + (cs.attPoss ? sessions : "—") + "</td></tr>";
+        '</td><td class="num">' + (cs.attCount ? sessions : "—") + "</td></tr>";
     });
     html += "</tbody></table></div>";
   } else {
@@ -3191,7 +3251,7 @@ function renderOverview(root) {
   const expAttBtn = document.getElementById("exp-att");
   if (expAttBtn) expAttBtn.addEventListener("click", () => {
     exportCSV("tag-academy-attendance-" + dateTag + ".csv",
-      ["Date", "Student", "Class/Period", "Attendance (0-1)", "Participation (0-1)", "Note", "Entered by"],
+      ["Date", "Student", "Class/Period", "Attendance (points, out of that class's max)", "Participation (points, out of that class's max)", "Note", "Entered by"],
       exportAttendanceRows(rangeForExport));
   });
   const expLedgerBtn = document.getElementById("exp-ledger");
@@ -3404,8 +3464,8 @@ function renderAdminSchedule(root) {
   html += '<div class="field-row" style="align-items:flex-end;max-width:480px;">' +
     '<div class="field" style="flex:1;"><label for="np-name">New class name</label><input type="text" id="np-name" placeholder="e.g. Chavrusa"></div>' +
     '<div class="field" style="flex-shrink:0;"><button class="btn btn-ghost btn-sm" id="np-add" type="button">Add class</button></div></div>';
-  html += '<p class="help-text" style="margin-top:-6px;">The order below is the order classes appear in every dropdown (Today’s Class/period picker, reports, etc.) — drag the handle to reorder. Category controls which Leaderboard(s) a class counts toward — Torah, Avoda, or Gemilas Chassidim classes are combined into one score there; “Other” classes still count toward the overall Attendance/Participation boards.</p>';
-  html += '<div class="table-wrap"><table><thead><tr><th style="width:36px;">Order</th><th style="min-width:150px;">Period</th><th style="min-width:212px;">Category</th>' + DAY_NAMES.map((d) => "<th>" + d.slice(0, 3) + "</th>").join("") + "<th></th></tr></thead><tbody>";
+  html += '<p class="help-text" style="margin-top:-6px;">The order below is the order classes appear in every dropdown (Today’s Class/period picker, reports, etc.) — drag the handle to reorder. Category controls which Leaderboard(s) a class counts toward — Torah, Avoda, or Gemilas Chassidim classes are combined into one score there; “Other” classes still count toward the overall Attendance/Participation boards. Max score is what a full mark in that class is worth — most classes are a normal 1, but a shorter or supplementary class can be set lower (e.g. 0.3 or 0.1) so it counts for proportionally less of a student’s blended average.</p>';
+  html += '<div class="table-wrap"><table><thead><tr><th style="width:36px;">Order</th><th style="min-width:150px;">Period</th><th style="min-width:212px;">Category</th><th style="min-width:100px;">Max score</th>' + DAY_NAMES.map((d) => "<th>" + d.slice(0, 3) + "</th>").join("") + "<th></th></tr></thead><tbody>";
   state.settings.periods.forEach((p, i) => {
     html += '<tr data-period-row="' + escapeHtml(p) + '"><td style="white-space:nowrap;">' +
       '<button class="btn btn-ghost btn-sm drag-handle" type="button" data-drag-handle title="Drag to reorder">⠿</button>' +
@@ -3415,6 +3475,7 @@ function renderAdminSchedule(root) {
     html += '<td><select class="period-category-input" data-original="' + escapeHtml(p) + '">' +
       PERIOD_CATEGORIES.map((c) => '<option value="' + c.id + '"' + (c.id === currentCat ? " selected" : "") + '>' + escapeHtml(c.label) + "</option>").join("") +
       "</select></td>";
+    html += '<td><input type="number" class="period-max-input" data-original="' + escapeHtml(p) + '" value="' + periodMaxFor(p) + '" min="0.05" max="1" step="0.05" title="A full mark in this class is worth this many points toward the blended average"></td>';
     DAY_NAMES.forEach((d) => {
       const checked = (state.settings.schedule[p] || []).includes(d);
       html += '<td style="text-align:center;"><input type="checkbox" data-period="' + escapeHtml(p) + '" data-day="' + d + '" ' + (checked ? "checked" : "") + "></td>";
@@ -3443,14 +3504,27 @@ function renderAdminSchedule(root) {
     root.querySelectorAll("input[data-period]").forEach((cb) => { if (cb.checked) schedByOriginal[cb.getAttribute("data-period")].push(cb.getAttribute("data-day")); });
     const categoryByOriginal = {};
     root.querySelectorAll(".period-category-input").forEach((sel) => { categoryByOriginal[sel.getAttribute("data-original")] = sel.value; });
+    // Same clamp/fallback as periodMaxFor -- a blank, zero, negative, or >1 entry just falls
+    // back to a normal full-weight 1 rather than blocking the whole save over one bad number.
+    const maxByOriginal = {};
+    root.querySelectorAll(".period-max-input").forEach((inp) => {
+      const n = Number(inp.value);
+      maxByOriginal[inp.getAttribute("data-original")] = (inp.value !== "" && !isNaN(n) && n > 0 && n <= 1) ? n : 1;
+    });
 
     const newState = JSON.parse(JSON.stringify(state));
     newState.settings.periods = finalNames;
     const newSched = {};
     const newCategories = {};
-    state.settings.periods.forEach((p) => { newSched[renameOf[p]] = schedByOriginal[p]; newCategories[renameOf[p]] = categoryByOriginal[p] || categoryFor(p); });
+    const newMax = {};
+    state.settings.periods.forEach((p) => {
+      newSched[renameOf[p]] = schedByOriginal[p];
+      newCategories[renameOf[p]] = categoryByOriginal[p] || categoryFor(p);
+      newMax[renameOf[p]] = maxByOriginal[p] || periodMaxFor(p);
+    });
     newState.settings.schedule = newSched;
     newState.settings.periodCategories = newCategories;
+    newState.settings.periodMax = newMax;
     // Carry past attendance over to the new name for anything actually renamed.
     state.settings.periods.forEach((p) => {
       const next = renameOf[p];
@@ -4194,7 +4268,7 @@ function renderStudentDetail(root, student, opts) {
 
   const reportNotes = notesForStudent(student.id, range.from, range.to);
   const reportClusters = clusterNotes(reportNotes);
-  const narrative = generateReportNarrative(student.first, reportClusters, rangeSt, rangeSt.attPoss);
+  const narrative = generateReportNarrative(student.first, reportClusters, rangeSt, rangeSt.attCount);
   html += '<div class="card card-pad report-card-print" style="margin-top:16px;">' +
     '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">' +
     '<div><span class="eyebrow">Report card</span><h3 style="margin:2px 0 0;">' + escapeHtml(fullName(student)) + '</h3>' +
@@ -4207,7 +4281,7 @@ function renderStudentDetail(root, student, opts) {
 
   html += '<div class="card card-pad" style="margin-top:16px;"><h3>By class</h3>' +
     '<p class="help-text" style="margin-top:-6px;">Click a class to see the calendar and stats above for just that class.</p>';
-  const classRows = periods.map((p) => ({ p: p, cs: computeStats(student.id, { period: p, from: range.from, to: range.to }) })).filter((r) => r.cs.attPoss > 0 || r.cs.partPoss > 0);
+  const classRows = periods.map((p) => ({ p: p, cs: computeStats(student.id, { period: p, from: range.from, to: range.to }) })).filter((r) => r.cs.attCount > 0 || r.cs.partCount > 0);
   if (classRows.length === 0) {
     html += '<p class="help-text">No classes recorded for this student yet.</p>';
   } else {
@@ -4216,7 +4290,7 @@ function renderStudentDetail(root, student, opts) {
       const isSel = sdClassFilter === r.p;
       html += '<tr class="sd-class-row' + (isSel ? " sd-class-row-sel" : "") + '" data-sd-class-row="' + escapeHtml(r.p) + '"><td>' + escapeHtml(r.p) + (isSel ? ' <span class="pill pill-good">Selected</span>' : "") +
         '</td><td class="num">' + pctPill(r.cs.attPct) + '</td><td class="num">' + pctPill(r.cs.partPct) +
-        '</td><td class="num">' + r.cs.attPoss + "</td></tr>";
+        '</td><td class="num">' + r.cs.attCount + "</td></tr>";
     });
     html += "</tbody></table></div>";
   }
