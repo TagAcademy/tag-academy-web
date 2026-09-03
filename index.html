@@ -427,6 +427,22 @@ main.view {
 .card + .card { margin-top: 16px; }
 .section-title { font-family: var(--font-display); font-weight: 800; font-size: 1rem; margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
 
+/* Collapsible "disclosure" sections (see collapsibleSectionHtml in app.js) -- a plain .card
+   whose only always-visible content is one full-width button acting as its header. */
+.collapsible-toggle {
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  background: none; border: none; cursor: pointer; padding: 16px 20px; text-align: left;
+  font: inherit; color: inherit; border-radius: var(--radius);
+}
+.collapsible-toggle:hover, .collapsible-toggle:focus-visible { background: var(--surface-2); }
+.collapsible-toggle-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.collapsible-title { font-family: var(--font-display); font-weight: 800; font-size: 1rem; }
+.collapsible-subtitle { font-size: 0.8rem; color: var(--muted); font-weight: 400; }
+.collapsible-chevron { flex-shrink: 0; width: 18px; height: 18px; color: var(--muted); transition: transform 0.15s ease; }
+.collapsible-toggle[aria-expanded="true"] .collapsible-chevron { transform: rotate(180deg); }
+.collapsible-toggle[aria-expanded="true"] { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.collapsible-body { padding: 0 20px 20px; }
+
 .grid-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
 .stat-tile { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; box-shadow: var(--shadow); }
 .stat-tile .label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 700; }
@@ -556,6 +572,24 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--line); font-size: 0
 tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover { background: var(--surface-2); }
 td.num, th.num { font-family: var(--font-mono); text-align: right; }
+
+/* Frozen first/last column for wide tables that scroll horizontally on a phone -- e.g. the
+   Students/Staff tables' Actions column (so the action menu toggle is reachable without
+   scrolling all the way right first) and the Schedule table's Period name (so you can still
+   tell which class you're editing while scrolled over to its day checkboxes). Mirrors the
+   existing sticky "Student" column pattern in the attendance weekly grids. */
+.table-wrap table td.sticky-col-r, .table-wrap table th.sticky-col-r {
+  position: sticky; right: 0; background: var(--surface); z-index: 1;
+  border-left: 1px solid var(--line-strong);
+}
+.table-wrap table thead th.sticky-col-r { background: var(--surface-2); z-index: 3; }
+.table-wrap table tbody tr:hover td.sticky-col-r { background: var(--surface-2); }
+.table-wrap table td.sticky-col-l, .table-wrap table th.sticky-col-l {
+  position: sticky; left: 0; background: var(--surface); z-index: 1;
+  border-right: 1px solid var(--line-strong);
+}
+.table-wrap table thead th.sticky-col-l { background: var(--surface-2); z-index: 3; }
+.table-wrap table tbody tr:hover td.sticky-col-l { background: var(--surface-2); }
 
 /* Masked-by-default password cells (Admin > Staff/Students) -- see passwordCellHtml. Dots
    instead of the real password so a shared screen or projector doesn't broadcast every
@@ -976,12 +1010,24 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
   .hcal-pop { position: static; width: 100%; max-width: none; margin-top: 8px; }
   /* Page titles ("Attendance & Participation" etc.) and their description line read as
      oversized on a phone-width column -- scale them down a step, desktop is unaffected. */
+  .page-head { margin-bottom: 14px; }
   .page-head h1 { font-size: 1.35rem; }
-  .page-head p { font-size: 0.8rem; }
+  .page-head p { font-size: 0.8rem; margin-top: 2px; }
   /* Compact view stays one line per student even on phones -- shrink the name's minimum
      width a bit further and let the row itself scroll sideways as the last resort instead
      of wrapping, which would make it as tall as Cards again (the exact complaint it fixes). */
   .student-row-compact .src-name { min-width: 44px; }
+  /* Cards view: on a phone, "ATTENDANCE"/"PARTICIPATION" sitting on their own line above each
+     bar (the desktop layout) makes every card roughly 300px tall -- with a full class of
+     students that's an enormous amount of scrolling for something people do every day, often
+     one-handed. Moving the label beside its bar instead of above it removes one whole text
+     line per bar (two per student) without losing any information -- "Attendance"/
+     "Participation" comfortably fit next to the bar at this width, they just don't need a row
+     of their own. */
+  .score-pill-row { flex-direction: row; align-items: center; gap: 8px; }
+  .score-pill-label { flex: 0 0 auto; width: 92px; white-space: nowrap; }
+  .score-pill-wrap { flex: 1; min-width: 0; }
+  .student-card { padding: 12px; gap: 10px; }
 }
 @media (max-width: 360px) {
   main.view { padding: 20px 10px 50px; }
@@ -2129,8 +2175,40 @@ const ICONS = {
   download: '<path d="M9 2.5v9.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M5 8.2 9 12.2 13 8.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 14.5v.6a1.4 1.4 0 0 0 1.4 1.4h9.2a1.4 1.4 0 0 0 1.4-1.4v-.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
   trophy: '<path d="M6 2.5h6v5a3 3 0 0 1-6 0v-5z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M6 3.3H3.3a1 1 0 0 0-1 1.1c.15 1.7 1 3 3.2 3.2M12 3.3h2.7a1 1 0 0 1 1 1.1c-.15 1.7-1 3-3.2 3.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M9 10.3v2.4M6.3 15.5c0-1.5 1.1-2 2.7-2.1 1.6.1 2.7.6 2.7 2.1" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
   crown: '<path d="M2.7 13.2h12.6l1-7.3-3.9 2.9-2.7-4.8-2.7 4.8-3.9-2.9 1 7.3z" fill="currentColor" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/><rect x="2.7" y="13.2" width="12.6" height="1.9" rx="0.5" fill="currentColor"/>',
+  chevron: '<path d="M4.5 7 9 11.5 13.5 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
 };
 function icon(name) { return '<svg viewBox="0 0 18 18">' + (ICONS[name] || "") + "</svg>"; }
+
+/* Collapsible "disclosure" sections, used across the app for content that's genuinely useful
+   but that most visits don't need -- Reports' whole-roster weekly sheet, its day-by-day
+   calendar, and its CSV export; the Ledger's privilege price list and bulk grant/charge tool.
+   Rather than always taking up scroll space (especially painful on a phone, where these
+   sections used to stack into one very long page), each one collapses behind a single tap on
+   its own header, with a short subtitle so it's clear what's inside before opening it.
+   `openSections` is a plain Set of open section ids, kept at module level (not per-page state)
+   so it survives the app's usual full-page renderAll() re-renders -- a new section anywhere
+   just picks its own id and starts closed like every other one. */
+let openSections = new Set();
+function collapsibleSectionHtml(id, title, subtitle, bodyHtml) {
+  const open = openSections.has(id);
+  return '<div class="card collapsible-card" style="margin-top:16px;">' +
+    '<button type="button" class="collapsible-toggle" data-collapse="' + escapeHtml(id) + '" aria-expanded="' + (open ? "true" : "false") + '">' +
+    '<span class="collapsible-toggle-text"><span class="collapsible-title">' + escapeHtml(title) + "</span>" +
+    (subtitle ? '<span class="collapsible-subtitle">' + escapeHtml(subtitle) + "</span>" : "") + "</span>" +
+    '<span class="collapsible-chevron">' + icon("chevron") + "</span>" +
+    "</button>" +
+    (open ? '<div class="collapsible-body">' + bodyHtml + "</div>" : "") +
+    "</div>";
+}
+function wireCollapsibleSections(root) {
+  root.querySelectorAll("[data-collapse]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-collapse");
+      if (openSections.has(id)) openSections.delete(id); else openSections.add(id);
+      renderAll();
+    });
+  });
+}
 
 /* ================================================================
    SHELL
@@ -3122,12 +3200,11 @@ function renderLedger(root, session) {
     // right here, and "Select all" ticks/clears the whole active roster in one click.
     bulkLedgerSelected.forEach((id) => { if (!roster.some((s) => s.id === id)) bulkLedgerSelected.delete(id); });
     const allSelected = roster.length > 0 && roster.every((s) => bulkLedgerSelected.has(s.id));
-    html += '<div class="card card-pad" style="margin-top:16px;"><div class="section-title">Bulk grant or charge</div>' +
-      '<p class="help-text" style="margin-top:-6px;">Apply one grant or charge to several students — or the whole roster — at once.</p>';
+    let bulkBody;
     if (roster.length === 0) {
-      html += '<p class="help-text">No active students on the roster yet.</p></div>';
+      bulkBody = '<p class="help-text">No active students on the roster yet.</p>';
     } else {
-      html += '<div class="field-row">' +
+      bulkBody = '<div class="field-row">' +
         '<div class="field"><label for="blk-date">Date</label><input type="date" id="blk-date" value="' + todayISO() + '"></div>' +
         '<div class="field" style="min-width:190px;"><label for="blk-type">Type</label><select id="blk-type">' +
         '<option value="Manual Grant">Manual Grant (add coins)</option>' +
@@ -3146,14 +3223,15 @@ function renderLedger(root, session) {
             '</td><td class="num"><span class="coin-inline">' + coinBadge("sm") + '<span style="font-weight:700;color:var(--gold);">' + num2(bal) + "</span></span></td></tr>";
         }).join("") +
         "</tbody></table></div>" +
-        '<button class="btn btn-primary" id="blk-submit" style="margin-top:12px;">Apply to ' + bulkLedgerSelected.size + " selected</button>" +
-        "</div>";
+        '<button class="btn btn-primary" id="blk-submit" style="margin-top:12px;">Apply to ' + bulkLedgerSelected.size + " selected</button>";
     }
+    html += collapsibleSectionHtml("ledgerBulk", "Bulk grant or charge", "Apply one grant or charge to several students — or the whole roster — at once.", bulkBody);
   }
 
   if (privs.length) {
-    html += '<div class="card card-pad"><div class="section-title">Privilege price list</div><div class="table-wrap"><table><thead><tr><th>Privilege</th><th class="num">Cost</th></tr></thead><tbody>' +
-      privs.map((p) => "<tr><td>" + escapeHtml(p.name) + '</td><td class="num">' + num2(p.cost) + "</td></tr>").join("") + "</tbody></table></div></div>";
+    const privBody = '<div class="table-wrap"><table><thead><tr><th>Privilege</th><th class="num">Cost</th></tr></thead><tbody>' +
+      privs.map((p) => "<tr><td>" + escapeHtml(p.name) + '</td><td class="num">' + num2(p.cost) + "</td></tr>").join("") + "</tbody></table></div>";
+    html += collapsibleSectionHtml("ledgerPrivs", "Privilege price list", null, privBody);
   }
 
   const rows = state.ledger.slice().sort((a, b) => (b.enteredAt || 0) - (a.enteredAt || 0));
@@ -3366,9 +3444,7 @@ function renderReportsCalendarHtml() {
   const roster = activeRoster();
   const periods = state.settings.periods;
 
-  let html = '<div class="card card-pad" style="margin-top:16px;">';
-  html += '<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:12px;">' +
-    '<div><span class="eyebrow">Whole school, day by day</span><h2 style="margin:2px 0 0;font-family:var(--font-display);font-size:1.15rem;">Attendance calendar</h2></div>' +
+  let html = '<div style="display:flex;justify-content:flex-end;margin-bottom:12px;">' +
     '<div class="field" style="min-width:180px;margin-bottom:0;"><label for="rep-cal-class">Class</label><select id="rep-cal-class">' +
     '<option value=""' + (!repCalClassFilter ? " selected" : "") + '>All classes</option>' +
     periods.map((p) => '<option value="' + escapeHtml(p) + '"' + (repCalClassFilter === p ? " selected" : "") + '>' + escapeHtml(p) + "</option>").join("") +
@@ -3404,7 +3480,6 @@ function renderReportsCalendarHtml() {
   html += '<p class="help-text" style="margin-top:10px;">Each day blends attendance and participation across the whole roster' +
     (repCalClassFilter ? " for " + escapeHtml(repCalClassFilter) : " and every class held that day") +
     '. Click a day to jump the table above to just that day.</p>';
-  html += "</div>";
   return html;
 }
 
@@ -3498,58 +3573,63 @@ function renderOverview(root) {
   const weekPeriods = state.settings.periods;
   if (!weekPeriods.includes(repWeekPeriod)) repWeekPeriod = weekPeriods[0] || null;
   const repWeekRange = weekRangeFor(repWeekAnchor);
-  html += '<div class="card card-pad" style="margin-top:16px;"><div class="section-title"><span>Week at a glance — whole roster</span></div>' +
-    '<p style="margin:2px 0 12px;font-size:0.82rem;color:var(--muted);">Pick a class and a week to see every student’s attendance day by day — marked, missed, or not scheduled — the same read as a student’s own weekly sheet.</p>';
-  if (!weekPeriods.length || !roster.length) {
-    html += '<p class="help-text">' + (!weekPeriods.length ? "No classes set up yet." : "No active students on the roster yet.") + "</p>";
-  } else {
-    html += '<div class="field-row" style="align-items:flex-end;">' +
-      '<div class="field" style="min-width:200px;"><label for="rep-week-period">Class / period</label><select id="rep-week-period">' +
-      weekPeriods.map((p) => '<option value="' + escapeHtml(p) + '"' + (p === repWeekPeriod ? " selected" : "") + '>' + escapeHtml(p) + "</option>").join("") +
-      "</select></div>" +
-      '<div class="field" style="flex-shrink:0;min-width:auto;"><label>&nbsp;</label><div style="display:flex;gap:6px;flex-wrap:wrap;">' +
-      '<button class="btn btn-ghost btn-sm" id="rep-week-prev" type="button">&larr;</button>' +
-      '<button class="btn btn-ghost btn-sm" id="rep-week-today" type="button">This week</button>' +
-      '<button class="btn btn-ghost btn-sm" id="rep-week-next" type="button">&rarr;</button></div></div>' +
-      "</div>" +
-      '<div style="margin:2px 0 12px;font-size:0.82rem;color:var(--muted);">' + escapeHtml(fmtDateShort(repWeekRange.from)) + " – " + escapeHtml(fmtDateShort(repWeekRange.to)) + "</div>" +
-      renderRosterWeekGridHtml(roster, repWeekPeriod, repWeekRange.from);
+  {
+    let body = "";
+    if (!weekPeriods.length || !roster.length) {
+      body = '<p class="help-text">' + (!weekPeriods.length ? "No classes set up yet." : "No active students on the roster yet.") + "</p>";
+    } else {
+      body = '<div class="field-row" style="align-items:flex-end;">' +
+        '<div class="field" style="min-width:200px;"><label for="rep-week-period">Class / period</label><select id="rep-week-period">' +
+        weekPeriods.map((p) => '<option value="' + escapeHtml(p) + '"' + (p === repWeekPeriod ? " selected" : "") + '>' + escapeHtml(p) + "</option>").join("") +
+        "</select></div>" +
+        '<div class="field" style="flex-shrink:0;min-width:auto;"><label>&nbsp;</label><div style="display:flex;gap:6px;flex-wrap:wrap;">' +
+        '<button class="btn btn-ghost btn-sm" id="rep-week-prev" type="button">&larr;</button>' +
+        '<button class="btn btn-ghost btn-sm" id="rep-week-today" type="button">This week</button>' +
+        '<button class="btn btn-ghost btn-sm" id="rep-week-next" type="button">&rarr;</button></div></div>' +
+        "</div>" +
+        '<div style="margin:2px 0 12px;font-size:0.82rem;color:var(--muted);">' + escapeHtml(fmtDateShort(repWeekRange.from)) + " – " + escapeHtml(fmtDateShort(repWeekRange.to)) + "</div>" +
+        renderRosterWeekGridHtml(roster, repWeekPeriod, repWeekRange.from);
+    }
+    html += collapsibleSectionHtml("repWeek", "Week at a glance — whole roster",
+      "Pick a class and a week to see every student's attendance day by day", body);
   }
-  html += "</div>";
 
-  html += renderReportsCalendarHtml();
+  html += collapsibleSectionHtml("repCal", "Whole school, day by day",
+    "Attendance calendar — every day, every class, at a glance", renderReportsCalendarHtml());
 
-  const xr = exportRange();
-  const showNav = exportScope !== "all" && exportScope !== "custom";
-  const canExport = exportAvailable();
-  html += '<div class="card card-pad" style="margin-top:16px;">' +
-    '<span class="eyebrow">Backup &amp; export</span><h2 style="margin:2px 0 4px;font-family:var(--font-display);font-size:1.15rem;">Download your data</h2>';
-  if (!canExport) {
-    html += '<p class="help-text" style="margin:0;">File downloads aren\'t available on this copy of the app right now — ask whoever set this up to pull a backup export for you instead.</p></div>';
-  } else {
-    html += '<p class="help-text" style="margin:0 0 12px;">Export a spreadsheet-ready CSV file — opens directly in Excel, Numbers, or Google Sheets.</p>' +
-      '<div class="field-row">' +
-      '<div class="field" style="min-width:170px;"><label for="exp-scope">Time range</label><select id="exp-scope">' +
-      '<option value="today"' + (exportScope === "today" ? " selected" : "") + '>Daily</option>' +
-      '<option value="week"' + (exportScope === "week" ? " selected" : "") + '>Weekly</option>' +
-      '<option value="hmonth"' + (exportScope === "hmonth" ? " selected" : "") + '>Monthly (Hebrew month)</option>' +
-      '<option value="hyear"' + (exportScope === "hyear" ? " selected" : "") + '>Yearly (Hebrew year)</option>' +
-      '<option value="all"' + (exportScope === "all" ? " selected" : "") + '>All time</option>' +
-      '<option value="custom"' + (exportScope === "custom" ? " selected" : "") + '>Custom range</option>' +
-      "</select></div>" +
-      (showNav ? '<div class="field" style="flex-shrink:0;min-width:auto;"><label>&nbsp;</label><div style="display:flex;gap:6px;flex-wrap:wrap;">' +
-        '<button class="btn btn-ghost btn-sm" id="exp-prev" type="button">&larr;</button>' +
-        '<button class="btn btn-ghost btn-sm" id="exp-today" type="button">Today</button>' +
-        '<button class="btn btn-ghost btn-sm" id="exp-next" type="button">&rarr;</button></div></div>' : "") +
-      (exportScope === "custom" ? '<div class="field" style="min-width:150px;"><label for="exp-from">From</label><input type="date" id="exp-from" value="' + escapeHtml(exportFrom) + '"></div>' +
-        '<div class="field" style="min-width:150px;"><label for="exp-to">To</label><input type="date" id="exp-to" value="' + escapeHtml(exportTo) + '"></div>' : "") +
-      "</div>" +
-      (xr.label ? '<div style="font-size:0.82rem;color:var(--muted);margin:-4px 0 14px;">' + escapeHtml(xr.label) + "</div>" : "") +
-      '<div style="display:flex;gap:10px;flex-wrap:wrap;">' +
-      '<button class="btn btn-ghost" id="exp-att" type="button">' + icon("download") + "Attendance &amp; participation</button>" +
-      '<button class="btn btn-ghost" id="exp-ledger" type="button">' + icon("download") + "Coin ledger</button>" +
-      '<button class="btn btn-ghost" id="exp-summary" type="button">' + icon("download") + "Student summary</button>" +
-      "</div></div>";
+  {
+    const xr = exportRange();
+    const showNav = exportScope !== "all" && exportScope !== "custom";
+    const canExport = exportAvailable();
+    let body;
+    if (!canExport) {
+      body = '<p class="help-text" style="margin:0;">File downloads aren\'t available on this copy of the app right now — ask whoever set this up to pull a backup export for you instead.</p>';
+    } else {
+      body = '<p class="help-text" style="margin:0 0 12px;">Export a spreadsheet-ready CSV file — opens directly in Excel, Numbers, or Google Sheets.</p>' +
+        '<div class="field-row">' +
+        '<div class="field" style="min-width:170px;"><label for="exp-scope">Time range</label><select id="exp-scope">' +
+        '<option value="today"' + (exportScope === "today" ? " selected" : "") + '>Daily</option>' +
+        '<option value="week"' + (exportScope === "week" ? " selected" : "") + '>Weekly</option>' +
+        '<option value="hmonth"' + (exportScope === "hmonth" ? " selected" : "") + '>Monthly (Hebrew month)</option>' +
+        '<option value="hyear"' + (exportScope === "hyear" ? " selected" : "") + '>Yearly (Hebrew year)</option>' +
+        '<option value="all"' + (exportScope === "all" ? " selected" : "") + '>All time</option>' +
+        '<option value="custom"' + (exportScope === "custom" ? " selected" : "") + '>Custom range</option>' +
+        "</select></div>" +
+        (showNav ? '<div class="field" style="flex-shrink:0;min-width:auto;"><label>&nbsp;</label><div style="display:flex;gap:6px;flex-wrap:wrap;">' +
+          '<button class="btn btn-ghost btn-sm" id="exp-prev" type="button">&larr;</button>' +
+          '<button class="btn btn-ghost btn-sm" id="exp-today" type="button">Today</button>' +
+          '<button class="btn btn-ghost btn-sm" id="exp-next" type="button">&rarr;</button></div></div>' : "") +
+        (exportScope === "custom" ? '<div class="field" style="min-width:150px;"><label for="exp-from">From</label><input type="date" id="exp-from" value="' + escapeHtml(exportFrom) + '"></div>' +
+          '<div class="field" style="min-width:150px;"><label for="exp-to">To</label><input type="date" id="exp-to" value="' + escapeHtml(exportTo) + '"></div>' : "") +
+        "</div>" +
+        (xr.label ? '<div style="font-size:0.82rem;color:var(--muted);margin:-4px 0 14px;">' + escapeHtml(xr.label) + "</div>" : "") +
+        '<div style="display:flex;gap:10px;flex-wrap:wrap;">' +
+        '<button class="btn btn-ghost" id="exp-att" type="button">' + icon("download") + "Attendance &amp; participation</button>" +
+        '<button class="btn btn-ghost" id="exp-ledger" type="button">' + icon("download") + "Coin ledger</button>" +
+        '<button class="btn btn-ghost" id="exp-summary" type="button">' + icon("download") + "Student summary</button>" +
+        "</div>";
+    }
+    html += collapsibleSectionHtml("repExport", "Backup & export", "Download a spreadsheet-ready CSV", body);
   }
 
   root.innerHTML = html;
@@ -3886,12 +3966,12 @@ function renderAdminSchedule(root) {
     '<div class="field" style="flex:1;"><label for="np-name">New class name</label><input type="text" id="np-name" placeholder="e.g. Chavrusa"></div>' +
     '<div class="field" style="flex-shrink:0;"><button class="btn btn-ghost btn-sm" id="np-add" type="button">Add class</button></div></div>';
   html += '<p class="help-text" style="margin-top:-6px;">The order below is the order classes appear in every dropdown (Today’s Class/period picker, reports, etc.) — drag the handle to reorder. Category controls which Leaderboard(s) a class counts toward — Torah, Avoda, or Gemilas Chassidim classes are combined into one score there; “Other” classes still count toward the overall Attendance/Participation boards. Max score is what a full mark in that class is worth — most classes are a normal 1, but a shorter or supplementary class can be set lower (e.g. 0.3 or 0.1) so it counts for proportionally less of a student’s blended average.</p>';
-  html += '<div class="table-wrap"><table><thead><tr><th style="width:36px;">Order</th><th style="min-width:150px;">Period</th><th style="min-width:212px;">Category</th><th style="min-width:100px;">Max score</th>' + DAY_NAMES.map((d) => "<th>" + d.slice(0, 3) + "</th>").join("") + "<th></th></tr></thead><tbody>";
+  html += '<div class="table-wrap"><table><thead><tr><th style="width:36px;">Order</th><th class="sticky-col-l" style="min-width:150px;">Period</th><th style="min-width:212px;">Category</th><th style="min-width:100px;">Max score</th>' + DAY_NAMES.map((d) => "<th>" + d.slice(0, 3) + "</th>").join("") + "<th></th></tr></thead><tbody>";
   state.settings.periods.forEach((p, i) => {
     html += '<tr data-period-row="' + escapeHtml(p) + '"><td style="white-space:nowrap;">' +
       '<button class="btn btn-ghost btn-sm drag-handle" type="button" data-drag-handle title="Drag to reorder">⠿</button>' +
       "</td>";
-    html += '<td><input type="text" class="period-name-input" data-original="' + escapeHtml(p) + '" value="' + escapeHtml(p) + '"></td>';
+    html += '<td class="sticky-col-l"><input type="text" class="period-name-input" data-original="' + escapeHtml(p) + '" value="' + escapeHtml(p) + '"></td>';
     const currentCat = categoryFor(p);
     html += '<td><select class="period-category-input" data-original="' + escapeHtml(p) + '">' +
       PERIOD_CATEGORIES.map((c) => '<option value="' + c.id + '"' + (c.id === currentCat ? " selected" : "") + '>' + escapeHtml(c.label) + "</option>").join("") +
@@ -4062,11 +4142,11 @@ function renderAdminStaff(root) {
       '<button class="btn btn-ghost btn-sm" id="st-bulk-dismiss" style="margin-top:10px;">Dismiss</button></div>';
   }
 
-  html += '<div class="card card-pad"><div class="table-wrap"><table><thead><tr><th>Name</th><th>Username</th><th>Password</th><th>Role</th><th></th></tr></thead><tbody>';
+  html += '<div class="card card-pad"><div class="table-wrap"><table><thead><tr><th>Name</th><th>Username</th><th>Password</th><th>Role</th><th class="sticky-col-r"></th></tr></thead><tbody>';
   state.staff.forEach((s) => {
     html += "<tr><td>" + escapeHtml(s.name) + '</td><td class="num">' + escapeHtml(s.username) + '</td><td class="num">' + passwordCellHtml(s.password, "staff:" + s.id) +
       '</td><td>' + (s.role === "admin" ? '<span class="pill pill-gold">Admin</span>' : '<span class="pill pill-muted">Teacher</span>') +
-      '</td><td><button class="btn btn-ghost btn-sm" data-view-as-staff="' + s.id + '">View as</button> ' +
+      '</td><td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;"><button class="btn btn-ghost btn-sm" data-view-as-staff="' + s.id + '">View as</button>' +
       '<button class="btn btn-ghost btn-sm" data-reset-staff="' + s.id + '">Reset password</button></td></tr>';
   });
   html += "</tbody></table></div></div>";
@@ -4152,6 +4232,12 @@ let showBulkStudentForm = false;
 let showArchivedStudents = false;
 let confirmDeleteStudentId = null;
 let editingStudentId = null;
+// Which student's row-action menu is expanded (only one at a time) -- collapsing the five
+// per-row buttons (View as/Edit/Archive/Reset/Delete) behind one toggle keeps every row a
+// single compact line by default, since a wrapped row of five buttons on a narrow phone
+// screen was stretching every roster row to 150px+ even though most of that height was an
+// off-screen (horizontally-scrolled) cell.
+let openStudentActionMenu = null;
 function studentRow(s, archived) {
   if (editingStudentId === s.id) {
     return "<tr>" +
@@ -4160,22 +4246,28 @@ function studentRow(s, archived) {
       '<td class="num">' + escapeHtml(s.username || "—") + '</td><td class="num">' + passwordCellHtml(s.password, "student:" + s.id) + "</td>" +
       '<td class="num"><input type="number" id="edit-yob-' + s.id + '" value="' + (s.yearOfBirth ? escapeHtml(String(s.yearOfBirth)) : "") + '" placeholder="e.g. 2013" style="width:88px;"></td><td>' +
       (archived ? '<span class="pill pill-muted">Archived</span>' : '<span class="pill pill-good">Active</span>') +
-      '</td><td style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
+      '</td><td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
       '<button class="btn btn-primary btn-sm" data-save-student="' + s.id + '">Save</button>' +
       '<button class="btn btn-ghost btn-sm" data-cancel-edit-student="' + s.id + '">Cancel</button>' +
       "</td></tr>";
   }
-  const actions = confirmDeleteStudentId === s.id
-    ? '<span style="color:var(--warn);font-weight:600;">Delete permanently?</span> ' +
+  let actions;
+  if (confirmDeleteStudentId === s.id) {
+    actions = '<span style="color:var(--warn);font-weight:600;">Delete permanently?</span> ' +
       '<button class="btn btn-danger btn-sm" data-confirm-delete-student="' + s.id + '">Yes, delete everything</button>' +
-      '<button class="btn btn-ghost btn-sm" data-cancel-delete-student="' + s.id + '">Cancel</button>'
-    : '<button class="btn btn-ghost btn-sm" data-view-as-student="' + s.id + '">View as</button>' +
+      '<button class="btn btn-ghost btn-sm" data-cancel-delete-student="' + s.id + '">Cancel</button>';
+  } else if (openStudentActionMenu === s.id) {
+    actions = '<button class="btn btn-ghost btn-sm" data-view-as-student="' + s.id + '">View as</button>' +
       '<button class="btn btn-ghost btn-sm" data-edit-student="' + s.id + '">Edit</button>' +
       '<button class="btn btn-ghost btn-sm" data-toggle="' + s.id + '">' + (archived ? "Unarchive" : "Archive") + '</button>' +
       '<button class="btn btn-ghost btn-sm" data-reset-student="' + s.id + '">Reset pw</button>' +
-      '<button class="btn btn-ghost btn-sm" data-delete-student="' + s.id + '" style="color:var(--warn);">Delete</button>';
+      '<button class="btn btn-ghost btn-sm" data-delete-student="' + s.id + '" style="color:var(--warn);">Delete</button>' +
+      '<button class="btn btn-ghost btn-sm" data-student-menu-toggle="' + s.id + '">Close</button>';
+  } else {
+    actions = '<button class="btn btn-ghost btn-sm" data-student-menu-toggle="' + s.id + '">Actions ' + icon("chevron") + "</button>";
+  }
   return "<tr><td>" + escapeHtml(s.last) + "</td><td>" + escapeHtml(s.first) + '</td><td class="num">' + escapeHtml(s.username || "—") + '</td><td class="num">' + passwordCellHtml(s.password, "student:" + s.id) + '</td><td class="num">' + (s.yearOfBirth ? escapeHtml(String(s.yearOfBirth)) : "—") + "</td><td>" +
-    (archived ? '<span class="pill pill-muted">Archived</span>' : '<span class="pill pill-good">Active</span>') + '</td><td style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
+    (archived ? '<span class="pill pill-muted">Archived</span>' : '<span class="pill pill-good">Active</span>') + '</td><td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
     actions + "</td></tr>";
 }
 function renderAdminStudents(root) {
@@ -4210,13 +4302,13 @@ function renderAdminStudents(root) {
   const activeStudents = state.roster.filter((s) => s.active !== false).sort((a, b) => (a.last + a.first).localeCompare(b.last + b.first));
   const archivedStudents = state.roster.filter((s) => s.active === false).sort((a, b) => (a.last + a.first).localeCompare(b.last + b.first));
 
-  html += '<div class="card card-pad"><div class="table-wrap"><table><thead><tr><th>Last</th><th>First</th><th>Username</th><th>Password</th><th>Born</th><th>Status</th><th></th></tr></thead><tbody>';
+  html += '<div class="card card-pad"><div class="table-wrap"><table><thead><tr><th>Last</th><th>First</th><th>Username</th><th>Password</th><th>Born</th><th>Status</th><th class="sticky-col-r"></th></tr></thead><tbody>';
   activeStudents.forEach((s) => { html += studentRow(s, false); });
   html += "</tbody></table></div>";
   html += '<button class="btn btn-ghost btn-sm" id="archived-toggle" style="margin-top:12px;">' +
     (showArchivedStudents ? "Hide" : "Show") + " archived students (" + archivedStudents.length + ")</button>";
   if (showArchivedStudents) {
-    html += '<div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>Last</th><th>First</th><th>Username</th><th>Password</th><th>Born</th><th>Status</th><th></th></tr></thead><tbody>';
+    html += '<div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>Last</th><th>First</th><th>Username</th><th>Password</th><th>Born</th><th>Status</th><th class="sticky-col-r"></th></tr></thead><tbody>';
     if (archivedStudents.length) archivedStudents.forEach((s) => { html += studentRow(s, true); });
     else html += '<tr><td colspan="7" class="help-text">No archived students.</td></tr>';
     html += "</tbody></table></div>";
@@ -4278,9 +4370,15 @@ function renderAdminStudents(root) {
     const res = await saveState(newState);
     if (res.ok || res.local) { toast("New password for " + rec.first + " " + rec.last + ": " + np, "good"); renderAll(); }
   }));
+  root.querySelectorAll("[data-student-menu-toggle]").forEach((btn) => btn.addEventListener("click", () => {
+    const id = btn.getAttribute("data-student-menu-toggle");
+    openStudentActionMenu = openStudentActionMenu === id ? null : id;
+    renderAdminStudents(root);
+  }));
   root.querySelectorAll("[data-edit-student]").forEach((btn) => btn.addEventListener("click", () => {
     editingStudentId = btn.getAttribute("data-edit-student");
     confirmDeleteStudentId = null;
+    openStudentActionMenu = null;
     renderAdminStudents(root);
   }));
   root.querySelectorAll("[data-cancel-edit-student]").forEach((btn) => btn.addEventListener("click", () => {
@@ -4598,9 +4696,7 @@ function renderStudentCalendarHtml(student) {
   const todayGregISO = todayISO();
   const periods = state.settings.periods;
 
-  let html = '<div class="card card-pad" style="margin-top:16px;">';
-  html += '<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:12px;">' +
-    '<div><span class="eyebrow">Day by day</span><h3 style="margin:2px 0 0;">Attendance calendar</h3></div>' +
+  let html = '<div style="display:flex;justify-content:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:12px;">' +
     '<div class="field" style="min-width:180px;margin-bottom:0;"><label for="sd-cal-class">Class</label><select id="sd-cal-class">' +
     '<option value=""' + (!sdClassFilter ? " selected" : "") + '>All classes</option>' +
     periods.map((p) => '<option value="' + escapeHtml(p) + '"' + (sdClassFilter === p ? " selected" : "") + '>' + escapeHtml(p) + "</option>").join("") +
@@ -4635,7 +4731,6 @@ function renderStudentCalendarHtml(student) {
 
   html += '<p class="help-text" style="margin-top:10px;">Each day blends attendance and participation across ' +
     (sdClassFilter ? escapeHtml(sdClassFilter) : "every class held that day") + '. Click a day to see just that day above.</p>';
-  html += "</div>";
   return html;
 }
 
@@ -4650,10 +4745,10 @@ function renderStudentWeekGridHtml(student, weekFrom) {
   const days = Array.from({ length: 7 }, (_, i) => shiftDate(weekFrom, i));
   const todayGregISO = todayISO();
   const weekPeriods = state.settings.periods.filter((p) => days.some((d) => periodsForDate(d).includes(p)));
-  let html = '<div class="card card-pad" style="margin-top:16px;"><div class="section-title"><span>Week at a glance</span></div>' +
+  let html = '<div class="section-title"><span>Week at a glance</span></div>' +
     '<p style="margin:2px 0 12px;font-size:0.82rem;color:var(--muted);">Every class this week, day by day — a hatched cell means that class wasn’t scheduled that day.</p>';
   if (!weekPeriods.length) {
-    html += '<p class="help-text">No classes are scheduled this week.</p></div>';
+    html += '<p class="help-text">No classes are scheduled this week.</p>';
     return html;
   }
   html += '<div class="att-grid-scroll"><table class="att-grid"><thead><tr><th style="position:sticky;left:0;background:var(--surface-2);z-index:2;">Class</th>';
@@ -4667,7 +4762,7 @@ function renderStudentWeekGridHtml(student, weekFrom) {
     days.forEach((d) => { html += weeklySheetCellHtml(d, p, student.id, d === todayGregISO ? "col-active" : ""); });
     html += "</tr>";
   });
-  html += "</tbody></table></div></div>";
+  html += "</tbody></table></div>";
   return html;
 }
 
@@ -4729,8 +4824,8 @@ function renderStudentDetail(root, student, opts) {
       '<button type="button" class="link-btn" id="sd-class-clear">show every class combined</button>.</p>';
   }
 
-  if (sdScope === "week") html += renderStudentWeekGridHtml(student, range.from);
-  html += renderStudentCalendarHtml(student);
+  const calendarBody = (sdScope === "week" ? renderStudentWeekGridHtml(student, range.from) : "") + renderStudentCalendarHtml(student);
+  if (calendarBody) html += collapsibleSectionHtml("sdCalendar", "Day by day", "Attendance calendar — tap a day to jump straight to it", calendarBody);
 
   const reportNotes = notesForStudent(student.id, range.from, range.to);
   const reportClusters = clusterNotes(reportNotes);
@@ -4745,35 +4840,34 @@ function renderStudentDetail(root, student, opts) {
     (reportNotes.length ? '<p class="help-text" style="margin-top:10px;">Based on ' + reportNotes.length + ' comment' + (reportNotes.length === 1 ? "" : "s") + ' logged in this period.</p>' : "") +
     "</div>";
 
-  html += '<div class="card card-pad" style="margin-top:16px;"><h3>By class</h3>' +
-    '<p class="help-text" style="margin-top:-6px;">Click a class to see the calendar and stats above for just that class.</p>';
   const classRows = periods.map((p) => ({ p: p, cs: computeStats(student.id, { period: p, from: range.from, to: range.to }) })).filter((r) => r.cs.attCount > 0 || r.cs.partCount > 0);
+  let byClassBody;
   if (classRows.length === 0) {
-    html += '<p class="help-text">No classes recorded for this student yet.</p>';
+    byClassBody = '<p class="help-text">No classes recorded for this student yet.</p>';
   } else {
-    html += '<div class="table-wrap"><table><thead><tr><th>Class</th><th class="num">Attendance</th><th class="num">Participation</th><th class="num">Times marked</th></tr></thead><tbody>';
+    byClassBody = '<div class="table-wrap"><table><thead><tr><th>Class</th><th class="num">Attendance</th><th class="num">Participation</th><th class="num">Times marked</th></tr></thead><tbody>';
     classRows.forEach((r) => {
       const isSel = sdClassFilter === r.p;
-      html += '<tr class="sd-class-row' + (isSel ? " sd-class-row-sel" : "") + '" data-sd-class-row="' + escapeHtml(r.p) + '"><td>' + escapeHtml(r.p) + (isSel ? ' <span class="pill pill-good">Selected</span>' : "") +
+      byClassBody += '<tr class="sd-class-row' + (isSel ? " sd-class-row-sel" : "") + '" data-sd-class-row="' + escapeHtml(r.p) + '"><td>' + escapeHtml(r.p) + (isSel ? ' <span class="pill pill-good">Selected</span>' : "") +
         '</td><td class="num">' + pctPill(r.cs.attPct) + '</td><td class="num">' + pctPill(r.cs.partPct) +
         '</td><td class="num">' + r.cs.attCount + "</td></tr>";
     });
-    html += "</tbody></table></div>";
+    byClassBody += "</tbody></table></div>";
   }
-  html += "</div>";
+  html += collapsibleSectionHtml("sdByClass", "By class", "Tap a class to filter the calendar and stats above to just that class", byClassBody);
 
-  html += '<div class="card card-pad" style="margin-top:16px;"><h3>Recent coin activity</h3>';
+  let coinActivityBody;
   if (trail.length === 0) {
-    html += '<p class="help-text">No coin activity yet.</p>';
+    coinActivityBody = '<p class="help-text">No coin activity yet.</p>';
   } else {
-    html += '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Type</th><th class="num">Amount</th><th class="num">Balance after</th><th>Note</th></tr></thead><tbody>';
+    coinActivityBody = '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Type</th><th class="num">Amount</th><th class="num">Balance after</th><th>Note</th></tr></thead><tbody>';
     trail.forEach((tx) => {
       const out = tx.type === "Spent/Redeemed" || tx.type === "Transfer Out";
-      html += "<tr><td>" + fmtDateShort(tx.date) + "</td><td>" + txPill(tx.type) + '</td><td class="num" style="font-weight:700;color:' + (out ? "var(--warn)" : "var(--gold)") + ';">' + (out ? "−" : "+") + num2(tx.amount) + '</td><td class="num">' + num2(tx.balanceAfter) + "</td><td>" + escapeHtml(tx.note || "") + "</td></tr>";
+      coinActivityBody += "<tr><td>" + fmtDateShort(tx.date) + "</td><td>" + txPill(tx.type) + '</td><td class="num" style="font-weight:700;color:' + (out ? "var(--warn)" : "var(--gold)") + ';">' + (out ? "−" : "+") + num2(tx.amount) + '</td><td class="num">' + num2(tx.balanceAfter) + "</td><td>" + escapeHtml(tx.note || "") + "</td></tr>";
     });
-    html += "</tbody></table></div>";
+    coinActivityBody += "</tbody></table></div>";
   }
-  html += "</div>";
+  html += collapsibleSectionHtml("sdCoinActivity", "Recent coin activity", null, coinActivityBody);
 
   const logRows = [];
   state.attendance.forEach((rec) => {
@@ -4792,22 +4886,22 @@ function renderStudentDetail(root, student, opts) {
     });
   });
   logRows.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : a.period.localeCompare(b.period)));
-  html += '<div class="card card-pad" style="margin-top:16px;"><h3>Attendance &amp; participation log' + (sdClassFilter ? " — " + escapeHtml(sdClassFilter) : "") + '</h3>';
+  let logBody;
   if (logRows.length === 0) {
-    html += '<p class="help-text">' + (sdScope === "all" ? "Nothing entered for this student yet." : "Nothing entered for this student in this range.") + '</p>';
+    logBody = '<p class="help-text">' + (sdScope === "all" ? "Nothing entered for this student yet." : "Nothing entered for this student in this range.") + '</p>';
   } else {
-    html += '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Class</th><th class="num">Attendance</th><th class="num">Participation</th><th>Note</th><th>By</th></tr></thead><tbody>';
+    logBody = '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Class</th><th class="num">Attendance</th><th class="num">Participation</th><th>Note</th><th>By</th></tr></thead><tbody>';
     logRows.slice(0, 150).forEach((r) => {
       const attPartHtml = r.excused
         ? '<td class="num" colspan="2" style="color:var(--gold);font-weight:600;">Excused</td>'
         : '<td class="num">' + num2(r.att) + '</td><td class="num">' + (r.part === null || r.part === undefined ? "—" : num2(r.part)) + "</td>";
-      html += "<tr><td>" + fmtDateShort(r.date) + "</td><td>" + escapeHtml(r.period) + (r.bonus ? ' <span class="pill pill-gold" title="Bonus that day — only helped, never hurt">★</span>' : "") + "</td>" + attPartHtml + "<td>" + escapeHtml(r.note) +
+      logBody += "<tr><td>" + fmtDateShort(r.date) + "</td><td>" + escapeHtml(r.period) + (r.bonus ? ' <span class="pill pill-gold" title="Bonus that day — only helped, never hurt">★</span>' : "") + "</td>" + attPartHtml + "<td>" + escapeHtml(r.note) +
         '</td><td>' + (r.by ? '<span class="marked-by marked-by-sm" title="' + escapeHtml(r.by) + '">' + escapeHtml(initialsFor(r.by)) + "</span>" : "") + "</td></tr>";
     });
-    html += "</tbody></table></div>";
-    if (logRows.length > 150) html += '<p class="help-text" style="margin-top:8px;">Showing the most recent 150 of ' + logRows.length + ' entries.</p>';
+    logBody += "</tbody></table></div>";
+    if (logRows.length > 150) logBody += '<p class="help-text" style="margin-top:8px;">Showing the most recent 150 of ' + logRows.length + ' entries.</p>';
   }
-  html += "</div>";
+  html += collapsibleSectionHtml("sdLog", "Attendance & participation log" + (sdClassFilter ? " — " + sdClassFilter : ""), null, logBody);
 
   root.innerHTML = html;
   const backBtn = document.getElementById("sd-back");
@@ -4897,7 +4991,7 @@ function renderAll() {
   const role = roleOf(session);
   if (viewingStudentId && (role === "admin" || role === "teacher")) {
     const student = studentById(viewingStudentId);
-    if (student) { renderStudentDetail(root, student); wireStudentLinks(root); return; }
+    if (student) { renderStudentDetail(root, student); wireStudentLinks(root); wireCollapsibleSections(root); return; }
     viewingStudentId = null;
   }
   const route = currentRoute(session);
@@ -4909,6 +5003,7 @@ function renderAll() {
   ({ today: renderToday, ledger: renderLedger, overview: renderOverview, leaderboard: renderLeaderboard, admin: renderAdmin, balance: renderMyBalance })[route](root, session);
   canWrite = savedCanWrite;
   wireStudentLinks(root);
+  wireCollapsibleSections(root);
 }
 
 /* ================================================================
