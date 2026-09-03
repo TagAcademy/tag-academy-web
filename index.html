@@ -2493,8 +2493,18 @@ function renderToday(root, session) {
     '<button class="btn btn-primary" id="save-today"' + (canWrite ? "" : " disabled") + '>Save ' + escapeHtml(selectedPeriod) + "</button>" +
     (canUndo ? '<button class="btn btn-ghost btn-sm" id="undo-last-save" type="button">Undo last save</button>' : "") +
     '<span id="today-save-status" style="font-size:0.8rem;color:var(--muted);"></span></div>';
-  html += "</div>";
 
+  // NOTE: there used to be a stray extra `html += "</div>";` right here that closed
+  // .today-wrap one statement too early (both roster-view branches above already close their
+  // own student-rows/student-grid wrapper) -- browsers silently ignore an orphaned closing tag
+  // rather than erroring, so it went unnoticed, but it meant "Today at a glance" below rendered
+  // as a sibling of .today-wrap instead of inside it: not just visually narrower than intended
+  // (see the comment above on today-wrap's reading-width column), but also why .today-sticky-bar
+  // stopped staying pinned once you scrolled past the roster -- position:sticky only holds an
+  // element in place for as long as its own parent still has room left to scroll through, and
+  // .today-wrap's parent had already ended right there. Removing the stray close (this comment
+  // marks where it was) lets .today-wrap -- and the sticky bar inside it -- run the full height
+  // of the page, "Today at a glance" included.
   html += renderTodaySummary(todayDate, periods, roster);
   html += "</div>"; // .today-wrap
 
