@@ -226,6 +226,19 @@ main.view {
    that column, as its own full-width row, so it can be centered across the whole page rather
    than just within the narrow date controls. */
 .today-head-controls { margin: 14px 0 10px; display: flex; flex-direction: column; gap: 10px; max-width: 560px; }
+/* Keeps the date picker and (once a day has classes) the class/period selector pinned to the
+   top of the viewport while the roster below is scrolled, so staff never have to scroll back
+   up just to switch date or class mid-session. `top` is set from JS (syncStickyBarOffset) to
+   sit right below the mobile topbar+tab-bar (both 0px tall on desktop, where this simply pins
+   to the very top of the scrolling page). The background matches the page so content
+   scrolling underneath doesn't show through, and the bottom border only reads once something
+   has actually scrolled under it (see .is-stuck, toggled from JS via IntersectionObserver). */
+.today-sticky-bar {
+  position: sticky; top: 0; z-index: 12; background: var(--paper);
+  padding-top: 4px; margin-bottom: 4px; border-bottom: 1px solid transparent; transition: border-color 0.15s;
+}
+.today-sticky-bar.is-stuck { border-bottom-color: var(--line); }
+.today-sticky-bar .field-row { margin-bottom: 0; }
 .today-parsha-line {
   font-family: var(--font-display); font-size: 1.05rem; font-weight: 700; color: var(--gold);
   text-align: center; margin: 0 0 18px;
@@ -543,6 +556,24 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--line); font-size: 0
 tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover { background: var(--surface-2); }
 td.num, th.num { font-family: var(--font-mono); text-align: right; }
+
+/* Masked-by-default password cells (Admin > Staff/Students) -- see passwordCellHtml. Dots
+   instead of the real password so a shared screen or projector doesn't broadcast every
+   student's login; "Show" reveals just that one row. */
+.pw-cell { display: inline-flex; align-items: center; gap: 8px; }
+.pw-value { letter-spacing: 0.03em; }
+.pw-toggle { background: none; border: none; padding: 0; color: var(--brand); font-size: 0.76rem; font-weight: 700; cursor: pointer; font-family: var(--font-body); }
+.pw-toggle:hover, .pw-toggle:focus-visible { text-decoration: underline; }
+/* Same idea for a live password INPUT (login/signup) -- see passwordFieldHtml -- a "Show"
+   button floating inside the field's right edge instead of a read-only dots-vs-text swap. */
+.pwfield-wrap { position: relative; }
+.pwfield-wrap input { padding-right: 58px; width: 100%; }
+.pwfield-toggle {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; padding: 4px 2px; color: var(--brand); font-size: 0.76rem;
+  font-weight: 700; cursor: pointer; font-family: var(--font-body);
+}
+.pwfield-toggle:hover, .pwfield-toggle:focus-visible { text-decoration: underline; }
 
 /* pills / badges */
 .pill { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 99px; font-size: 0.72rem; font-weight: 700; }
@@ -1194,6 +1225,23 @@ function scoreTone(v, max) {
   if (n <= 0) return "warn";
   return "caution";
 }
+/* How much of a score dial's ring gets colored in (its conic-gradient --fill), for every A/P
+   circle in the app (the compact marking view's dials, and the read-only glance circles on the
+   Today/weekly grids) -- deliberately NOT just "value / max": a literal 0% fill would mean
+   zero degrees of the ring actually show --circle-color, so a student explicitly marked absent
+   (0) would render as a plain grey ring, visually identical to one nobody's touched yet, even
+   though scoreTone already picks "warn" (red) for it. A blank/never-marked dial has no tone at
+   all (see scoreTone) and stays that plain grey; an explicit 0 gets a FULL ring so the red
+   tone set alongside this is actually visible, matching what the dial's own long-standing "0 =
+   red" documentation always intended. Anything above 0 still fills proportionally as before. */
+function circleFillPct(v, max) {
+  if (v === null || v === undefined || v === "") return 0;
+  const n = Number(v);
+  if (isNaN(n)) return 0;
+  if (n <= 0) return 100;
+  const m = Number(max) || 1;
+  return Math.max(0, Math.min(1, n / m)) * 100;
+}
 function pctPill(n) {
   const tone = pctTone(n);
   if (!tone) return '<span style="color:var(--muted);">—</span>';
@@ -1257,7 +1305,7 @@ function refreshPillForInput(input) {
 function compactSlotHtml(slot, value, disabled, extraAttrs, max) {
   const m = Number(max) || 1;
   const v = (value === null || value === undefined) ? "" : value;
-  const pct = v === "" ? 0 : Math.max(0, Math.min(1, Number(v) / m)) * 100;
+  const pct = v === "" ? 0 : circleFillPct(v, m);
   const label = slot === "att" ? "A" : "P";
   const tone = v === "" ? "" : scoreTone(v, m);
   const toneVar = tone ? ("--circle-color:var(--" + tone + ");") : "";
@@ -1445,6 +1493,41 @@ function uniqueUsername(base, takenSet) {
 }
 function randomPassword() {
   return String(Math.floor(1000 + Math.random() * 9000));
+}
+/* Passwords in the Admin > Staff/Students tables default to masked (dots) rather than plain
+   text, since those tables are often up on a shared screen or projector -- revealedPasswords
+   is just a per-row "show" toggle, kept in memory only (never persisted), keyed by a string
+   like "staff:<id>" or "student:<id>" so staff and student rows can't collide. */
+let revealedPasswords = new Set();
+/* A live, typed password input (login/signup) can't use passwordCellHtml's re-render-to-toggle
+   approach -- re-rendering the page on every click would blow away whatever's mid-typed. This
+   flips the input's own type between password/text in place instead, no render involved. */
+function passwordFieldHtml(id, opts) {
+  opts = opts || {};
+  return '<div class="pwfield-wrap">' +
+    '<input type="password" id="' + escapeHtml(id) + '"' +
+    (opts.placeholder ? ' placeholder="' + escapeHtml(opts.placeholder) + '"' : "") +
+    (opts.autocomplete ? ' autocomplete="' + escapeHtml(opts.autocomplete) + '"' : "") + ">" +
+    '<button type="button" class="pwfield-toggle" data-pwfield-toggle="' + escapeHtml(id) + '">Show</button>' +
+    "</div>";
+}
+function wirePasswordToggles(root) {
+  root.querySelectorAll("[data-pwfield-toggle]").forEach((btn) => btn.addEventListener("click", () => {
+    const input = document.getElementById(btn.getAttribute("data-pwfield-toggle"));
+    if (!input) return;
+    const showing = input.type === "text";
+    input.type = showing ? "password" : "text";
+    btn.textContent = showing ? "Show" : "Hide";
+  }));
+}
+function passwordCellHtml(password, revealKey) {
+  const pw = password || "";
+  const shown = revealedPasswords.has(revealKey);
+  const display = shown ? (pw || "—") : "•".repeat(Math.max(4, Math.min(10, pw.length || 6)));
+  return '<span class="pw-cell">' +
+    '<span class="pw-value">' + escapeHtml(display) + "</span>" +
+    (pw ? '<button type="button" class="pw-toggle" data-pw-toggle="' + escapeHtml(revealKey) + '">' + (shown ? "Hide" : "Show") + "</button>" : "") +
+    "</span>";
 }
 /* One name per line — "Last, First" (comma) or "First Last" (no comma, last
    word taken as the surname). Returns {first, last} or null if unparseable. */
@@ -2116,16 +2199,17 @@ function renderLogin(root) {
       ? '<p class="sub" style="text-align:center;">No accounts exist yet. Create the first admin account to set everything up.</p>' +
         '<div class="field"><label for="fr-name">Your name</label><input type="text" id="fr-name" placeholder="e.g. Rabbi Katz"></div>' +
         '<div class="field"><label for="fr-username">Username</label><input type="text" id="fr-username" placeholder="e.g. rkatz"></div>' +
-        '<div class="field"><label for="fr-password">Password</label><input type="password" id="fr-password" placeholder="Choose a password"></div>' +
+        '<div class="field"><label for="fr-password">Password</label>' + passwordFieldHtml("fr-password", { placeholder: "Choose a password" }) + "</div>" +
         '<button class="btn btn-primary" id="fr-submit" style="width:100%;">Create admin account &amp; sign in</button>'
       : '<p class="sub" style="text-align:center;">Sign in with your username and password.</p>' +
         '<div class="field"><label for="lg-username">Username</label><input type="text" id="lg-username" autocomplete="username"></div>' +
-        '<div class="field"><label for="lg-password">Password</label><input type="password" id="lg-password" autocomplete="current-password"></div>' +
+        '<div class="field"><label for="lg-password">Password</label>' + passwordFieldHtml("lg-password", { autocomplete: "current-password" }) + "</div>" +
         '<div id="login-error" style="color:var(--warn);font-size:0.82rem;margin-bottom:10px;display:none;">Username or password not recognized.</div>' +
         '<button class="btn btn-primary" id="lg-submit" style="width:100%;">Log in</button>' +
         '<p class="help-text" style="text-align:center;margin-top:14px;">Forgot your password? Ask your teacher or admin to reset it.</p>') +
     "</div></div>";
 
+  wirePasswordToggles(root);
   if (isFirstRun) {
     document.getElementById("fr-submit").addEventListener("click", async () => {
       const name = document.getElementById("fr-name").value.trim();
@@ -2216,6 +2300,7 @@ function renderToday(root, session) {
   // stretching to whatever width its own content happens to need.
   html += '<div class="today-wrap">';
 
+  html += '<div class="today-sticky-bar">';
   html += '<div class="today-head-controls">';
   html += '<div class="thc-row">';
   html += '<div class="field" style="margin-bottom:0;"><label for="today-date">' + escapeHtml(dayNameFor(todayDate)) + '</label><input type="date" id="today-date" value="' + todayDate + '"></div>';
@@ -2245,6 +2330,29 @@ function renderToday(root, session) {
   }
   html += "</div>"; // .thc-row
   html += "</div>"; // .today-head-controls
+
+  // The class/period selector lives inside the same sticky bar as the date row (when there's
+  // actually a class to pick, i.e. periods and roster are both non-empty) so "date and class"
+  // stay pinned together while the roster below scrolls -- see .today-sticky-bar above.
+  const isExtraToday = selectedPeriod && !(state.settings.schedule[selectedPeriod] || []).includes(dayNameFor(todayDate));
+  if (periods.length > 0 && roster.length > 0) {
+    html += '<div class="field-row" style="align-items:flex-end;">' +
+      '<div class="field" style="max-width:380px;"><label for="period-select">Class / period</label><select id="period-select">';
+    periods.forEach((p) => {
+      const n = periodMarkedCount(todayDate, p, roster);
+      html += '<option value="' + escapeHtml(p) + '"' + (p === selectedPeriod ? " selected" : "") + '>' + escapeHtml(p) + " — " + n + "/" + roster.length + " marked</option>";
+    });
+    html += "</select></div>";
+    if (isExtraToday) {
+      html += '<div class="field" style="flex-shrink:0;display:flex;align-items:center;gap:8px;">' +
+        '<span class="pill pill-gold">Added just for today</span>' +
+        (canWrite ? '<button class="btn btn-ghost btn-sm" id="remove-extra-period" type="button">Remove from today</button>' : "") +
+        "</div>";
+    }
+    html += "</div>";
+  }
+  html += "</div>"; // .today-sticky-bar
+
   // Just reflects the selected date, in Hebrew -- no picker, since it's not an independent
   // choice (the date already determines it). Lives outside the (narrow, left-hand)
   // today-head-controls column so it can be centered across the full page width.
@@ -2285,22 +2393,6 @@ function renderToday(root, session) {
     html += '<div class="empty-state">No active students on the roster yet — ask an admin to add them.</div></div>';
     root.innerHTML = html; wireTodayHeader(root); return;
   }
-
-  const isExtraToday = selectedPeriod && !(state.settings.schedule[selectedPeriod] || []).includes(dayNameFor(todayDate));
-  html += '<div class="field-row" style="align-items:flex-end;">' +
-    '<div class="field" style="max-width:380px;"><label for="period-select">Class / period</label><select id="period-select">';
-  periods.forEach((p) => {
-    const n = periodMarkedCount(todayDate, p, roster);
-    html += '<option value="' + escapeHtml(p) + '"' + (p === selectedPeriod ? " selected" : "") + '>' + escapeHtml(p) + " — " + n + "/" + roster.length + " marked</option>";
-  });
-  html += "</select></div>";
-  if (isExtraToday) {
-    html += '<div class="field" style="flex-shrink:0;display:flex;align-items:center;gap:8px;">' +
-      '<span class="pill pill-gold">Added just for today</span>' +
-      (canWrite ? '<button class="btn btn-ghost btn-sm" id="remove-extra-period" type="button">Remove from today</button>' : "") +
-      "</div>";
-  }
-  html += "</div>";
 
   // Bonus: admin-only toggle, but the "this class is bonus today" pill is visible to whoever's
   // marking it too, so a teacher isn't left guessing why a student's average moved.
@@ -2422,7 +2514,7 @@ function glanceCircleHtml(slot, value, max) {
   const m = Number(max) || 1;
   const label = slot === "att" ? "A" : "P";
   if (value === null || value === undefined) return '<span class="glance-circle-empty">–</span>';
-  const pct = Math.max(0, Math.min(1, Number(value) / m)) * 100;
+  const pct = circleFillPct(value, m);
   const tone = scoreTone(value, m);
   const toneVar = tone ? ("--circle-color:var(--" + tone + ");") : "";
   return '<button type="button" class="glance-circle" data-label="' + label + '" data-value="' + escapeHtml(num2(value)) + '" style="--fill:' + pct + '%;' + toneVar + '">' +
@@ -2440,6 +2532,51 @@ function wireGlanceCircles(root) {
   });
 }
 
+/* Shared cell renderer for every roster×period(s) grid in the app (the "Today at a glance"
+   table right below, and the weekly "sheet" views on a student's own page and in Reports) --
+   one attendance/participation status for one student, one class, one date. Returns the inner
+   HTML for that status, or null when nothing at all was entered (a blank attendance AND no
+   note/marked-by) so callers can each decide how to represent "nothing here" -- the Today grid
+   shows a plain "—", while the weekly sheets (see weeklySheetCellHtml) go further and
+   distinguish "not scheduled" from "scheduled but missed" from "not due yet". */
+function attendanceCellHtml(dateStr, period, studentId) {
+  const rec = attendanceRecord(dateStr, studentId);
+  const pair = rec && rec.scores && rec.scores[period];
+  const has = pair && pair[0] !== null && pair[0] !== undefined;
+  const hasPart = pair && pair[1] !== null && pair[1] !== undefined;
+  const note = pair && pair[2];
+  const by = pair && pair[3];
+  const excused = pair && !!pair[4];
+  const pMax = periodMaxFor(period);
+  const meta = (by || note)
+    ? '<span class="glance-meta">' +
+      (by ? '<span class="marked-by marked-by-sm" title="Marked by ' + escapeHtml(by) + '">' + escapeHtml(initialsFor(by)) + "</span>" : "") +
+      (note ? '<span class="note-dot" title="' + escapeHtml(note) + '"></span>' : "") +
+      "</span>"
+    : "";
+  if (excused) return '<span class="att-glance-excused">Excused</span>' + meta;
+  if (has || meta) return '<span class="glance-row">' + glanceCircleHtml("att", has ? pair[0] : null, pMax) + glanceCircleHtml("part", has && hasPart ? pair[1] : null, pMax) + meta + "</span>";
+  return null;
+}
+/* Weekly "sheet" cell -- used by both the student's own week view (renderStudentWeekGridHtml)
+   and the teacher/admin whole-roster week view in Reports (renderRosterWeekGridHtml). Builds
+   on attendanceCellHtml by also covering the two states that only make sense across a whole
+   week rather than a single already-selected day: a class that plain wasn't held that day
+   (hatched, same visual language as the Reports calendar's "not applicable" cells) versus one
+   that was scheduled but nothing's been entered for it -- shown as "Missed" once that day is in
+   the past, or a plain "—" for today/a future day so an empty cell for tomorrow doesn't read as
+   a missed class. Returns the full <td> markup (class + content) so callers just concatenate. */
+function weeklySheetCellHtml(dateStr, period, studentId, extraClass) {
+  const cls = extraClass ? " " + extraClass : "";
+  if (!periodsForDate(dateStr).includes(period)) {
+    return '<td class="score-cell na' + cls + '" title="Not scheduled"></td>';
+  }
+  const marked = attendanceCellHtml(dateStr, period, studentId);
+  if (marked !== null) return '<td class="score-cell' + cls + '">' + marked + "</td>";
+  if (dateStr < todayISO()) return '<td class="score-cell' + cls + '" title="Scheduled — nothing entered"><span class="pill pill-warn" style="font-size:0.68rem;">Missed</span></td>';
+  return '<td class="score-cell' + cls + '" title="Not marked yet">—</td>';
+}
+
 function renderTodaySummary(date, periods, roster) {
   let html = '<div class="card card-pad" style="margin-top:18px;"><div class="section-title"><span>Today at a glance</span></div>' +
     '<p style="margin:2px 0 12px;font-size:0.82rem;color:var(--muted);">Every class entered so far for this day — click a class name to jump to it. Tap a circle for the exact number; A/P are colored the same as the marking dials above.</p>';
@@ -2449,28 +2586,10 @@ function renderTodaySummary(date, periods, roster) {
   });
   html += "</tr></thead><tbody>";
   roster.forEach((student) => {
-    const rec = attendanceRecord(date, student.id);
     html += '<tr><td class="student-cell">' + studentLink(student) + "</td>";
     periods.forEach((p) => {
-      const pair = rec && rec.scores && rec.scores[p];
-      const has = pair && pair[0] !== null && pair[0] !== undefined;
-      const hasPart = pair && pair[1] !== null && pair[1] !== undefined;
-      const note = pair && pair[2];
-      const by = pair && pair[3];
-      const excused = pair && !!pair[4];
-      const pMax = periodMaxFor(p);
-      const meta = (by || note)
-        ? '<span class="glance-meta">' +
-          (by ? '<span class="marked-by marked-by-sm" title="Marked by ' + escapeHtml(by) + '">' + escapeHtml(initialsFor(by)) + "</span>" : "") +
-          (note ? '<span class="note-dot" title="' + escapeHtml(note) + '"></span>' : "") +
-          "</span>"
-        : "";
-      const text = excused
-        ? '<span class="att-glance-excused">Excused</span>' + meta
-        : has || meta
-        ? '<span class="glance-row">' + glanceCircleHtml("att", has ? pair[0] : null, pMax) + glanceCircleHtml("part", has && hasPart ? pair[1] : null, pMax) + meta + "</span>"
-        : "—";
-      html += '<td class="num' + (p === selectedPeriod ? " col-active" : "") + '">' + text + "</td>";
+      const text = attendanceCellHtml(date, p, student.id);
+      html += '<td class="num' + (p === selectedPeriod ? " col-active" : "") + '">' + (text === null ? "—" : text) + "</td>";
     });
     html += "</tr>";
   });
@@ -2478,7 +2597,29 @@ function renderTodaySummary(date, periods, roster) {
   return html;
 }
 
+/* Keeps .today-sticky-bar (the date row + class picker on the Today tab) pinned right below
+   the mobile topbar+tab-bar instead of at the very top of the viewport -- both of those are
+   0px tall on desktop (they're display:none there), so this naturally collapses to "stick at
+   the top of the page" on a wide screen. Also toggles a bottom border once the bar is actually
+   pinned (rather than just sitting in its normal spot) so it reads as "floating" over the
+   content scrolling underneath rather than blending into it. Registered once as a scroll/resize
+   listener (see below) rather than per-render, and re-run from wireTodayHeader after every
+   render since the bar's own height (and thus whether it's "stuck" yet) can change with it. */
+function syncStickyBarOffset() {
+  const bar = document.querySelector(".today-sticky-bar");
+  if (!bar) return;
+  const topbar = document.getElementById("topbar-mobile");
+  const tabbar = document.getElementById("tab-bar");
+  const offset = (topbar ? topbar.offsetHeight : 0) + (tabbar ? tabbar.offsetHeight : 0);
+  bar.style.top = offset + "px";
+  const rect = bar.getBoundingClientRect();
+  bar.classList.toggle("is-stuck", Math.round(rect.top) <= offset);
+}
+window.addEventListener("scroll", syncStickyBarOffset, { passive: true });
+window.addEventListener("resize", syncStickyBarOffset);
+
 function wireTodayHeader(root) {
+  syncStickyBarOffset();
   const dateInput = document.getElementById("today-date");
   if (dateInput) dateInput.addEventListener("change", () => { todayDate = dateInput.value; showAddExtraPeriod = false; showHebrewCal = false; localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
   const hcalTrigger = document.getElementById("hcal-trigger");
@@ -2604,7 +2745,7 @@ function wireTodayGrid(root, teacherName) {
     const setCircle = (circle, input) => {
       if (!circle || !input) return;
       const v = input.value === "" ? null : Math.max(0, Math.min(periodMax, Number(input.value) || 0));
-      circle.style.setProperty("--fill", (v === null ? 0 : (v / periodMax) * 100) + "%");
+      circle.style.setProperty("--fill", circleFillPct(v, periodMax) + "%");
       const tone = v === null ? "" : scoreTone(v, periodMax);
       if (tone) circle.style.setProperty("--circle-color", "var(--" + tone + ")");
       else circle.style.removeProperty("--circle-color");
@@ -2913,6 +3054,10 @@ let ledgerCart = []; // [{ id, name, cost }] -- items tapped from the price list
 let showOtherLedgerEntry = false;
 function ledgerCartTotal() { return ledgerCart.reduce((sum, item) => sum + Number(item.cost || 0), 0); }
 function ledgerCartNote() { return ledgerCart.map((item) => item.name).join(", "); }
+// Bulk grant/charge (see the "Bulk grant or charge" card in renderLedger) -- a checked set of
+// student ids, kept across re-renders so ticking boxes doesn't reset every time the amount
+// field changes. Cleared after a successful bulk save, same as the single-entry cart above.
+let bulkLedgerSelected = new Set();
 
 function renderLedger(root, session) {
   const roster = activeRoster();
@@ -2956,6 +3101,44 @@ function renderLedger(root, session) {
     html += '<button class="btn btn-primary" id="ledger-submit">Log purchase</button></div>';
   } else {
     html += '<div class="banner banner-warn">Read-only view — you can see the ledger but not add to it.</div>';
+  }
+
+  if (canWrite) {
+    // Bulk grant/charge -- one Manual Grant or Spent/Redeemed entry applied to every checked
+    // student at once (e.g. a schoolwide Chanukah bonus, or charging everyone for a trip),
+    // instead of repeating the single-entry form above once per student. Each row shows that
+    // student's current running-total balance (studentStats, never date-scoped -- see the
+    // Reports table fix above for why) so a charge amount can be sanity-checked against it
+    // right here, and "Select all" ticks/clears the whole active roster in one click.
+    bulkLedgerSelected.forEach((id) => { if (!roster.some((s) => s.id === id)) bulkLedgerSelected.delete(id); });
+    const allSelected = roster.length > 0 && roster.every((s) => bulkLedgerSelected.has(s.id));
+    html += '<div class="card card-pad" style="margin-top:16px;"><div class="section-title">Bulk grant or charge</div>' +
+      '<p class="help-text" style="margin-top:-6px;">Apply one grant or charge to several students — or the whole roster — at once.</p>';
+    if (roster.length === 0) {
+      html += '<p class="help-text">No active students on the roster yet.</p></div>';
+    } else {
+      html += '<div class="field-row">' +
+        '<div class="field"><label for="blk-date">Date</label><input type="date" id="blk-date" value="' + todayISO() + '"></div>' +
+        '<div class="field" style="min-width:190px;"><label for="blk-type">Type</label><select id="blk-type">' +
+        '<option value="Manual Grant">Manual Grant (add coins)</option>' +
+        '<option value="Spent/Redeemed">Spent/Redeemed (take coins)</option>' +
+        "</select></div>" +
+        '<div class="field"><label for="blk-amount">Amount</label><input type="number" min="0" step="0.5" id="blk-amount" placeholder="0"></div>' +
+        "</div>" +
+        '<div class="field"><label for="blk-note">Note</label><input type="text" id="blk-note" placeholder="e.g. Chanukah bonus for everyone"></div>' +
+        '<label style="display:flex;align-items:center;gap:8px;margin:12px 0 8px;cursor:pointer;font-weight:700;">' +
+        '<input type="checkbox" id="blk-select-all"' + (allSelected ? " checked" : "") + "> Select all (" + roster.length + " active student" + (roster.length === 1 ? "" : "s") + ")</label>" +
+        '<div class="table-wrap" style="max-height:340px;overflow-y:auto;"><table><thead><tr><th></th><th>Student</th><th class="num">Current balance</th></tr></thead><tbody>' +
+        roster.map((s) => {
+          const bal = studentStats(s.id).balance;
+          const checked = bulkLedgerSelected.has(s.id);
+          return '<tr><td><input type="checkbox" class="blk-select" data-blk-student="' + s.id + '"' + (checked ? " checked" : "") + "></td><td>" + fullName(s) +
+            '</td><td class="num"><span class="coin-inline">' + coinBadge("sm") + '<span style="font-weight:700;color:var(--gold);">' + num2(bal) + "</span></span></td></tr>";
+        }).join("") +
+        "</tbody></table></div>" +
+        '<button class="btn btn-primary" id="blk-submit" style="margin-top:12px;">Apply to ' + bulkLedgerSelected.size + " selected</button>" +
+        "</div>";
+    }
   }
 
   if (privs.length) {
@@ -3035,6 +3218,60 @@ function renderLedger(root, session) {
       submitBtn.disabled = false;
     }
   });
+
+  const blkSelectAll = document.getElementById("blk-select-all");
+  if (blkSelectAll) blkSelectAll.addEventListener("change", () => {
+    if (blkSelectAll.checked) roster.forEach((s) => bulkLedgerSelected.add(s.id));
+    else roster.forEach((s) => bulkLedgerSelected.delete(s.id));
+    renderAll();
+  });
+  root.querySelectorAll(".blk-select").forEach((cb) => cb.addEventListener("change", () => {
+    const id = cb.getAttribute("data-blk-student");
+    if (cb.checked) bulkLedgerSelected.add(id); else bulkLedgerSelected.delete(id);
+    renderAll();
+  }));
+  const blkSubmitBtn = document.getElementById("blk-submit");
+  if (blkSubmitBtn) blkSubmitBtn.addEventListener("click", async () => {
+    const date = document.getElementById("blk-date").value;
+    const type = document.getElementById("blk-type").value;
+    const amount = Number(document.getElementById("blk-amount").value);
+    const note = document.getElementById("blk-note").value.trim();
+    const ids = Array.from(bulkLedgerSelected);
+    if (!date || !amount || amount <= 0) { toast("Pick a date and a positive amount.", "warn"); return; }
+    if (ids.length === 0) { toast("Select at least one student.", "warn"); return; }
+    // A bulk charge can't push anyone's balance negative any more than a single-entry one can
+    // (see the single-entry submit handler above) -- rather than blocking the whole batch over
+    // one student who's short, apply it to everyone who can afford it and report who got
+    // skipped, so e.g. charging the whole roster for a trip still works for the 28 kids who can
+    // cover it even if 2 can't.
+    const applied = [], skipped = [];
+    ids.forEach((id) => {
+      if (type === "Spent/Redeemed") {
+        const bal = studentStats(id).balance;
+        if (amount > bal) { const s = studentById(id); skipped.push(s ? s.last + ", " + s.first : id); return; }
+      }
+      applied.push(id);
+    });
+    if (applied.length === 0) { toast("No one selected has enough balance for that charge.", "warn"); return; }
+    blkSubmitBtn.disabled = true;
+    const newState = JSON.parse(JSON.stringify(state));
+    const enteredAt = Date.now();
+    applied.forEach((id) => {
+      newState.ledger.push({ id: uid("l"), date, studentId: id, type, amount, note, enteredBy: session.record.name, enteredAt });
+    });
+    const res = await saveState(newState, { stashKey: "ledger:bulk", stashData: { date, type, amount, note, ids: applied } });
+    if (res.ok || res.local) {
+      bulkLedgerSelected = new Set();
+      toast(
+        "Applied to " + applied.length + " student" + (applied.length === 1 ? "" : "s") + "." +
+        (skipped.length ? " Skipped " + skipped.length + " with insufficient balance: " + skipped.join(", ") + "." : ""),
+        skipped.length ? "warn" : "good"
+      );
+      renderAll();
+    } else {
+      blkSubmitBtn.disabled = false;
+    }
+  });
 }
 
 /* ================================================================
@@ -3049,6 +3286,13 @@ let reportTo = todayISO();
 // class filter, independent of the table above (which has its own time-range picker).
 let repCalAnchor = todayISO();
 let repCalClassFilter = null;
+// The Reports page's whole-roster weekly "sheet" (see renderRosterWeekGridHtml) -- its own
+// week anchor and single-class filter, independent of everything else on the page. A weekly
+// sheet only reads cleanly for one class at a time (rows are students, so there's no room left
+// to also break each row out by class the way the student's own weekly view does), hence the
+// dropdown instead of "every class combined".
+let repWeekAnchor = todayISO();
+let repWeekPeriod = null;
 let exportScope = "hmonth"; // "today" | "week" | "hmonth" | "hyear" | "all" | "custom"
 let exportAnchor = todayISO();
 let exportFrom = todayISO();
@@ -3154,6 +3398,30 @@ function renderReportsCalendarHtml() {
   return html;
 }
 
+/* The teacher/admin-facing counterpart to a student's own "Week at a glance" sheet
+   (renderStudentWeekGridHtml) -- same idea, but with the axes swapped: rows are the whole
+   active roster, columns are the 7 days of the picked week, and since a roster-wide sheet
+   doesn't have room to also break every row out by class, one class is picked at a time (see
+   the "Class / period" dropdown in renderOverview). Reuses weeklySheetCellHtml so "marked" /
+   "missed" / "not scheduled" read identically to the student-facing version. */
+function renderRosterWeekGridHtml(roster, period, weekFrom) {
+  const days = Array.from({ length: 7 }, (_, i) => shiftDate(weekFrom, i));
+  const todayGregISO = todayISO();
+  let html = '<div class="att-grid-scroll"><table class="att-grid"><thead><tr><th style="position:sticky;left:0;background:var(--surface-2);z-index:2;">Student</th>';
+  days.forEach((d, i) => {
+    html += '<th class="' + (d === todayGregISO ? "col-active" : "") + '"><span class="period-name">' + escapeHtml(DAY_NAMES[i].slice(0, 3)) +
+      '</span><br><span class="sub">' + escapeHtml(fmtDateShort(d)) + "</span></th>";
+  });
+  html += "</tr></thead><tbody>";
+  roster.forEach((s) => {
+    html += '<tr><td class="student-cell">' + studentLink(s) + "</td>";
+    days.forEach((d) => { html += weeklySheetCellHtml(d, period, s.id, d === todayGregISO ? "col-active" : ""); });
+    html += "</tr>";
+  });
+  html += "</tbody></table></div>";
+  return html;
+}
+
 function renderOverview(root) {
   const roster = activeRoster();
   const range = reportRange();
@@ -3172,7 +3440,7 @@ function renderOverview(root) {
     '<option value="hmonth"' + (reportScope === "hmonth" ? " selected" : "") + '>This Hebrew month</option>' +
     '<option value="custom"' + (reportScope === "custom" ? " selected" : "") + '>Custom range</option>' +
     "</select></div>" +
-    (reportScope === "week" || reportScope === "hmonth" ? '<div class="field" style="flex-shrink:0;"><label>&nbsp;</label><div style="display:flex;gap:6px;">' +
+    (reportScope === "week" || reportScope === "hmonth" ? '<div class="field" style="flex-shrink:0;min-width:auto;"><label>&nbsp;</label><div style="display:flex;gap:6px;flex-wrap:wrap;">' +
       '<button class="btn btn-ghost btn-sm" id="rep-prev" type="button">&larr;</button>' +
       '<button class="btn btn-ghost btn-sm" id="rep-today" type="button">Today</button>' +
       '<button class="btn btn-ghost btn-sm" id="rep-next" type="button">&rarr;</button></div></div>' : "") +
@@ -3198,15 +3466,44 @@ function renderOverview(root) {
     html += "</tbody></table></div>";
   } else {
     html += '<div class="table-wrap"><table><thead><tr><th>Student</th><th class="num">Attendance</th><th class="num">Participation</th><th class="num">Points</th>' +
-      (reportScope === "all" ? '<th class="num">Coin balance</th>' : "") + "</tr></thead><tbody>";
+      '<th class="num" title="Always a running total — not limited to the time range above">Coin balance</th></tr></thead><tbody>';
     roster.forEach((s) => {
       const st = computeStats(s.id, { from: range.from, to: range.to });
+      // Coin balance is always the true, all-time running total (studentStats == computeStats
+      // with no date bounds) regardless of which time range the table above is scoped to --
+      // computeStats's from/to filtering narrows coinsEarned/ledgerNet to just that window, so
+      // a date-scoped "balance" would be that window's net change, not a real balance (see
+      // computeStats). Every student's current TAG coin count should be visible at a glance no
+      // matter what range is selected, so this column intentionally ignores `range` entirely.
+      const balance = studentStats(s.id).balance;
       html += "<tr><td>" + studentLink(s) + '</td><td class="num">' + pctPill(st.attPct) + '</td><td class="num">' + pctPill(st.partPct) +
         '</td><td class="num">' + num2(st.points) + "</td>" +
-        (reportScope === "all" ? '<td class="num"><span class="coin-inline">' + coinBadge("sm") + '<span style="font-weight:700;color:var(--gold);">' + num2(st.balance) + "</span></span></td>" : "") +
+        '<td class="num"><span class="coin-inline">' + coinBadge("sm") + '<span style="font-weight:700;color:var(--gold);">' + num2(balance) + "</span></span></td>" +
         "</tr>";
     });
     html += "</tbody></table></div>";
+  }
+  html += "</div>";
+
+  const weekPeriods = state.settings.periods;
+  if (!weekPeriods.includes(repWeekPeriod)) repWeekPeriod = weekPeriods[0] || null;
+  const repWeekRange = weekRangeFor(repWeekAnchor);
+  html += '<div class="card card-pad" style="margin-top:16px;"><div class="section-title"><span>Week at a glance — whole roster</span></div>' +
+    '<p style="margin:2px 0 12px;font-size:0.82rem;color:var(--muted);">Pick a class and a week to see every student’s attendance day by day — marked, missed, or not scheduled — the same read as a student’s own weekly sheet.</p>';
+  if (!weekPeriods.length || !roster.length) {
+    html += '<p class="help-text">' + (!weekPeriods.length ? "No classes set up yet." : "No active students on the roster yet.") + "</p>";
+  } else {
+    html += '<div class="field-row" style="align-items:flex-end;">' +
+      '<div class="field" style="min-width:200px;"><label for="rep-week-period">Class / period</label><select id="rep-week-period">' +
+      weekPeriods.map((p) => '<option value="' + escapeHtml(p) + '"' + (p === repWeekPeriod ? " selected" : "") + '>' + escapeHtml(p) + "</option>").join("") +
+      "</select></div>" +
+      '<div class="field" style="flex-shrink:0;min-width:auto;"><label>&nbsp;</label><div style="display:flex;gap:6px;flex-wrap:wrap;">' +
+      '<button class="btn btn-ghost btn-sm" id="rep-week-prev" type="button">&larr;</button>' +
+      '<button class="btn btn-ghost btn-sm" id="rep-week-today" type="button">This week</button>' +
+      '<button class="btn btn-ghost btn-sm" id="rep-week-next" type="button">&rarr;</button></div></div>' +
+      "</div>" +
+      '<div style="margin:2px 0 12px;font-size:0.82rem;color:var(--muted);">' + escapeHtml(fmtDateShort(repWeekRange.from)) + " – " + escapeHtml(fmtDateShort(repWeekRange.to)) + "</div>" +
+      renderRosterWeekGridHtml(roster, repWeekPeriod, repWeekRange.from);
   }
   html += "</div>";
 
@@ -3230,7 +3527,7 @@ function renderOverview(root) {
       '<option value="all"' + (exportScope === "all" ? " selected" : "") + '>All time</option>' +
       '<option value="custom"' + (exportScope === "custom" ? " selected" : "") + '>Custom range</option>' +
       "</select></div>" +
-      (showNav ? '<div class="field" style="flex-shrink:0;"><label>&nbsp;</label><div style="display:flex;gap:6px;">' +
+      (showNav ? '<div class="field" style="flex-shrink:0;min-width:auto;"><label>&nbsp;</label><div style="display:flex;gap:6px;flex-wrap:wrap;">' +
         '<button class="btn btn-ghost btn-sm" id="exp-prev" type="button">&larr;</button>' +
         '<button class="btn btn-ghost btn-sm" id="exp-today" type="button">Today</button>' +
         '<button class="btn btn-ghost btn-sm" id="exp-next" type="button">&rarr;</button></div></div>' : "") +
@@ -3283,6 +3580,15 @@ function renderOverview(root) {
     reportScope = "custom"; reportFrom = d; reportTo = d;
     renderAll();
   }));
+
+  const repWeekPeriodSel = document.getElementById("rep-week-period");
+  if (repWeekPeriodSel) repWeekPeriodSel.addEventListener("change", () => { repWeekPeriod = repWeekPeriodSel.value; renderAll(); });
+  const repWeekPrev = document.getElementById("rep-week-prev");
+  if (repWeekPrev) repWeekPrev.addEventListener("click", () => { repWeekAnchor = shiftDate(repWeekAnchor, -7); renderAll(); });
+  const repWeekNext = document.getElementById("rep-week-next");
+  if (repWeekNext) repWeekNext.addEventListener("click", () => { repWeekAnchor = shiftDate(repWeekAnchor, 7); renderAll(); });
+  const repWeekTodayBtn = document.getElementById("rep-week-today");
+  if (repWeekTodayBtn) repWeekTodayBtn.addEventListener("click", () => { repWeekAnchor = todayISO(); renderAll(); });
 
   const expScopeSel = document.getElementById("exp-scope");
   if (expScopeSel) expScopeSel.addEventListener("change", () => { exportScope = expScopeSel.value; renderAll(); });
@@ -3426,7 +3732,7 @@ function renderLeaderboard(root, session) {
     '<option value="hmonth"' + (lbScope === "hmonth" ? " selected" : "") + '>This Hebrew month</option>' +
     '<option value="custom"' + (lbScope === "custom" ? " selected" : "") + '>Custom range</option>' +
     "</select></div>" +
-    (lbScope === "week" || lbScope === "hmonth" ? '<div class="field" style="flex-shrink:0;"><label>&nbsp;</label><div style="display:flex;gap:6px;">' +
+    (lbScope === "week" || lbScope === "hmonth" ? '<div class="field" style="flex-shrink:0;min-width:auto;"><label>&nbsp;</label><div style="display:flex;gap:6px;flex-wrap:wrap;">' +
       '<button class="btn btn-ghost btn-sm" id="lb-prev" type="button">&larr;</button>' +
       '<button class="btn btn-ghost btn-sm" id="lb-today" type="button">Today</button>' +
       '<button class="btn btn-ghost btn-sm" id="lb-next" type="button">&rarr;</button></div></div>' : "") +
@@ -3721,7 +4027,7 @@ function renderAdminStaff(root) {
   let html = '<div class="card card-pad"><div class="section-title">Add a staff account</div><div class="field-row">' +
     '<div class="field"><label for="st-name">Name</label><input type="text" id="st-name"></div>' +
     '<div class="field"><label for="st-username">Username</label><input type="text" id="st-username"></div>' +
-    '<div class="field"><label for="st-password">Password</label><input type="text" id="st-password" placeholder="leave blank to auto-generate"></div>' +
+    '<div class="field"><label for="st-password">Password</label>' + passwordFieldHtml("st-password", { placeholder: "leave blank to auto-generate" }) + "</div>" +
     '<div class="field" style="max-width:150px;"><label for="st-role">Role</label><select id="st-role"><option value="teacher">Teacher</option><option value="admin">Admin</option></select></div>' +
     "</div><button class=\"btn btn-primary btn-sm\" id=\"st-add\">Add staff member</button>" +
     '<p class="help-text" style="margin-top:12px;">Admins can set everything up here; teachers only see Today, the Ledger, and Reports — kept simple on purpose.</p>' +
@@ -3748,13 +4054,14 @@ function renderAdminStaff(root) {
 
   html += '<div class="card card-pad"><div class="table-wrap"><table><thead><tr><th>Name</th><th>Username</th><th>Password</th><th>Role</th><th></th></tr></thead><tbody>';
   state.staff.forEach((s) => {
-    html += "<tr><td>" + escapeHtml(s.name) + '</td><td class="num">' + escapeHtml(s.username) + '</td><td class="num">' + escapeHtml(s.password) +
+    html += "<tr><td>" + escapeHtml(s.name) + '</td><td class="num">' + escapeHtml(s.username) + '</td><td class="num">' + passwordCellHtml(s.password, "staff:" + s.id) +
       '</td><td>' + (s.role === "admin" ? '<span class="pill pill-gold">Admin</span>' : '<span class="pill pill-muted">Teacher</span>') +
       '</td><td><button class="btn btn-ghost btn-sm" data-view-as-staff="' + s.id + '">View as</button> ' +
       '<button class="btn btn-ghost btn-sm" data-reset-staff="' + s.id + '">Reset password</button></td></tr>';
   });
   html += "</tbody></table></div></div>";
   root.innerHTML = html;
+  wirePasswordToggles(root);
   document.getElementById("st-add").addEventListener("click", async () => {
     const name = document.getElementById("st-name").value.trim();
     const username = document.getElementById("st-username").value.trim();
@@ -3823,6 +4130,11 @@ function renderAdminStaff(root) {
   });
   const bulkDismiss = document.getElementById("st-bulk-dismiss");
   if (bulkDismiss) bulkDismiss.addEventListener("click", () => { bulkStaffResult = null; renderAdminStaff(root); });
+  root.querySelectorAll("[data-pw-toggle]").forEach((btn) => btn.addEventListener("click", () => {
+    const key = btn.getAttribute("data-pw-toggle");
+    if (revealedPasswords.has(key)) revealedPasswords.delete(key); else revealedPasswords.add(key);
+    renderAdminStaff(root);
+  }));
 }
 
 let bulkStudentResult = null;
@@ -3835,7 +4147,7 @@ function studentRow(s, archived) {
     return "<tr>" +
       '<td><input type="text" id="edit-last-' + s.id + '" value="' + escapeHtml(s.last) + '" style="width:100%;"></td>' +
       '<td><input type="text" id="edit-first-' + s.id + '" value="' + escapeHtml(s.first) + '" style="width:100%;"></td>' +
-      '<td class="num">' + escapeHtml(s.username || "—") + '</td><td class="num">' + escapeHtml(s.password || "—") + "</td>" +
+      '<td class="num">' + escapeHtml(s.username || "—") + '</td><td class="num">' + passwordCellHtml(s.password, "student:" + s.id) + "</td>" +
       '<td class="num"><input type="number" id="edit-yob-' + s.id + '" value="' + (s.yearOfBirth ? escapeHtml(String(s.yearOfBirth)) : "") + '" placeholder="e.g. 2013" style="width:88px;"></td><td>' +
       (archived ? '<span class="pill pill-muted">Archived</span>' : '<span class="pill pill-good">Active</span>') +
       '</td><td style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
@@ -3852,7 +4164,7 @@ function studentRow(s, archived) {
       '<button class="btn btn-ghost btn-sm" data-toggle="' + s.id + '">' + (archived ? "Unarchive" : "Archive") + '</button>' +
       '<button class="btn btn-ghost btn-sm" data-reset-student="' + s.id + '">Reset pw</button>' +
       '<button class="btn btn-ghost btn-sm" data-delete-student="' + s.id + '" style="color:var(--warn);">Delete</button>';
-  return "<tr><td>" + escapeHtml(s.last) + "</td><td>" + escapeHtml(s.first) + '</td><td class="num">' + escapeHtml(s.username || "—") + '</td><td class="num">' + escapeHtml(s.password || "—") + '</td><td class="num">' + (s.yearOfBirth ? escapeHtml(String(s.yearOfBirth)) : "—") + "</td><td>" +
+  return "<tr><td>" + escapeHtml(s.last) + "</td><td>" + escapeHtml(s.first) + '</td><td class="num">' + escapeHtml(s.username || "—") + '</td><td class="num">' + passwordCellHtml(s.password, "student:" + s.id) + '</td><td class="num">' + (s.yearOfBirth ? escapeHtml(String(s.yearOfBirth)) : "—") + "</td><td>" +
     (archived ? '<span class="pill pill-muted">Archived</span>' : '<span class="pill pill-good">Active</span>') + '</td><td style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
     actions + "</td></tr>";
 }
@@ -3861,7 +4173,7 @@ function renderAdminStudents(root) {
     '<div class="field"><label for="r-last">Last name</label><input type="text" id="r-last"></div>' +
     '<div class="field"><label for="r-first">First name</label><input type="text" id="r-first"></div>' +
     '<div class="field"><label for="r-username">Username</label><input type="text" id="r-username" placeholder="auto-suggested"></div>' +
-    '<div class="field"><label for="r-password">Password</label><input type="text" id="r-password" placeholder="leave blank to auto-generate"></div>' +
+    '<div class="field"><label for="r-password">Password</label>' + passwordFieldHtml("r-password", { placeholder: "leave blank to auto-generate" }) + "</div>" +
     '<div class="field" style="max-width:130px;"><label for="r-yob">Year of birth</label><input type="number" id="r-yob" placeholder="optional"></div>' +
     '</div><button class="btn btn-primary btn-sm" id="r-submit">Add to roster</button>' +
     (showBulkStudentForm ? "" : '<button class="btn btn-ghost btn-sm" id="r-bulk-toggle" style="margin-left:8px;">Bulk add multiple students…</button>') +
@@ -3901,6 +4213,7 @@ function renderAdminStudents(root) {
   }
   html += "</div>";
   root.innerHTML = html;
+  wirePasswordToggles(root);
 
   const lastInput = document.getElementById("r-last"), firstInput = document.getElementById("r-first"), userInput = document.getElementById("r-username");
   let userTouched = false;
@@ -4003,6 +4316,11 @@ function renderAdminStudents(root) {
   }));
   const archivedToggle = document.getElementById("archived-toggle");
   if (archivedToggle) archivedToggle.addEventListener("click", () => { showArchivedStudents = !showArchivedStudents; renderAdminStudents(root); });
+  root.querySelectorAll("[data-pw-toggle]").forEach((btn) => btn.addEventListener("click", () => {
+    const key = btn.getAttribute("data-pw-toggle");
+    if (revealedPasswords.has(key)) revealedPasswords.delete(key); else revealedPasswords.add(key);
+    renderAdminStudents(root);
+  }));
   const bulkToggle = document.getElementById("r-bulk-toggle");
   if (bulkToggle) bulkToggle.addEventListener("click", () => { showBulkStudentForm = true; renderAdminStudents(root); });
   const bulkCancel = document.getElementById("r-bulk-cancel");
@@ -4311,6 +4629,38 @@ function renderStudentCalendarHtml(student) {
   return html;
 }
 
+/* The student's own "full week" attendance sheet -- every class held at least once this week
+   down the side, the 7 days of that week (Sun-Sat) across the top, so a student (or staff
+   looking at one student) can see at a glance which classes were marked, missed, or not
+   scheduled that day -- the same read a printed weekly attendance sheet gives. Only shown
+   while sdScope is "week" (see renderStudentDetail), since it needs one specific week to lay
+   out as columns; reuses the same weeklySheetCellHtml/att-grid machinery as the teacher-facing
+   roster-wide version of this in Reports (renderRosterWeekGridHtml). */
+function renderStudentWeekGridHtml(student, weekFrom) {
+  const days = Array.from({ length: 7 }, (_, i) => shiftDate(weekFrom, i));
+  const todayGregISO = todayISO();
+  const weekPeriods = state.settings.periods.filter((p) => days.some((d) => periodsForDate(d).includes(p)));
+  let html = '<div class="card card-pad" style="margin-top:16px;"><div class="section-title"><span>Week at a glance</span></div>' +
+    '<p style="margin:2px 0 12px;font-size:0.82rem;color:var(--muted);">Every class this week, day by day — a hatched cell means that class wasn’t scheduled that day.</p>';
+  if (!weekPeriods.length) {
+    html += '<p class="help-text">No classes are scheduled this week.</p></div>';
+    return html;
+  }
+  html += '<div class="att-grid-scroll"><table class="att-grid"><thead><tr><th style="position:sticky;left:0;background:var(--surface-2);z-index:2;">Class</th>';
+  days.forEach((d, i) => {
+    html += '<th class="' + (d === todayGregISO ? "col-active" : "") + '"><span class="period-name">' + escapeHtml(DAY_NAMES[i].slice(0, 3)) +
+      '</span><br><span class="sub">' + escapeHtml(fmtDateShort(d)) + "</span></th>";
+  });
+  html += "</tr></thead><tbody>";
+  weekPeriods.forEach((p) => {
+    html += '<tr><td class="student-cell">' + escapeHtml(p) + "</td>";
+    days.forEach((d) => { html += weeklySheetCellHtml(d, p, student.id, d === todayGregISO ? "col-active" : ""); });
+    html += "</tr>";
+  });
+  html += "</tbody></table></div></div>";
+  return html;
+}
+
 function renderStudentDetail(root, student, opts) {
   // opts.self: a student viewing their own record (from the "My Balance" tab) rather than a
   // staff member browsing the roster. Same page, same calendar/log/report-card machinery --
@@ -4348,7 +4698,7 @@ function renderStudentDetail(root, student, opts) {
     '<option value="custom"' + (sdScope === "custom" ? " selected" : "") + '>Custom range</option>' +
     "</select></div>" +
     (sdScope === "day" ? '<div class="field" style="min-width:150px;"><label for="sd-day">Day</label><input type="date" id="sd-day" value="' + escapeHtml(sdAnchor) + '"></div>' : "") +
-    (sdScope === "day" || sdScope === "week" || sdScope === "hmonth" ? '<div class="field" style="flex-shrink:0;"><label>&nbsp;</label><div style="display:flex;gap:6px;">' +
+    (sdScope === "day" || sdScope === "week" || sdScope === "hmonth" ? '<div class="field" style="flex-shrink:0;min-width:auto;"><label>&nbsp;</label><div style="display:flex;gap:6px;flex-wrap:wrap;">' +
       '<button class="btn btn-ghost btn-sm" id="sd-prev" type="button">&larr;</button>' +
       '<button class="btn btn-ghost btn-sm" id="sd-today" type="button">Today</button>' +
       '<button class="btn btn-ghost btn-sm" id="sd-next" type="button">&rarr;</button></div></div>' : "") +
@@ -4369,6 +4719,7 @@ function renderStudentDetail(root, student, opts) {
       '<button type="button" class="link-btn" id="sd-class-clear">show every class combined</button>.</p>';
   }
 
+  if (sdScope === "week") html += renderStudentWeekGridHtml(student, range.from);
   html += renderStudentCalendarHtml(student);
 
   const reportNotes = notesForStudent(student.id, range.from, range.to);
