@@ -572,6 +572,7 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid var(--line); font-size: 0
 tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover { background: var(--surface-2); }
 td.num, th.num { font-family: var(--font-mono); text-align: right; }
+.th-abbr { display: none; }
 
 /* Frozen first/last column for wide tables that scroll horizontally on a phone -- e.g. the
    Students/Staff tables' Actions column (so the action menu toggle is reachable without
@@ -1075,6 +1076,21 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
   .sd-cal-greg { font-size: 0.6rem; }
   .sd-cal-heb, .sd-cal-val { font-size: 0.5rem; }
 }
+/* Reports' Student/Class summary tables (.rep-table): 4-5 columns of real data that all need
+   to stay visible together for the row to mean anything at a glance, so on a phone this
+   shrinks and abbreviates instead of letting .table-wrap's default overflow-x scroll kick in --
+   sliding sideways to compare one student's Attendance against their Coin balance defeats the
+   point of a summary table. */
+@media (max-width: 480px) {
+  .rep-table thead th { padding: 6px 4px; font-size: 0.62rem; white-space: normal; }
+  .rep-table tbody td { padding: 6px 4px; font-size: 0.74rem; white-space: normal; }
+  .rep-table td:first-child, .rep-table th:first-child { white-space: normal; word-break: break-word; }
+  .rep-table .th-full { display: none; }
+  .rep-table .th-abbr { display: inline; }
+  .rep-table .pill { padding: 2px 6px; font-size: 0.64rem; gap: 3px; }
+  .rep-table .coin-inline { gap: 3px; }
+  .rep-table .coin-badge-sm { width: 15px; height: 15px; }
+}
 
 /* Report card printing: hitting Print on a student's report card should print
    just that card, not the sidebar, nav, or the rest of the page around it. */
@@ -1330,6 +1346,13 @@ function pctPill(n) {
   const tone = pctTone(n);
   if (!tone) return '<span style="color:var(--muted);">—</span>';
   return '<span class="pill pill-' + tone + '">' + pct(n) + "</span>";
+}
+// A table header that shows its full label normally, but swaps to a short abbreviation on
+// narrow phone widths (see .rep-table's media rule) so a wide column set -- e.g. Reports'
+// Student/Attendance/Participation/Points/Coin balance table -- fits without a horizontal
+// scrollbar instead of just shrinking padding until the text itself is what's too wide.
+function thAbbr(full, abbr) {
+  return '<span class="th-full">' + escapeHtml(full) + '</span><span class="th-abbr">' + escapeHtml(abbr) + "</span>";
 }
 function num2(n) { return (n === null || n === undefined || isNaN(n)) ? "—" : Number(n).toFixed(2).replace(/\.00$/, ""); }
 function clampScore(v, max) {
@@ -3589,7 +3612,7 @@ function renderOverview(root) {
   html += '<div class="card card-pad">';
   if (reportGroupBy === "class") {
     const periods = state.settings.periods;
-    html += '<div class="table-wrap"><table><thead><tr><th>Class</th><th class="num">Attendance</th><th class="num">Participation</th><th class="num">Times marked (avg)</th></tr></thead><tbody>';
+    html += '<div class="table-wrap"><table class="rep-table"><thead><tr><th>Class</th><th class="num">' + thAbbr("Attendance", "Att") + '</th><th class="num">' + thAbbr("Participation", "Part") + '</th><th class="num">' + thAbbr("Times marked (avg)", "Avg") + "</th></tr></thead><tbody>";
     periods.forEach((p) => {
       const cs = classStats(p, roster, { from: range.from, to: range.to });
       const sessions = roster.length ? Math.round(cs.attCount / roster.length) : 0;
@@ -3598,8 +3621,8 @@ function renderOverview(root) {
     });
     html += "</tbody></table></div>";
   } else {
-    html += '<div class="table-wrap"><table><thead><tr><th>Student</th><th class="num">Attendance</th><th class="num">Participation</th><th class="num">Points</th>' +
-      '<th class="num" title="Always a running total — not limited to the time range above">Coin balance</th></tr></thead><tbody>';
+    html += '<div class="table-wrap"><table class="rep-table"><thead><tr><th>Student</th><th class="num">' + thAbbr("Attendance", "Att") + '</th><th class="num">' + thAbbr("Participation", "Part") + '</th><th class="num">' + thAbbr("Points", "Pts") + '</th>' +
+      '<th class="num" title="Always a running total — not limited to the time range above">' + thAbbr("Coin balance", "Coins") + "</th></tr></thead><tbody>";
     roster.forEach((s) => {
       const st = computeStats(s.id, { from: range.from, to: range.to });
       // Coin balance is always the true, all-time running total (studentStats == computeStats
