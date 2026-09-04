@@ -899,23 +899,20 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
    larger desktop sizes only, not a different layout. */
 .lb-podium { display: flex; align-items: flex-end; gap: 8px; padding: 6px 0 0; }
 .lb-podium-col {
-  display: flex; flex-direction: column; align-items: center; justify-content: space-between; gap: 6px; flex: 1 1 0; min-width: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 1 1 0; min-width: 0;
   padding: 12px 6px 0; border-radius: var(--radius); border: none;
   position: relative; overflow: hidden;
 }
 /* The riser itself: a full, solid place color at the FOOT of the column -- where the
-   representative figure stands -- fading up into the ordinary card background behind the
-   wreath, with no outline of its own (the color block and the page simply meet). Each column's
-   height is a fixed height, not a floor -- 1st is always tallest, then 2nd, then 3rd, no matter
-   how many students are tied onto any one of them (a big tie just shrinks that place's own
-   figures via .lb-podium-figure's flex/max-width, which only ever shrinks a column's content,
-   never grows it past what a single winner already takes up -- see the figure max-widths below,
-   sized so a lone winner's wreath+figure always fits inside their place's own fixed height).
-   0deg (not 180deg) is what puts the gradient's first color stop at the bottom instead of the
-   top. */
-.lb-podium-col.rank-1 { order: 2; height: 280px; background: linear-gradient(0deg, var(--gold) 0%, var(--gold-soft) 44%, var(--surface) 90%); }
-.lb-podium-col.rank-2 { order: 1; height: 250px; background: linear-gradient(0deg, var(--silver) 0%, var(--silver-soft) 44%, var(--surface) 90%); }
-.lb-podium-col.rank-3 { order: 3; height: 226px; background: linear-gradient(0deg, var(--bronze) 0%, var(--bronze-soft) 44%, var(--surface) 90%); }
+   representative figure(s) stand -- fading up into the ordinary card background behind the
+   wreath, with no outline of its own (the color block and the page simply meet). This height is
+   a fixed height, not a floor -- 1st is always tallest, then 2nd, then 3rd, no matter how many
+   students are tied onto any one of them, since a tie is drawn as a compact overlapping pyramid
+   (see .lb-podium-figures) rather than something that grows the column to fit more people. 0deg
+   (not 180deg) is what puts the gradient's first color stop at the bottom instead of the top. */
+.lb-podium-col.rank-1 { order: 2; height: 300px; background: linear-gradient(0deg, var(--gold) 0%, var(--gold-soft) 44%, var(--surface) 90%); }
+.lb-podium-col.rank-2 { order: 1; height: 268px; background: linear-gradient(0deg, var(--silver) 0%, var(--silver-soft) 44%, var(--surface) 90%); }
+.lb-podium-col.rank-3 { order: 3; height: 244px; background: linear-gradient(0deg, var(--bronze) 0%, var(--bronze-soft) 44%, var(--surface) 90%); }
 /* The podium wreath badge (see wreathBadgeHtml). 1st/2nd/3rd (.lb-wreath-img) are the user's own
    wreath artwork with its ordinal already baked in -- just an image, full bleed on the badge box.
    Every other place (.lb-wreath) uses the same ring without a baked-in number -- a light-mode
@@ -941,24 +938,37 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
 /* Every student tied for this place stands on the riser together, side by side -- not just one
    representative (see orderedPodiumEntries) -- as plain figures NOT clipped into circles, so the
    transparent-background art (see AVATAR_GALLERY) sits on the color like little character cards
-   rather than framed photos. Bottom-anchored (via the column's own justify-content:space-between)
-   so it reads as people actually standing on the podium. The figures container spans the full
-   column width and each figure is flex:1 1 0, sized up to max-width -- a lone figure grows all
-   the way to it, and two or more sharing the spot pull in close with a small negative margin
-   (letting shoulders overlap slightly) rather than just shrinking to stay separate, so a tie
-   still reads as a group of real-sized people instead of shrinking away into thumbnails. Each
-   figure is nudged down a couple px past the riser's own edge (clipped by the column's
-   overflow:hidden, see .lb-podium-col) so the source art's own rounded shoulder/hem line -- which
-   sits a little short of the image's bottom edge -- disappears below the crop instead of reading
-   as a stray curve floating over the riser color. */
-.lb-podium-figures { display: flex; align-items: flex-end; justify-content: center; width: 100%; }
-.lb-podium-figure {
-  display: block; flex: 1 1 0; min-width: 0; max-width: 118px; margin-left: -8px;
-  transform: translateY(6px); filter: drop-shadow(0 3px 6px rgba(15, 23, 42, 0.28));
+   rather than framed photos.
+
+   Rather than shrinking to divide the column's width evenly, or wrapping onto extra rows that
+   would grow the column taller, a tie is drawn as one tight, overlapping PYRAMID that packs into
+   about the same footprint as a single winner: a bottom row of up to 3, a shorter row nested in
+   its gaps above, and so on (see pyramidRows/podiumFiguresHtml, which computes each figure's row
+   and its horizontal offset from center in figure-widths as --row/--dx below). Each figure stays
+   the same real size regardless of how many are sharing the place -- only fixed per PLACE
+   (bigger for 1st, then 2nd, then 3rd -- see --fig-w below) -- so a crowded 1st place still reads
+   as the biggest place on the board, just packed closer together instead of shrunk down.
+
+   .lb-podium-figures fills whatever vertical space is left under the wreath (flex:1 1 auto) so
+   --row can position every figure's `bottom` off of the SAME shared baseline (the column's own
+   bottom edge) regardless of how many rows there are; each figure is also nudged down a couple
+   more px past that edge (clipped by the column's overflow:hidden) so the source art's own
+   rounded shoulder/hem line -- which sits a little short of the image's bottom edge -- disappears
+   below the crop instead of reading as a stray curve floating over the riser color. A pyramid
+   taller than the column itself (an unusually large tie) simply has its top rows clipped by that
+   same overflow:hidden rather than growing the riser. */
+.lb-podium-figures {
+  position: relative; width: 100%; flex: 1 1 auto;
+  --fig-w: 84px; --fig-h: calc(var(--fig-w) * 1.1208);
 }
-.lb-podium-figure:first-child { margin-left: 0; }
-.lb-podium-col.rank-2 .lb-podium-figure { max-width: 140px; }
-.lb-podium-col.rank-1 .lb-podium-figure { max-width: 166px; }
+.lb-podium-col.rank-2 .lb-podium-figures { --fig-w: 96px; }
+.lb-podium-col.rank-1 .lb-podium-figures { --fig-w: 112px; }
+.lb-podium-figure {
+  position: absolute; left: 50%; bottom: 0; display: block; width: var(--fig-w);
+  margin-left: calc((var(--dx) - 0.5) * var(--fig-w));
+  transform: translateY(calc(6px - var(--row) * var(--fig-h) * 0.58));
+  filter: drop-shadow(0 3px 6px rgba(15, 23, 42, 0.28));
+}
 /* Value + every tied student's name live OUTSIDE the riser, directly underneath it, in a second
    row that mirrors the same flex:1 1 0 slots and rank-N order as .lb-podium-col above so each
    info block lines up under its own column no matter how tall that column's riser is. */
@@ -1058,17 +1068,21 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
      mobile. */
   .lb-podium { gap: 16px; padding: 10px 0 0; }
   .lb-podium-col { gap: 8px; padding: 18px 10px 0; }
-  .lb-podium-col.rank-1 { height: 384px; }
+  .lb-podium-col.rank-1 { height: 390px; }
   .lb-podium-col.rank-2 { height: 348px; }
-  .lb-podium-col.rank-3 { height: 317px; }
+  .lb-podium-col.rank-3 { height: 316px; }
   .lb-avatar { width: 40px; height: 40px; font-size: 0.84rem; }
   .lb-avatar-md { width: 58px; height: 58px; font-size: 1.1rem; }
   .lb-avatar-lg { width: 72px; height: 72px; font-size: 1.3rem; }
   .lb-wreath-badge { width: 108px; height: 95px; }
   .lb-wreath-ordinal { font-size: 0.86rem; }
-  .lb-podium-figure { max-width: 164px; margin-left: -12px; transform: translateY(9px); }
-  .lb-podium-col.rank-2 .lb-podium-figure { max-width: 192px; }
-  .lb-podium-col.rank-1 .lb-podium-figure { max-width: 224px; }
+  /* Figures scale up with the bigger desktop wreath/riser, same pyramid math as mobile (see
+     .lb-podium-figures / .lb-podium-figure in the base stylesheet) -- only --fig-w and the
+     translateY base offset (9px, matching this app's long-standing desktop nudge) change here. */
+  .lb-podium-figures { --fig-w: 112px; }
+  .lb-podium-col.rank-2 .lb-podium-figures { --fig-w: 128px; }
+  .lb-podium-col.rank-1 .lb-podium-figures { --fig-w: 146px; }
+  .lb-podium-figure { transform: translateY(calc(9px - var(--row) * var(--fig-h) * 0.58)); }
   .lb-podium-info-row { gap: 16px; margin-top: 12px; }
   .lb-podium-value { font-size: 0.92rem; }
   .lb-podium-names { font-size: 0.76rem; }
@@ -4099,6 +4113,26 @@ function competitionRanks(sortedDesc) {
   sortedDesc.forEach((e, i) => { ranks.push(i > 0 && e.value === sortedDesc[i - 1].value ? ranks[i - 1] : i + 1); });
   return ranks;
 }
+// A tie's figures are drawn as a tight, overlapping pyramid instead of one wide row -- a bottom
+// row of up to PYRAMID_ROW_WIDTH, a shorter row nested above it in the gaps, and so on -- so a
+// big tie packs into roughly the same footprint as a single winner rather than growing the
+// podium taller or shrinking everyone down to thumbnails (see podiumFiguresHtml and
+// .lb-podium-figure's --row/--dx custom properties, which do the actual positioning in CSS).
+// Returns row sizes, bottom row first, tapering by 1 each row up (3,2,1 for 6 -- see the
+// reference photo this was modeled on) and never growing past PYRAMID_ROW_WIDTH.
+const PYRAMID_ROW_WIDTH = 3;
+function pyramidRows(n) {
+  const rows = [];
+  let remaining = n;
+  let cap = PYRAMID_ROW_WIDTH;
+  while (remaining > 0) {
+    const count = Math.min(remaining, cap);
+    rows.push(count);
+    remaining -= count;
+    cap = Math.max(1, count - 1);
+  }
+  return rows;
+}
 function renderLeaderboard(root, session) {
   const role = roleOf(session);
   const roster = activeRoster();
@@ -4195,10 +4229,36 @@ function renderLeaderboard(root, session) {
         return i > 0 ? [g.entries[i]].concat(g.entries.slice(0, i), g.entries.slice(i + 1)) : g.entries;
       };
       // The podium figures are plain (non-circular) cutouts, not the circular lb-avatar used
-      // everywhere else -- see .lb-podium-figure/.lb-podium-figures.
-      const podiumFiguresHtml = (students) => '<div class="lb-podium-figures">' +
-        students.map((student) => '<img class="lb-podium-figure" src="' + escapeHtml(student.photoUrl || defaultAvatarFor(student)) + '" alt="" />').join("") +
-        "</div>";
+      // everywhere else -- see .lb-podium-figure/.lb-podium-figures. A tie is laid out as a
+      // pyramid (see pyramidRows/PYRAMID_ROW_WIDTH): each figure carries its row and its
+      // horizontal offset from center (in figure-widths, --dx) as inline custom properties, and
+      // the actual pixel positioning happens in CSS off of those -- see .lb-podium-figure.
+      const podiumFiguresHtml = (students) => {
+        const rows = pyramidRows(students.length);
+        let i = 0;
+        const figures = [];
+        rows.forEach((rowCount, rowIndex) => {
+          // Offsets are ordered center-out (0, then the nearest pair to center, then the next
+          // pair, ...) so the row's first-consumed student -- the signed-in student, when
+          // they're part of this tie, since orderedPodiumEntries put them first -- lands dead
+          // center of their row instead of just filling in from the left.
+          const offsets = Array.from({ length: rowCount }, (_, c) => c - (rowCount - 1) / 2)
+            .sort((a, b) => Math.abs(a) - Math.abs(b));
+          for (let c = 0; c < rowCount; c++) {
+            figures.push({ student: students[i++], row: rowIndex, dx: offsets[c] * 0.6 });
+          }
+        });
+        // Painted back-to-front (top row first in the DOM, bottom row last) so the front/bottom
+        // row's heads sit ON TOP of the row(s) tucked behind them, matching how a real huddle of
+        // people photographs -- CSS paints later DOM siblings over earlier ones by default. This
+        // also means the centered, first-consumed (signed-in) student within the front row is
+        // painted last of all -- on top of their row-mates too.
+        const figsHtml = figures.slice().reverse().map((f) =>
+          '<img class="lb-podium-figure" style="--row:' + f.row + ";--dx:" + f.dx.toFixed(3) + ';" src="' +
+          escapeHtml(f.student.photoUrl || defaultAvatarFor(f.student)) + '" alt="" />'
+        ).join("");
+        return '<div class="lb-podium-figures">' + figsHtml + "</div>";
+      };
       html += '<div class="lb-podium">';
       order.forEach((g) => {
         html += '<div class="lb-podium-col rank-' + g.place + '">' +
