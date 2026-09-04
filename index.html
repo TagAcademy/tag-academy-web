@@ -659,6 +659,33 @@ td.num, th.num { font-family: var(--font-mono); text-align: right; }
 .coin-hero .coin-hero-sub { font-size: 0.8rem; color: var(--muted); margin-top: 3px; }
 .coin-inline { display: inline-flex; align-items: center; gap: 6px; }
 
+/* TAG Coins page: a grid of tappable student "coin cards" (balance + avatar), multi-selectable
+   -- select one or more, then Grant or Purchase/charge applies the same entry to all of them.
+   Selected cards get a checkmark badge and a brand-colored glow instead of changing size or
+   layout, so selecting many at once stays visually calm. */
+.coin-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(126px, 1fr)); gap: 12px; }
+.coin-card {
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 7px;
+  padding: 16px 10px 14px; border-radius: var(--radius); border: 2px solid var(--line);
+  background: linear-gradient(160deg, var(--gold-soft) 0%, var(--surface) 68%);
+  cursor: pointer; font-family: inherit; text-align: center;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+.coin-card:hover { border-color: var(--gold); transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08); }
+.coin-card.selected { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+.coin-card:disabled { cursor: default; }
+.coin-card:disabled:hover { transform: none; box-shadow: none; border-color: var(--line); }
+.coin-card-check {
+  position: absolute; top: 7px; right: 7px; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--brand); color: #fff; display: flex; align-items: center; justify-content: center;
+  opacity: 0; transform: scale(0.5); transition: opacity 0.12s ease, transform 0.12s ease;
+}
+.coin-card-check svg { width: 11px; height: 11px; }
+.coin-card.selected .coin-card-check { opacity: 1; transform: scale(1); }
+.coin-card-name { font-weight: 700; font-size: 0.84rem; line-height: 1.25; }
+.coin-card-balance { display: inline-flex; align-items: center; gap: 6px; }
+.coin-card-balance-value { font-family: var(--font-mono); font-size: 1.25rem; font-weight: 800; color: var(--gold); }
+
 /* attendance grid */
 .att-grid-scroll { overflow-x: auto; border-radius: var(--radius); border: 1px solid var(--line); }
 .att-grid { border-collapse: collapse; min-width: 100%; table-layout: fixed; }
@@ -711,6 +738,17 @@ td.num, th.num { font-family: var(--font-mono); text-align: right; }
   background: none; border: none; padding: 0; color: var(--brand); font-size: 0.78rem;
   font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 2px;
 }
+/* Pill/"bubble" button groups -- a segmented-control alternative to a <select> for a short,
+   fixed list of choices (Reports' Group by / Time range) where seeing every option at a
+   glance, in one tap, reads friendlier than a dropdown. */
+.bubble-group { display: flex; flex-wrap: wrap; gap: 8px; }
+.bubble-btn {
+  display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 999px;
+  border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink);
+  font-size: 0.86rem; font-weight: 700; cursor: pointer; font-family: inherit;
+}
+.bubble-btn:hover { border-color: var(--brand); color: var(--brand); }
+.bubble-btn.active { background: var(--brand); border-color: var(--brand); color: #fff; }
 .price-chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .price-chip {
   display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 999px;
@@ -2120,7 +2158,7 @@ function toast(msg, kind) {
    ================================================================ */
 const ROUTES = [
   { id: "today", label: "Today", icon: "check", roles: ["teacher", "admin"] },
-  { id: "ledger", label: "Coin Ledger", icon: "coin", roles: ["teacher", "admin"] },
+  { id: "ledger", label: "TAG Coins", icon: "coin", roles: ["teacher", "admin"] },
   { id: "overview", label: "Reports", icon: "grid", roles: ["teacher", "admin"] },
   { id: "leaderboard", label: "Leaderboard", icon: "trophy", roles: ["teacher", "admin", "student"] },
   { id: "admin", label: "Admin", icon: "gear", roles: ["admin"] },
@@ -2381,7 +2419,15 @@ function renderToday(root, session) {
   html += '<div class="today-sticky-bar">';
   html += '<div class="today-head-controls">';
   html += '<div class="thc-row">';
-  html += '<div class="field" style="margin-bottom:0;"><label for="today-date">' + escapeHtml(dayNameFor(todayDate)) + '</label><input type="date" id="today-date" value="' + todayDate + '"></div>';
+  // The "Today" jump button lives inside the same field as the Gregorian date input (rather
+  // than as its own field in .thc-row) so it doesn't compete with the Hebrew-date field for
+  // the row's width budget and force an extra wrapped line on a phone -- it just sits on the
+  // same line as the date it jumps, to its left.
+  html += '<div class="field" style="margin-bottom:0;"><label for="today-date">' + escapeHtml(dayNameFor(todayDate)) + '</label>' +
+    '<div style="display:flex;gap:6px;">' +
+    '<button type="button" class="btn btn-ghost btn-sm" id="today-jump" style="height:40px;flex-shrink:0;" title="Jump to today">Today</button>' +
+    '<input type="date" id="today-date" value="' + todayDate + '" style="flex:1;min-width:0;">' +
+    "</div></div>";
   if (hdayOptions.length) {
     html += '<div class="field hcal-field" style="margin-bottom:0;"><label for="hcal-trigger" dir="rtl">' + escapeHtml(hebrewDowLabelFor(todayDate)) + '</label>' +
       '<button type="button" class="hcal-trigger" id="hcal-trigger" dir="rtl">' + escapeHtml(hebLabel || "Pick a date") + "</button>";
@@ -2661,8 +2707,10 @@ function weeklySheetCellHtml(dateStr, period, studentId, extraClass) {
   }
   const marked = attendanceCellHtml(dateStr, period, studentId);
   if (marked !== null) return '<td class="score-cell' + cls + '">' + marked + "</td>";
-  if (dateStr < todayISO()) return '<td class="score-cell' + cls + '" title="Scheduled — nothing entered"><span class="pill pill-warn" style="font-size:0.68rem;">Missed</span></td>';
-  return '<td class="score-cell' + cls + '" title="Not marked yet">—</td>';
+  // Scheduled but nothing entered -- left blank rather than labeled "Missed"/"—" so an
+  // unmarked cell doesn't read as a flag or a judgment; the hatched "not scheduled" cells
+  // above are still visually distinct from a plain blank one.
+  return '<td class="score-cell' + cls + '" title="Nothing entered"></td>';
 }
 
 function renderTodaySummary(date, periods, roster) {
@@ -2710,6 +2758,8 @@ function wireTodayHeader(root) {
   syncStickyBarOffset();
   const dateInput = document.getElementById("today-date");
   if (dateInput) dateInput.addEventListener("change", () => { todayDate = dateInput.value; showAddExtraPeriod = false; showHebrewCal = false; localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
+  const todayJumpBtn = document.getElementById("today-jump");
+  if (todayJumpBtn) todayJumpBtn.addEventListener("click", () => { todayDate = todayISO(); showAddExtraPeriod = false; showHebrewCal = false; localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
   const hcalTrigger = document.getElementById("hcal-trigger");
   if (hcalTrigger) hcalTrigger.addEventListener("click", () => { showHebrewCal = !showHebrewCal; renderAll(); });
   root.querySelectorAll(".hcal-day").forEach((btn) => {
@@ -3133,99 +3183,104 @@ function txPill(type) {
 }
 
 /* ================================================================
-   VIEW: COIN LEDGER
+   VIEW: TAG COINS
    ================================================================ */
-// The ledger is used, day to day, almost entirely to log a purchase -- so that's the primary,
-// one-tap-per-item flow. Manual grants and transfers are real but rare, so they're tucked
-// behind a small "different kind of entry" toggle instead of cluttering the main form.
-let ledgerCart = []; // [{ id, name, cost }] -- items tapped from the price list for this purchase
-let showOtherLedgerEntry = false;
+// The main flow here is "select one or more students, then Grant or Purchase/charge" -- tap a
+// student's card below to toggle it in/out of selectedCoinStudents, and as soon as at least
+// one is selected an action panel appears offering the two things you'd ever do with a coin
+// balance. coinActionMode remembers which of those two is open; ledgerCart/ledgerCartTotal/
+// ledgerCartNote (tapping a privilege onto the current purchase) work exactly as before, just
+// applied to however many students are selected instead of always exactly one.
+let selectedCoinStudents = new Set();
+let coinActionMode = null; // null | "grant" | "purchase"
+let ledgerCart = []; // [{ id, name, cost }] -- privileges tapped onto the current purchase
 function ledgerCartTotal() { return ledgerCart.reduce((sum, item) => sum + Number(item.cost || 0), 0); }
 function ledgerCartNote() { return ledgerCart.map((item) => item.name).join(", "); }
-// Bulk grant/charge (see the "Bulk grant or charge" card in renderLedger) -- a checked set of
-// student ids, kept across re-renders so ticking boxes doesn't reset every time the amount
-// field changes. Cleared after a successful bulk save, same as the single-entry cart above.
-let bulkLedgerSelected = new Set();
 
 function renderLedger(root, session) {
   const roster = activeRoster();
   const privs = state.settings.privileges || [];
-  let html = '<div class="page-head"><div style="display:flex;gap:14px;align-items:center;">' + coinBadge("lg") +
-    '<div><span class="eyebrow">Bank statement</span><h1>TAG Coin Ledger</h1>' +
-    '<p>Every purchase, manual grant, and transfer. Coins earned from Attendance &amp; Participation are calculated automatically and don’t appear here.</p></div></div></div>';
+  selectedCoinStudents.forEach((id) => { if (!roster.some((s) => s.id === id)) selectedCoinStudents.delete(id); });
+  const selCount = selectedCoinStudents.size;
 
-  if (canWrite) {
-    html += '<div class="card card-pad"><div class="section-title">Log a purchase</div>';
-    html += '<div class="field-row">' +
-      '<div class="field"><label for="lg-date">Date</label><input type="date" id="lg-date" value="' + todayISO() + '"></div>' +
-      '<div class="field"><label for="lg-student">Student</label><select id="lg-student">' + roster.map((s) => '<option value="' + s.id + '">' + fullName(s) + "</option>").join("") + "</select></div>" +
-      "</div>";
-    if (privs.length) {
-      html += '<div class="field"><label>Tap an item to add it to this purchase</label><div class="price-chip-row">' +
-        privs.map((p) => {
-          const inCart = ledgerCart.some((item) => item.id === p.id);
-          return '<button type="button" class="price-chip' + (inCart ? " active" : "") + '" data-price-item="' + p.id + '">' + escapeHtml(p.name) + ' <span class="price-chip-cost">' + num2(p.cost) + "</span></button>";
-        }).join("") + "</div></div>";
-    }
-    if (ledgerCart.length) {
-      html += '<div class="cart-list">' + ledgerCart.map((item, i) =>
-        '<span class="cart-chip">' + escapeHtml(item.name) + " (" + num2(item.cost) + ')<button type="button" class="cart-remove" data-cart-remove="' + i + '" aria-label="Remove">&times;</button></span>'
-      ).join("") + '<button type="button" class="btn btn-ghost btn-sm" id="cart-clear">Clear</button></div>';
-    }
-    html += '<div class="field-row">' +
-      '<div class="field"><label for="lg-amount">Amount spent</label><input type="number" min="0" step="0.5" id="lg-amount" value="' + (ledgerCart.length ? ledgerCartTotal() : "") + '" placeholder="0"></div>' +
-      "</div>" +
-      '<div class="field"><label for="lg-note">What for</label><input type="text" id="lg-note" value="' + escapeHtml(ledgerCartNote()) + '" placeholder="e.g. late lights-out"></div>';
-    // Type defaults to Spent/Redeemed (a purchase) and stays hidden -- this toggle is the
-    // escape hatch for the two other, much rarer cases (a bonus grant, or a transfer between
-    // students), without making the common case scroll past a type picker every time.
-    html += '<p class="help-text" style="margin:-2px 0 10px;">' +
-      '<button type="button" class="link-btn" id="ledger-other-toggle">' + (showOtherLedgerEntry ? "Hide — this is a purchase" : "This isn’t a purchase (grant coins, or transfer between students)") + "</button></p>";
-    if (showOtherLedgerEntry) {
-      html += '<div class="field" style="max-width:260px;"><label for="lg-type">Entry type</label><select id="lg-type">' +
-        TX_TYPES.map((t) => '<option value="' + t + '"' + (t === "Spent/Redeemed" ? " selected" : "") + ">" + t + "</option>").join("") + "</select></div>" +
-        '<p class="help-text">For a transfer between students, add two entries: a Transfer Out for the giver and a Transfer In for the receiver, with the same note.</p>';
-    }
-    html += '<button class="btn btn-primary" id="ledger-submit">Log purchase</button></div>';
+  let html = '<div class="page-head"><div style="display:flex;gap:14px;align-items:center;">' + coinBadge("lg") +
+    '<div><span class="eyebrow">Everyone’s balance</span><h1>TAG Coins</h1>' +
+    '<p>Tap a student — or several — below to grant or charge TAG coins. Coins earned from Attendance &amp; Participation are calculated automatically and already count toward every balance shown here.</p></div></div></div>';
+
+  // ---- Student coin cards: the whole roster's balance, at a glance, and the entry point for
+  // every grant/charge below (see selectedCoinStudents above). ----
+  html += '<div class="card card-pad" style="margin-bottom:16px;">';
+  if (roster.length === 0) {
+    html += '<p class="help-text" style="margin:0;">No active students on the roster yet.</p>';
   } else {
-    html += '<div class="banner banner-warn">Read-only view — you can see the ledger but not add to it.</div>';
+    html += '<div class="coin-card-grid">' + roster.map((s) => {
+      const bal = studentStats(s.id).balance;
+      const isSel = selectedCoinStudents.has(s.id);
+      return '<button type="button" class="coin-card' + (isSel ? " selected" : "") + '"' + (canWrite ? "" : " disabled") +
+        ' data-coin-student="' + s.id + '" aria-pressed="' + (isSel ? "true" : "false") + '">' +
+        '<span class="coin-card-check">' + icon("check") + "</span>" +
+        avatarHtml(s, "lb-avatar-md") +
+        '<span class="coin-card-name">' + fullName(s) + "</span>" +
+        '<span class="coin-card-balance">' + coinBadge("sm") + '<span class="coin-card-balance-value">' + num2(bal) + "</span></span>" +
+        "</button>";
+    }).join("") + "</div>";
+  }
+  html += "</div>";
+
+  // ---- Selection action panel: only appears once something's selected, and offers exactly
+  // the two things you'd do with a coin balance -- grant, or charge/purchase. ----
+  if (canWrite && selCount > 0) {
+    let actionBody = '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px;">' +
+      '<div style="font-weight:800;">' + selCount + " student" + (selCount === 1 ? "" : "s") + " selected</div>" +
+      '<button type="button" class="btn btn-ghost btn-sm" id="coin-sel-clear">Clear selection</button></div>';
+    actionBody += '<div class="bubble-group" style="margin-bottom:16px;">' +
+      '<button type="button" class="bubble-btn' + (coinActionMode === "grant" ? " active" : "") + '" data-coin-mode="grant">Grant coins</button>' +
+      '<button type="button" class="bubble-btn' + (coinActionMode === "purchase" ? " active" : "") + '" data-coin-mode="purchase">Purchase / charge</button></div>';
+    if (coinActionMode === "grant" || coinActionMode === "purchase") {
+      const isPurchase = coinActionMode === "purchase";
+      if (isPurchase && privs.length) {
+        actionBody += '<div class="field"><label>Tap an item to add it</label><div class="price-chip-row">' +
+          privs.map((p) => {
+            const inCart = ledgerCart.some((item) => item.id === p.id);
+            return '<button type="button" class="price-chip' + (inCart ? " active" : "") + '" data-price-item="' + p.id + '">' + escapeHtml(p.name) + ' <span class="price-chip-cost">' + num2(p.cost) + "</span></button>";
+          }).join("") + "</div></div>";
+      }
+      if (isPurchase && ledgerCart.length) {
+        actionBody += '<div class="cart-list">' + ledgerCart.map((item, i) =>
+          '<span class="cart-chip">' + escapeHtml(item.name) + " (" + num2(item.cost) + ')<button type="button" class="cart-remove" data-cart-remove="' + i + '" aria-label="Remove">&times;</button></span>'
+        ).join("") + '<button type="button" class="btn btn-ghost btn-sm" id="cart-clear">Clear</button></div>';
+      }
+      actionBody += '<div class="field-row">' +
+        '<div class="field"><label for="coin-date">Date</label><input type="date" id="coin-date" value="' + todayISO() + '"></div>' +
+        '<div class="field"><label for="coin-amount">Amount</label><input type="number" min="0" step="0.5" id="coin-amount" value="' + (isPurchase && ledgerCart.length ? ledgerCartTotal() : "") + '" placeholder="0"></div>' +
+        "</div>" +
+        '<div class="field"><label for="coin-note">Note</label><input type="text" id="coin-note" value="' + (isPurchase ? escapeHtml(ledgerCartNote()) : "") + '" placeholder="' + (isPurchase ? "e.g. late lights-out" : "e.g. Chanukah bonus") + '"></div>' +
+        '<button class="btn btn-primary" id="coin-action-submit">' + (isPurchase ? "Log purchase" : "Grant coins") + " — apply to " + selCount + " student" + (selCount === 1 ? "" : "s") + "</button>";
+    }
+    html += '<div class="card card-pad" style="margin-bottom:16px;border-color:var(--brand);">' + actionBody + "</div>";
   }
 
   if (canWrite) {
-    // Bulk grant/charge -- one Manual Grant or Spent/Redeemed entry applied to every checked
-    // student at once (e.g. a schoolwide Chanukah bonus, or charging everyone for a trip),
-    // instead of repeating the single-entry form above once per student. Each row shows that
-    // student's current running-total balance (studentStats, never date-scoped -- see the
-    // Reports table fix above for why) so a charge amount can be sanity-checked against it
-    // right here, and "Select all" ticks/clears the whole active roster in one click.
-    bulkLedgerSelected.forEach((id) => { if (!roster.some((s) => s.id === id)) bulkLedgerSelected.delete(id); });
-    const allSelected = roster.length > 0 && roster.every((s) => bulkLedgerSelected.has(s.id));
-    let bulkBody;
-    if (roster.length === 0) {
-      bulkBody = '<p class="help-text">No active students on the roster yet.</p>';
+    // Transfers are real but rare (moving coins from one student to another), so they get
+    // their own small, out-of-the-way section instead of complicating the select-cards flow
+    // above, which is built around applying one entry to a group, not moving value between
+    // two specific people.
+    let transferBody;
+    if (roster.length < 2) {
+      transferBody = '<p class="help-text">Need at least two active students to transfer between.</p>';
     } else {
-      bulkBody = '<div class="field-row">' +
-        '<div class="field"><label for="blk-date">Date</label><input type="date" id="blk-date" value="' + todayISO() + '"></div>' +
-        '<div class="field" style="min-width:190px;"><label for="blk-type">Type</label><select id="blk-type">' +
-        '<option value="Manual Grant">Manual Grant (add coins)</option>' +
-        '<option value="Spent/Redeemed">Spent/Redeemed (take coins)</option>' +
-        "</select></div>" +
-        '<div class="field"><label for="blk-amount">Amount</label><input type="number" min="0" step="0.5" id="blk-amount" placeholder="0"></div>' +
+      transferBody = '<div class="field-row">' +
+        '<div class="field"><label for="tr-date">Date</label><input type="date" id="tr-date" value="' + todayISO() + '"></div>' +
+        '<div class="field"><label for="tr-from">From</label><select id="tr-from">' + roster.map((s) => '<option value="' + s.id + '">' + fullName(s) + "</option>").join("") + "</select></div>" +
+        '<div class="field"><label for="tr-to">To</label><select id="tr-to">' + roster.map((s) => '<option value="' + s.id + '">' + fullName(s) + "</option>").join("") + "</select></div>" +
+        '<div class="field"><label for="tr-amount">Amount</label><input type="number" min="0" step="0.5" id="tr-amount" placeholder="0"></div>' +
         "</div>" +
-        '<div class="field"><label for="blk-note">Note</label><input type="text" id="blk-note" placeholder="e.g. Chanukah bonus for everyone"></div>' +
-        '<label style="display:flex;align-items:center;gap:8px;margin:12px 0 8px;cursor:pointer;font-weight:700;">' +
-        '<input type="checkbox" id="blk-select-all"' + (allSelected ? " checked" : "") + "> Select all (" + roster.length + " active student" + (roster.length === 1 ? "" : "s") + ")</label>" +
-        '<div class="table-wrap" style="max-height:340px;overflow-y:auto;"><table><thead><tr><th></th><th>Student</th><th class="num">Current balance</th></tr></thead><tbody>' +
-        roster.map((s) => {
-          const bal = studentStats(s.id).balance;
-          const checked = bulkLedgerSelected.has(s.id);
-          return '<tr><td><input type="checkbox" class="blk-select" data-blk-student="' + s.id + '"' + (checked ? " checked" : "") + "></td><td>" + fullName(s) +
-            '</td><td class="num"><span class="coin-inline">' + coinBadge("sm") + '<span style="font-weight:700;color:var(--gold);">' + num2(bal) + "</span></span></td></tr>";
-        }).join("") +
-        "</tbody></table></div>" +
-        '<button class="btn btn-primary" id="blk-submit" style="margin-top:12px;">Apply to ' + bulkLedgerSelected.size + " selected</button>";
+        '<div class="field"><label for="tr-note">Note</label><input type="text" id="tr-note" placeholder="e.g. traded for a sticker"></div>' +
+        '<button class="btn btn-primary btn-sm" id="tr-submit">Transfer</button>';
     }
-    html += collapsibleSectionHtml("ledgerBulk", "Bulk grant or charge", "Apply one grant or charge to several students — or the whole roster — at once.", bulkBody);
+    html += collapsibleSectionHtml("coinTransfer", "Transfer between students", "Move coins from one student straight to another", transferBody);
+  } else {
+    html += '<div class="banner banner-warn">Read-only view — you can see TAG coin balances but not change them.</div>';
   }
 
   if (privs.length) {
@@ -3235,9 +3290,9 @@ function renderLedger(root, session) {
   }
 
   const rows = state.ledger.slice().sort((a, b) => (b.enteredAt || 0) - (a.enteredAt || 0));
-  html += '<div class="card card-pad"><div class="section-title">All entries (' + rows.length + ")</div>";
+  html += '<div class="card card-pad" style="margin-top:16px;"><div class="section-title">All entries (' + rows.length + ")</div>";
   if (rows.length === 0) {
-    html += '<div class="empty-state">No ledger entries yet.</div>';
+    html += '<div class="empty-state">No entries yet.</div>';
   } else {
     html += '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Student</th><th>Type</th><th class="num">Amount</th><th>Note</th><th>Entered by</th></tr></thead><tbody>';
     rows.forEach((tx) => {
@@ -3251,6 +3306,21 @@ function renderLedger(root, session) {
   html += "</div>";
   root.innerHTML = html;
 
+  root.querySelectorAll("[data-coin-student]").forEach((btn) => {
+    if (btn.disabled) return;
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-coin-student");
+      if (selectedCoinStudents.has(id)) selectedCoinStudents.delete(id); else selectedCoinStudents.add(id);
+      renderAll();
+    });
+  });
+  const clearSelBtn = document.getElementById("coin-sel-clear");
+  if (clearSelBtn) clearSelBtn.addEventListener("click", () => { selectedCoinStudents = new Set(); coinActionMode = null; ledgerCart = []; renderAll(); });
+  root.querySelectorAll("[data-coin-mode]").forEach((btn) => btn.addEventListener("click", () => {
+    const mode = btn.getAttribute("data-coin-mode");
+    coinActionMode = coinActionMode === mode ? null : mode;
+    renderAll();
+  }));
   root.querySelectorAll("[data-price-item]").forEach((chip) => {
     chip.addEventListener("click", () => {
       const id = chip.getAttribute("data-price-item");
@@ -3272,64 +3342,18 @@ function renderLedger(root, session) {
   });
   const cartClearBtn = document.getElementById("cart-clear");
   if (cartClearBtn) cartClearBtn.addEventListener("click", () => { ledgerCart = []; renderAll(); });
-  const otherToggle = document.getElementById("ledger-other-toggle");
-  if (otherToggle) otherToggle.addEventListener("click", () => { showOtherLedgerEntry = !showOtherLedgerEntry; renderAll(); });
 
-  const submitBtn = document.getElementById("ledger-submit");
-  if (submitBtn) submitBtn.addEventListener("click", async () => {
-    const date = document.getElementById("lg-date").value;
-    const studentId = document.getElementById("lg-student").value;
-    const typeSel = document.getElementById("lg-type");
-    const type = typeSel ? typeSel.value : "Spent/Redeemed";
-    const amount = Number(document.getElementById("lg-amount").value);
-    const note = document.getElementById("lg-note").value.trim();
-    if (!date || !studentId || !amount || amount <= 0) { toast("Fill in date, student, and a positive amount.", "warn"); return; }
-    if (type === "Spent/Redeemed" || type === "Transfer Out") {
-      const bal = studentStats(studentId).balance;
-      if (amount > bal) {
-        const s = studentById(studentId);
-        const name = s ? s.last + ", " + s.first : "This student";
-        toast(name + "’s balance is only " + num2(bal) + " — can’t take out " + num2(amount) + ". TAG coin balances can’t go negative.", "warn");
-        return;
-      }
-    }
-    submitBtn.disabled = true;
-    const newState = JSON.parse(JSON.stringify(state));
-    newState.ledger.push({ id: uid("l"), date, studentId, type, amount, note, enteredBy: session.record.name, enteredAt: Date.now() });
-    const res = await saveState(newState, { stashKey: "ledger:new", stashData: { date, studentId, type, amount, note } });
-    if (res.ok || res.local) {
-      ledgerCart = [];
-      showOtherLedgerEntry = false;
-      toast("Saved.", "good");
-      renderAll();
-    } else {
-      submitBtn.disabled = false;
-    }
-  });
-
-  const blkSelectAll = document.getElementById("blk-select-all");
-  if (blkSelectAll) blkSelectAll.addEventListener("change", () => {
-    if (blkSelectAll.checked) roster.forEach((s) => bulkLedgerSelected.add(s.id));
-    else roster.forEach((s) => bulkLedgerSelected.delete(s.id));
-    renderAll();
-  });
-  root.querySelectorAll(".blk-select").forEach((cb) => cb.addEventListener("change", () => {
-    const id = cb.getAttribute("data-blk-student");
-    if (cb.checked) bulkLedgerSelected.add(id); else bulkLedgerSelected.delete(id);
-    renderAll();
-  }));
-  const blkSubmitBtn = document.getElementById("blk-submit");
-  if (blkSubmitBtn) blkSubmitBtn.addEventListener("click", async () => {
-    const date = document.getElementById("blk-date").value;
-    const type = document.getElementById("blk-type").value;
-    const amount = Number(document.getElementById("blk-amount").value);
-    const note = document.getElementById("blk-note").value.trim();
-    const ids = Array.from(bulkLedgerSelected);
-    if (!date || !amount || amount <= 0) { toast("Pick a date and a positive amount.", "warn"); return; }
+  const coinSubmitBtn = document.getElementById("coin-action-submit");
+  if (coinSubmitBtn) coinSubmitBtn.addEventListener("click", async () => {
+    const ids = Array.from(selectedCoinStudents);
     if (ids.length === 0) { toast("Select at least one student.", "warn"); return; }
-    // A bulk charge can't push anyone's balance negative any more than a single-entry one can
-    // (see the single-entry submit handler above) -- rather than blocking the whole batch over
-    // one student who's short, apply it to everyone who can afford it and report who got
+    const date = document.getElementById("coin-date").value;
+    const amount = Number(document.getElementById("coin-amount").value);
+    const note = document.getElementById("coin-note").value.trim();
+    if (!date || !amount || amount <= 0) { toast("Pick a date and a positive amount.", "warn"); return; }
+    const type = coinActionMode === "purchase" ? "Spent/Redeemed" : "Manual Grant";
+    // A charge can't push anyone's balance negative -- rather than blocking the whole batch
+    // over one student who's short, apply it to everyone who can afford it and report who got
     // skipped, so e.g. charging the whole roster for a trip still works for the 28 kids who can
     // cover it even if 2 can't.
     const applied = [], skipped = [];
@@ -3341,24 +3365,49 @@ function renderLedger(root, session) {
       applied.push(id);
     });
     if (applied.length === 0) { toast("No one selected has enough balance for that charge.", "warn"); return; }
-    blkSubmitBtn.disabled = true;
+    coinSubmitBtn.disabled = true;
     const newState = JSON.parse(JSON.stringify(state));
     const enteredAt = Date.now();
-    applied.forEach((id) => {
-      newState.ledger.push({ id: uid("l"), date, studentId: id, type, amount, note, enteredBy: session.record.name, enteredAt });
-    });
-    const res = await saveState(newState, { stashKey: "ledger:bulk", stashData: { date, type, amount, note, ids: applied } });
+    applied.forEach((id) => { newState.ledger.push({ id: uid("l"), date, studentId: id, type, amount, note, enteredBy: session.record.name, enteredAt }); });
+    const res = await saveState(newState, { stashKey: "coins:action", stashData: { date, type, amount, note, ids: applied } });
     if (res.ok || res.local) {
-      bulkLedgerSelected = new Set();
+      selectedCoinStudents = new Set();
+      coinActionMode = null;
+      ledgerCart = [];
       toast(
-        "Applied to " + applied.length + " student" + (applied.length === 1 ? "" : "s") + "." +
+        (type === "Manual Grant" ? "Granted to " : "Charged ") + applied.length + " student" + (applied.length === 1 ? "" : "s") + "." +
         (skipped.length ? " Skipped " + skipped.length + " with insufficient balance: " + skipped.join(", ") + "." : ""),
         skipped.length ? "warn" : "good"
       );
       renderAll();
     } else {
-      blkSubmitBtn.disabled = false;
+      coinSubmitBtn.disabled = false;
     }
+  });
+
+  const trSubmitBtn = document.getElementById("tr-submit");
+  if (trSubmitBtn) trSubmitBtn.addEventListener("click", async () => {
+    const date = document.getElementById("tr-date").value;
+    const fromId = document.getElementById("tr-from").value;
+    const toId = document.getElementById("tr-to").value;
+    const amount = Number(document.getElementById("tr-amount").value);
+    const note = document.getElementById("tr-note").value.trim();
+    if (!date || !amount || amount <= 0) { toast("Pick a date and a positive amount.", "warn"); return; }
+    if (fromId === toId) { toast("Pick two different students.", "warn"); return; }
+    const bal = studentStats(fromId).balance;
+    if (amount > bal) {
+      const s = studentById(fromId);
+      toast((s ? s.last + ", " + s.first : "That student") + "’s balance is only " + num2(bal) + " — can’t transfer out " + num2(amount) + ".", "warn");
+      return;
+    }
+    trSubmitBtn.disabled = true;
+    const newState = JSON.parse(JSON.stringify(state));
+    const enteredAt = Date.now();
+    newState.ledger.push({ id: uid("l"), date, studentId: fromId, type: "Transfer Out", amount, note, enteredBy: session.record.name, enteredAt });
+    newState.ledger.push({ id: uid("l"), date, studentId: toId, type: "Transfer In", amount, note, enteredBy: session.record.name, enteredAt });
+    const res = await saveState(newState, { stashKey: "coins:transfer", stashData: { date, fromId, toId, amount, note } });
+    if (res.ok || res.local) { toast("Transferred " + num2(amount) + ".", "good"); renderAll(); }
+    else { trSubmitBtn.disabled = false; }
   });
 }
 
@@ -3514,23 +3563,22 @@ function renderOverview(root) {
     '<div><span class="eyebrow">Everyone, at a glance</span><h1>Reports</h1>' +
     '<p>Attendance, participation, and TAG coins — by student or by class, for all time, this week, this Hebrew month, or any date range you pick.</p></div></div></div>';
 
-  html += '<div class="card card-pad" style="margin-bottom:16px;"><div class="field-row">' +
-    '<div class="field" style="min-width:170px;"><label for="rep-groupby">Group by</label><select id="rep-groupby">' +
-    '<option value="student"' + (reportGroupBy === "student" ? " selected" : "") + '>Student</option>' +
-    '<option value="class"' + (reportGroupBy === "class" ? " selected" : "") + '>Class / period</option>' +
-    "</select></div>" +
-    '<div class="field" style="min-width:170px;"><label for="rep-scope">Time range</label><select id="rep-scope">' +
-    '<option value="all"' + (reportScope === "all" ? " selected" : "") + '>All time</option>' +
-    '<option value="week"' + (reportScope === "week" ? " selected" : "") + '>This week</option>' +
-    '<option value="hmonth"' + (reportScope === "hmonth" ? " selected" : "") + '>This Hebrew month</option>' +
-    '<option value="custom"' + (reportScope === "custom" ? " selected" : "") + '>Custom range</option>' +
-    "</select></div>" +
-    (reportScope === "week" || reportScope === "hmonth" ? '<div class="field" style="flex-shrink:0;min-width:auto;"><label>&nbsp;</label><div style="display:flex;gap:6px;flex-wrap:wrap;">' +
+  html += '<div class="card card-pad" style="margin-bottom:16px;">' +
+    '<div class="field" style="margin-bottom:14px;"><label>Group by</label><div class="bubble-group">' +
+    [["student", "Student"], ["class", "Class / period"]].map(([v, label]) =>
+      '<button type="button" class="bubble-btn' + (reportGroupBy === v ? " active" : "") + '" data-rep-groupby="' + v + '">' + label + "</button>"
+    ).join("") + "</div></div>" +
+    '<div class="field" style="margin-bottom:0;"><label>Time range</label><div class="bubble-group">' +
+    [["all", "All time"], ["week", "This week"], ["hmonth", "This Hebrew month"], ["custom", "Custom range"]].map(([v, label]) =>
+      '<button type="button" class="bubble-btn' + (reportScope === v ? " active" : "") + '" data-rep-scope="' + v + '">' + label + "</button>"
+    ).join("") + "</div></div>" +
+    (reportScope === "week" || reportScope === "hmonth" ? '<div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
       '<button class="btn btn-ghost btn-sm" id="rep-prev" type="button">&larr;</button>' +
       '<button class="btn btn-ghost btn-sm" id="rep-today" type="button">Today</button>' +
-      '<button class="btn btn-ghost btn-sm" id="rep-next" type="button">&rarr;</button></div></div>' : "") +
-    (reportScope === "custom" ? '<div class="field" style="min-width:150px;"><label for="rep-from">From</label><input type="date" id="rep-from" value="' + escapeHtml(reportFrom) + '"></div>' +
-      '<div class="field" style="min-width:150px;"><label for="rep-to">To</label><input type="date" id="rep-to" value="' + escapeHtml(reportTo) + '"></div>' : "") +
+      '<button class="btn btn-ghost btn-sm" id="rep-next" type="button">&rarr;</button></div>' : "") +
+    (reportScope === "custom" ? '<div class="field-row" style="margin-top:12px;">' +
+      '<div class="field" style="min-width:150px;"><label for="rep-from">From</label><input type="date" id="rep-from" value="' + escapeHtml(reportFrom) + '"></div>' +
+      '<div class="field" style="min-width:150px;"><label for="rep-to">To</label><input type="date" id="rep-to" value="' + escapeHtml(reportTo) + '"></div></div>' : "") +
     "</div>";
   if (reportScope === "week" || reportScope === "hmonth") {
     html += '<div style="margin-top:2px;font-family:var(--font-display);font-weight:800;font-size:1.1rem;">' + escapeHtml(range.title) + "</div>" +
@@ -3633,11 +3681,10 @@ function renderOverview(root) {
   }
 
   root.innerHTML = html;
+  wireGlanceCircles(root); // lets a tap on the whole-roster weekly sheet reveal the exact number
 
-  const groupSel = document.getElementById("rep-groupby");
-  if (groupSel) groupSel.addEventListener("change", () => { reportGroupBy = groupSel.value; renderAll(); });
-  const scopeSel = document.getElementById("rep-scope");
-  if (scopeSel) scopeSel.addEventListener("change", () => { reportScope = scopeSel.value; renderAll(); });
+  root.querySelectorAll("[data-rep-groupby]").forEach((btn) => btn.addEventListener("click", () => { reportGroupBy = btn.getAttribute("data-rep-groupby"); renderAll(); }));
+  root.querySelectorAll("[data-rep-scope]").forEach((btn) => btn.addEventListener("click", () => { reportScope = btn.getAttribute("data-rep-scope"); renderAll(); }));
   const prevBtn = document.getElementById("rep-prev");
   if (prevBtn) prevBtn.addEventListener("click", () => {
     reportAnchor = reportScope === "week" ? shiftDate(reportAnchor, -7) : shiftHebrewMonth(reportAnchor, -1);
@@ -4120,7 +4167,7 @@ function renderAdminStaff(root) {
     '<div class="field"><label for="st-password">Password</label>' + passwordFieldHtml("st-password", { placeholder: "leave blank to auto-generate" }) + "</div>" +
     '<div class="field" style="max-width:150px;"><label for="st-role">Role</label><select id="st-role"><option value="teacher">Teacher</option><option value="admin">Admin</option></select></div>' +
     "</div><button class=\"btn btn-primary btn-sm\" id=\"st-add\">Add staff member</button>" +
-    '<p class="help-text" style="margin-top:12px;">Admins can set everything up here; teachers only see Today, the Ledger, and Reports — kept simple on purpose.</p>' +
+    '<p class="help-text" style="margin-top:12px;">Admins can set everything up here; teachers only see Today, TAG Coins, and Reports — kept simple on purpose.</p>' +
     (showBulkStaffForm ? "" : '<button class="btn btn-ghost btn-sm" id="st-bulk-toggle" style="margin-top:12px;">Bulk add multiple staff…</button>') +
     "</div>";
 
@@ -4904,6 +4951,7 @@ function renderStudentDetail(root, student, opts) {
   html += collapsibleSectionHtml("sdLog", "Attendance & participation log" + (sdClassFilter ? " — " + sdClassFilter : ""), null, logBody);
 
   root.innerHTML = html;
+  wireGlanceCircles(root); // lets a tap on the weekly sheet reveal the exact number
   const backBtn = document.getElementById("sd-back");
   if (backBtn) backBtn.addEventListener("click", () => { viewingStudentId = null; renderAll(); });
 
