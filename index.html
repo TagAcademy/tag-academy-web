@@ -1589,7 +1589,12 @@ function flushDeferredRefresh() {
 // the two.
 document.addEventListener("focusout", () => { setTimeout(flushDeferredRefresh, 0); });
 function fullName(person) { return escapeHtml(person.last) + ", " + escapeHtml(person.first); }
-function studentLink(student) { return '<button type="button" class="student-link" data-student-link="' + student.id + '">' + fullName(student) + "</button>"; }
+function studentLink(student) {
+  // data-last/data-first carry the raw (HTML-escaped-for-attribute) name parts so
+  // wireCompactStudentNames can rebuild "Last, First" or fall back to "Last, F." without
+  // re-rendering -- see that function for why.
+  return '<button type="button" class="student-link" data-student-link="' + student.id + '" data-last="' + escapeHtml(student.last) + '" data-first="' + escapeHtml(student.first) + '">' + fullName(student) + "</button>";
+}
 function slugUsername(first, last) {
   return (String(first).trim().toLowerCase().replace(/[^a-z0-9]/g, "") + "." + String(last).trim().toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 1)) || "user";
 }
@@ -2688,6 +2693,24 @@ function wireGlanceCircles(root) {
     labelEl.textContent = revealed ? btn.getAttribute("data-value") : btn.getAttribute("data-label");
   });
 }
+// Reports' narrow-phone Student column (see .rep-table's white-space:normal rule) lets a long
+// "Last, First" wrap to two lines instead of forcing the table to scroll sideways -- but a
+// name that wraps makes that row visually taller than its neighbors and is slower to scan.
+// So after layout, any name that still doesn't fit on one line gets its first name collapsed
+// to just an initial ("Rosenbaum, A.") -- names that already fit on one line are left alone.
+// Must run after the table is in the DOM (real layout, not string width guessing) and is a
+// no-op wherever white-space stays "nowrap" (desktop/tablet), since nothing wraps there.
+function wireCompactStudentNames(root) {
+  root.querySelectorAll(".rep-table .student-link[data-first]").forEach((btn) => {
+    const last = btn.getAttribute("data-last") || "";
+    const first = btn.getAttribute("data-first") || "";
+    btn.textContent = last + ", " + first;
+    const lineHeight = parseFloat(getComputedStyle(btn).lineHeight) || 16;
+    if (btn.scrollHeight > lineHeight * 1.4) {
+      btn.textContent = last + ", " + (first ? first.charAt(0) + "." : "");
+    }
+  });
+}
 
 /* Shared cell renderer for every roster×period(s) grid in the app (the "Today at a glance"
    table right below, and the weekly "sheet" views on a student's own page and in Reports) --
@@ -3705,6 +3728,7 @@ function renderOverview(root) {
 
   root.innerHTML = html;
   wireGlanceCircles(root); // lets a tap on the whole-roster weekly sheet reveal the exact number
+  wireCompactStudentNames(root); // shrinks a wrapped "Last, First" down to "Last, F." on a narrow phone
 
   root.querySelectorAll("[data-rep-groupby]").forEach((btn) => btn.addEventListener("click", () => { reportGroupBy = btn.getAttribute("data-rep-groupby"); renderAll(); }));
   root.querySelectorAll("[data-rep-scope]").forEach((btn) => btn.addEventListener("click", () => { reportScope = btn.getAttribute("data-rep-scope"); renderAll(); }));
