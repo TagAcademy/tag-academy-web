@@ -910,9 +910,9 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
    students are tied onto any one of them, since a tie is drawn as a compact overlapping pyramid
    (see .lb-podium-figures) rather than something that grows the column to fit more people. 0deg
    (not 180deg) is what puts the gradient's first color stop at the bottom instead of the top. */
-.lb-podium-col.rank-1 { order: 2; height: 300px; background: linear-gradient(0deg, var(--gold) 0%, var(--gold-soft) 44%, var(--surface) 90%); }
-.lb-podium-col.rank-2 { order: 1; height: 268px; background: linear-gradient(0deg, var(--silver) 0%, var(--silver-soft) 44%, var(--surface) 90%); }
-.lb-podium-col.rank-3 { order: 3; height: 244px; background: linear-gradient(0deg, var(--bronze) 0%, var(--bronze-soft) 44%, var(--surface) 90%); }
+.lb-podium-col.rank-1 { order: 2; height: 330px; background: linear-gradient(0deg, var(--gold) 0%, var(--gold-soft) 44%, var(--surface) 90%); }
+.lb-podium-col.rank-2 { order: 1; height: 295px; background: linear-gradient(0deg, var(--silver) 0%, var(--silver-soft) 44%, var(--surface) 90%); }
+.lb-podium-col.rank-3 { order: 3; height: 268px; background: linear-gradient(0deg, var(--bronze) 0%, var(--bronze-soft) 44%, var(--surface) 90%); }
 /* The podium wreath badge (see wreathBadgeHtml). 1st/2nd/3rd (.lb-wreath-img) are the user's own
    wreath artwork with its ordinal already baked in -- just an image, full bleed on the badge box.
    Every other place (.lb-wreath) uses the same ring without a baked-in number -- a light-mode
@@ -952,21 +952,28 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
    .lb-podium-figures fills whatever vertical space is left under the wreath (flex:1 1 auto) so
    --row can position every figure's `bottom` off of the SAME shared baseline (the column's own
    bottom edge) regardless of how many rows there are; each figure is also nudged down a couple
-   more px past that edge (clipped by the column's overflow:hidden) so the source art's own
+   more px past that edge (clipped by this element's own overflow:hidden) so the source art's own
    rounded shoulder/hem line -- which sits a little short of the image's bottom edge -- disappears
-   below the crop instead of reading as a stray curve floating over the riser color. A pyramid
-   taller than the column itself (an unusually large tie) simply has its top rows clipped by that
-   same overflow:hidden rather than growing the riser. */
+   below the crop instead of reading as a stray curve floating over the riser color.
+
+   overflow:hidden lives HERE (not just on .lb-podium-col) so it clips at this box's own top edge
+   -- i.e. right below the wreath -- rather than at the column's outer edge. A pyramid tall enough
+   to reach that line (a big tie, 6+ deep) has the top of its back-row heads cropped by a flat
+   line instead of climbing up and covering the wreath: the wreath must never be obscured, even
+   for an unusually large tie, so this clip is the hard guarantee for that, not just a tidy crop. */
 .lb-podium-figures {
-  position: relative; width: 100%; flex: 1 1 auto;
-  --fig-w: 84px; --fig-h: calc(var(--fig-w) * 1.1208);
+  position: relative; width: 100%; flex: 1 1 auto; overflow: hidden;
+  --fig-w: 96px; --fig-h: calc(var(--fig-w) * 1.1208);
 }
-.lb-podium-col.rank-2 .lb-podium-figures { --fig-w: 96px; }
-.lb-podium-col.rank-1 .lb-podium-figures { --fig-w: 112px; }
+.lb-podium-col.rank-2 .lb-podium-figures { --fig-w: 110px; }
+.lb-podium-col.rank-1 .lb-podium-figures { --fig-w: 128px; }
 .lb-podium-figure {
   position: absolute; left: 50%; bottom: 0; display: block; width: var(--fig-w);
   margin-left: calc((var(--dx) - 0.5) * var(--fig-w));
-  transform: translateY(calc(6px - var(--row) * var(--fig-h) * 0.58));
+  /* Rows pack a bit tighter vertically (0.5) than the horizontal overlap ratio (--dx's 0.6) would
+     suggest, so bigger figures still stack into as short a pyramid as possible before the
+     overflow:hidden above starts cropping the back rows. */
+  transform: translateY(calc(6px - var(--row) * var(--fig-h) * 0.5));
   filter: drop-shadow(0 3px 6px rgba(15, 23, 42, 0.28));
 }
 /* Value + every tied student's name live OUTSIDE the riser, directly underneath it, in a second
@@ -1003,6 +1010,23 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
 .lb-row-name.student-link:hover, .lb-row-name.student-link:focus-visible { color: var(--brand); text-decoration-color: var(--brand); }
 .lb-row-value { font-size: 0.76rem; color: var(--muted); }
 .lb-row-rank { margin-left: auto; }
+/* The one-line caption above the category tabs, saying whether the board is auto-rotating
+   (see lbAutoRotate/ensureLbRotation) or has been locked onto one category by a tap. */
+.lb-auto-line { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
+.lb-auto-line svg { width: 13px; height: 13px; color: var(--gold); flex-shrink: 0; animation: lbAutoPulse 1.8s ease-in-out infinite; }
+@keyframes lbAutoPulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+/* The podium+list card fades/lifts in on every fresh render of it -- the carousel's rotation
+   tick and a manual tab click both rebuild this element from scratch (root.innerHTML), so this
+   naturally replays each time a different board comes into view, giving the rotation an actual
+   transition instead of a hard cut. */
+.lb-board { animation: lbBoardIn 0.4s ease; }
+@keyframes lbBoardIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .lb-board { animation: none; } .lb-auto-line svg { animation: none; } }
+/* Week in Review (see weekInReviewHtml): a student's own personal weekly recap, underneath the
+   leaderboard itself. The Torah/Avoda/GC chips are plain small pills, not full stat tiles --
+   there just to round out the picture, not compete with the 3 headline numbers above them. */
+.lb-week-cats { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.lb-week-cat-chip { font-size: 0.76rem; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: var(--surface-2); color: var(--ink); }
 /* A smaller version of the same wreath-and-ordinal seal for every non-podium rank -- plain
    black/ink, since color is reserved for the podium. */
 .lb-wreath-badge-sm { width: 34px; height: 33px; }
@@ -1068,9 +1092,9 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
      mobile. */
   .lb-podium { gap: 16px; padding: 10px 0 0; }
   .lb-podium-col { gap: 8px; padding: 18px 10px 0; }
-  .lb-podium-col.rank-1 { height: 390px; }
-  .lb-podium-col.rank-2 { height: 348px; }
-  .lb-podium-col.rank-3 { height: 316px; }
+  .lb-podium-col.rank-1 { height: 429px; }
+  .lb-podium-col.rank-2 { height: 383px; }
+  .lb-podium-col.rank-3 { height: 348px; }
   .lb-avatar { width: 40px; height: 40px; font-size: 0.84rem; }
   .lb-avatar-md { width: 58px; height: 58px; font-size: 1.1rem; }
   .lb-avatar-lg { width: 72px; height: 72px; font-size: 1.3rem; }
@@ -1079,10 +1103,10 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
   /* Figures scale up with the bigger desktop wreath/riser, same pyramid math as mobile (see
      .lb-podium-figures / .lb-podium-figure in the base stylesheet) -- only --fig-w and the
      translateY base offset (9px, matching this app's long-standing desktop nudge) change here. */
-  .lb-podium-figures { --fig-w: 112px; }
-  .lb-podium-col.rank-2 .lb-podium-figures { --fig-w: 128px; }
-  .lb-podium-col.rank-1 .lb-podium-figures { --fig-w: 146px; }
-  .lb-podium-figure { transform: translateY(calc(9px - var(--row) * var(--fig-h) * 0.58)); }
+  .lb-podium-figures { --fig-w: 125px; }
+  .lb-podium-col.rank-2 .lb-podium-figures { --fig-w: 143px; }
+  .lb-podium-col.rank-1 .lb-podium-figures { --fig-w: 166px; }
+  .lb-podium-figure { transform: translateY(calc(9px - var(--row) * var(--fig-h) * 0.5)); }
   .lb-podium-info-row { gap: 16px; margin-top: 12px; }
   .lb-podium-value { font-size: 0.92rem; }
   .lb-podium-names { font-size: 0.76rem; }
@@ -4041,6 +4065,28 @@ let lbAnchor = todayISO();
 let lbFrom = todayISO();
 let lbTo = todayISO();
 let lbAgeBand = "all"; // "all" or an ageBandFor().label string
+// The board rotates through every category on its own -- a carousel, not a static default --
+// until someone taps a specific one, which locks it there (see the data-lbcat click handler in
+// renderLeaderboard). "Resume auto-rotate" hands it back. The timer itself only ever runs while
+// the leaderboard route is actually on screen (see ensureLbRotation, called from renderAll every
+// render) so it can't silently keep flipping categories, calling renderAll, while someone's off
+// looking at a different page.
+let lbAutoRotate = true;
+let lbRotateTimer = null;
+const LB_ROTATE_MS = 4500;
+function stopLbRotation() { if (lbRotateTimer) { clearInterval(lbRotateTimer); lbRotateTimer = null; } }
+function ensureLbRotation(route) {
+  const shouldRun = route === "leaderboard" && lbAutoRotate;
+  if (shouldRun && !lbRotateTimer) {
+    lbRotateTimer = setInterval(() => {
+      const idx = LEADERBOARD_CATEGORIES.findIndex((c) => c.id === lbCategory);
+      lbCategory = LEADERBOARD_CATEGORIES[(idx + 1) % LEADERBOARD_CATEGORIES.length].id;
+      renderAll();
+    }, LB_ROTATE_MS);
+  } else if (!shouldRun) {
+    stopLbRotation();
+  }
+}
 
 function lbRange() {
   if (lbScope === "week") {
@@ -4133,6 +4179,34 @@ function pyramidRows(n) {
   }
   return rows;
 }
+/* A student's own personal recap, shown at the bottom of the leaderboard page (see
+   renderLeaderboard) -- always THIS calendar week (weekRangeFor(todayISO())), independent of
+   whatever category or time range the board above is currently showing, so it reads like a
+   steady weekly digest rather than shifting under them every time the carousel advances. Blended
+   Torah/Avoda/Gemilas Chassidim chips only show up once there's actually a class of that kind
+   marked this week, same "leave it out rather than show a misleading 0%" rule computeStats
+   already applies everywhere else. */
+function weekInReviewHtml(student) {
+  const range = weekRangeFor(todayISO());
+  const st = computeStats(student.id, { from: range.from, to: range.to });
+  const catRows = [{ id: "torah", label: "Torah" }, { id: "avoda", label: "Avoda" }, { id: "gc", label: "Gemilas Chassidim" }]
+    .map((c) => ({ label: c.label, pct: computeStats(student.id, { from: range.from, to: range.to, category: c.id }).blendedPct }))
+    .filter((r) => r.pct !== null && r.pct !== undefined);
+  return '<div class="card card-pad lb-week-review" style="margin-top:16px;">' +
+    '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;">' +
+    '<div><span class="eyebrow">Just for you</span><h3 style="margin:2px 0 0;">Week in Review</h3></div>' +
+    '<div style="font-size:0.82rem;color:var(--muted);">' + escapeHtml(fmtDateShort(range.from) + " – " + fmtDateShort(range.to)) + "</div>" +
+    "</div>" +
+    '<div class="grid-stats" style="margin:12px 0 0;">' +
+    statTile("Attendance", pct(st.attPct), pctTone(st.attPct)) +
+    statTile("Participation", pct(st.partPct), pctTone(st.partPct)) +
+    statTile("Coins earned", num2(st.coinsEarned)) +
+    "</div>" +
+    (catRows.length ? '<div class="lb-week-cats">' + catRows.map((r) =>
+      '<span class="lb-week-cat-chip">' + escapeHtml(r.label) + ": " + pct(r.pct) + "</span>"
+    ).join("") + "</div>" : "") +
+    "</div>";
+}
 function renderLeaderboard(root, session) {
   const role = roleOf(session);
   const roster = activeRoster();
@@ -4140,14 +4214,26 @@ function renderLeaderboard(root, session) {
   const range = lbRange();
   const cat = LEADERBOARD_CATEGORIES.find((c) => c.id === lbCategory) || LEADERBOARD_CATEGORIES[0];
 
-  let html = '<div class="page-head"><div><span class="eyebrow">Everyone, ranked</span><h1>Leaderboard</h1>' +
-    "<p>Attendance, participation, Torah, Avoda, Gemilas Chassidim, and TAG coins — ranked for the whole roster, or narrowed to one age group.</p></div></div>";
+  let html = '<div class="page-head"><div><span class="eyebrow">Everyone, ranked</span><h1>Leaderboard</h1></div></div>';
+
+  // Rotates through every category on its own until someone taps one directly (see lbAutoRotate
+  // / ensureLbRotation) -- a one-line caption says which mode is active, right above the tabs
+  // that either pick a board to lock onto or (once locked) just show what's showing.
+  html += '<div class="lb-auto-line">' + (lbAutoRotate
+    ? icon("sparkle") + " Auto-rotating through every board — tap one to lock it in"
+    : "Showing " + escapeHtml(cat.label) + ' — <button type="button" class="link-btn" id="lb-auto-resume">resume auto-rotate</button>'
+  ) + "</div>";
 
   html += '<div class="admin-tabs lb-cat-tabs">' + LEADERBOARD_CATEGORIES.map((c) =>
     '<button class="admin-tab' + (lbCategory === c.id ? " active" : "") + '" data-lbcat="' + c.id + '">' + escapeHtml(c.label) + "</button>"
   ).join("") + "</div>";
 
-  html += '<div class="card card-pad" style="margin-bottom:16px;"><div class="field-row">' +
+  // Time range / Age group: collapsed behind one disclosure (see collapsibleSectionHtml, the
+  // same pattern used for Reports' calendar and CSV export) so picking through them doesn't
+  // push the actual leaderboard below the fold -- the board itself is the first thing on this
+  // page that matters, not its filters. The summary line shows the current selection at a
+  // glance even while closed.
+  let filtersBody = '<div class="field-row">' +
     '<div class="field" style="min-width:170px;"><label for="lb-scope">Time range</label><select id="lb-scope">' +
     '<option value="all"' + (lbScope === "all" ? " selected" : "") + '>All time</option>' +
     '<option value="week"' + (lbScope === "week" ? " selected" : "") + '>This week</option>' +
@@ -4166,13 +4252,15 @@ function renderLeaderboard(root, session) {
     "</select></div>" +
     "</div>";
   if (lbScope === "week" || lbScope === "hmonth") {
-    html += '<div style="margin-top:2px;font-family:var(--font-display);font-weight:800;font-size:1.1rem;">' + escapeHtml(range.title) + "</div>" +
+    filtersBody += '<div style="margin-top:2px;font-family:var(--font-display);font-weight:800;font-size:1.1rem;">' + escapeHtml(range.title) + "</div>" +
       '<div style="font-size:0.82rem;color:var(--muted);margin-top:2px;">' + escapeHtml(range.sub) + "</div>";
   }
   if (!bands.length) {
-    html += '<p class="help-text" style="margin:10px 0 0;">No students have a year of birth on file yet — add one in Admin &gt; Students to unlock age-group boards.</p>';
+    filtersBody += '<p class="help-text" style="margin:10px 0 0;">No students have a year of birth on file yet — add one in Admin &gt; Students to unlock age-group boards.</p>';
   }
-  html += "</div>";
+  const filterSummary = (lbScope === "all" ? "All time" : lbScope === "week" ? "This week" : lbScope === "hmonth" ? "This Hebrew month" : "Custom range") +
+    " · " + (lbAgeBand === "all" ? "all ages" : "ages " + lbAgeBand);
+  html += '<div style="margin-bottom:16px;">' + collapsibleSectionHtml("lbFilters", "Filters", filterSummary, filtersBody) + "</div>";
 
   // Rank every active student (in the selected age band, if any) by this category's value,
   // dropping anyone with no data at all in this category/range rather than showing them tied
@@ -4185,7 +4273,7 @@ function renderLeaderboard(root, session) {
   const ranked = entries.filter((e) => e.value !== null && e.value !== undefined).sort((a, b) => b.value - a.value);
   const noData = entries.length - ranked.length;
 
-  html += '<div class="card card-pad">';
+  html += '<div class="card card-pad lb-board">';
   if (!ranked.length) {
     html += '<p class="help-text" style="margin:0;">Nobody has data for ' + escapeHtml(cat.label) + (lbAgeBand !== "all" ? " in the ages " + escapeHtml(lbAgeBand) + " group" : "") + " yet.</p>";
   } else {
@@ -4296,9 +4384,16 @@ function renderLeaderboard(root, session) {
   }
   html += "</div>";
 
+  // A signed-in student gets their own personal recap below the board -- always this calendar
+  // week, regardless of whichever category/time-range the board above happens to be showing
+  // (see weekInReviewHtml) -- so the leaderboard itself stays the first thing on the page.
+  if (role === "student") html += weekInReviewHtml(session.record);
+
   root.innerHTML = html;
 
-  root.querySelectorAll("[data-lbcat]").forEach((btn) => btn.addEventListener("click", () => { lbCategory = btn.getAttribute("data-lbcat"); renderAll(); }));
+  root.querySelectorAll("[data-lbcat]").forEach((btn) => btn.addEventListener("click", () => { lbCategory = btn.getAttribute("data-lbcat"); lbAutoRotate = false; renderAll(); }));
+  const autoResumeBtn = document.getElementById("lb-auto-resume");
+  if (autoResumeBtn) autoResumeBtn.addEventListener("click", () => { lbAutoRotate = true; renderAll(); });
   const ageSel = document.getElementById("lb-age");
   if (ageSel) ageSel.addEventListener("change", () => { lbAgeBand = ageSel.value; renderAll(); });
   const scopeSel = document.getElementById("lb-scope");
@@ -5338,12 +5433,14 @@ function renderAll() {
   const shellEl = document.getElementById("shell");
   const loginEl = document.getElementById("login-root");
   if (!state) {
+    stopLbRotation();
     if (shellEl) shellEl.style.display = "none";
     if (loginEl) { loginEl.style.display = ""; loginEl.innerHTML = '<div class="login-wrap"><p class="sub" style="text-align:center;">Loading TAG Academy…</p></div>'; }
     return;
   }
   const realSession = currentSession();
   if (!realSession) {
+    stopLbRotation();
     if (shellEl) shellEl.style.display = "none";
     if (loginEl) { loginEl.style.display = ""; renderLogin(loginEl); }
     return;
@@ -5366,11 +5463,13 @@ function renderAll() {
   if (!root) return;
   const role = roleOf(session);
   if (viewingStudentId && (role === "admin" || role === "teacher")) {
+    stopLbRotation();
     const student = studentById(viewingStudentId);
     if (student) { renderStudentDetail(root, student); wireStudentLinks(root); wireCollapsibleSections(root); return; }
     viewingStudentId = null;
   }
   const route = currentRoute(session);
+  ensureLbRotation(route);
   // View-as is a preview, not a way to act as someone else -- force every write path off for
   // the duration of this one render (every renderer reads canWrite synchronously while
   // building its HTML/wiring, so restoring it right after is safe).
