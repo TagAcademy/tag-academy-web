@@ -918,7 +918,7 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
    raster image and a dark-mode SVG fallback, swapped via .lb-wreath-raster/.lb-wreath-svg below
    since the raster is a fixed color that stops reading against a dark surface -- with its own
    ordinal stamped in plain ink right in the middle, over the ring's hollow center. */
-.lb-wreath-badge { position: relative; display: block; width: 52px; height: 50px; flex-shrink: 0; }
+.lb-wreath-badge { position: relative; display: block; width: 74px; height: 65px; flex-shrink: 0; }
 .lb-wreath-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
 .lb-wreath { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .lb-wreath-raster { width: 100%; height: 100%; object-fit: contain; display: block; }
@@ -939,13 +939,21 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
    transparent-background art (see AVATAR_GALLERY) sits on the color like little character cards
    rather than framed photos. Bottom-anchored (via the column's own justify-content:space-between)
    so it reads as people actually standing on the podium. The figures container spans the full
-   column width and each figure is flex:1 1 0 with the SAME max-width a lone figure always had --
-   so a single winner renders pixel-identical to before (flex-grow is capped right back down to
-   that max-width), while two or more sharing the spot divide the width evenly and shrink together
-   as more names pile in, rather than overflowing the column. */
-.lb-podium-figures { display: flex; align-items: flex-end; justify-content: center; gap: 2px; width: 100%; }
-.lb-podium-figure { display: block; flex: 1 1 0; min-width: 0; max-width: 108px; filter: drop-shadow(0 3px 6px rgba(15, 23, 42, 0.28)); }
-.lb-podium-col.rank-1 .lb-podium-figure { max-width: 134px; }
+   column width and each figure is flex:1 1 0, sized up to max-width -- a lone figure grows all
+   the way to it, and two or more sharing the spot pull in close with a small negative margin
+   (letting shoulders overlap slightly) rather than just shrinking to stay separate, so a tie
+   still reads as a group of real-sized people instead of shrinking away into thumbnails. Each
+   figure is nudged down a couple px past the riser's own edge (clipped by the column's
+   overflow:hidden, see .lb-podium-col) so the source art's own rounded shoulder/hem line -- which
+   sits a little short of the image's bottom edge -- disappears below the crop instead of reading
+   as a stray curve floating over the riser color. */
+.lb-podium-figures { display: flex; align-items: flex-end; justify-content: center; width: 100%; }
+.lb-podium-figure {
+  display: block; flex: 1 1 0; min-width: 0; max-width: 132px; margin-left: -8px;
+  transform: translateY(6px); filter: drop-shadow(0 3px 6px rgba(15, 23, 42, 0.28));
+}
+.lb-podium-figure:first-child { margin-left: 0; }
+.lb-podium-col.rank-1 .lb-podium-figure { max-width: 166px; }
 /* Value + every tied student's name live OUTSIDE the riser, directly underneath it, in a second
    row that mirrors the same flex:1 1 0 slots and rank-N order as .lb-podium-col above so each
    info block lines up under its own column no matter how tall that column's riser is. */
@@ -1051,8 +1059,10 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
   .lb-avatar { width: 40px; height: 40px; font-size: 0.84rem; }
   .lb-avatar-md { width: 58px; height: 58px; font-size: 1.1rem; }
   .lb-avatar-lg { width: 72px; height: 72px; font-size: 1.3rem; }
-  .lb-wreath-badge { width: 66px; height: 63px; }
+  .lb-wreath-badge { width: 108px; height: 95px; }
   .lb-wreath-ordinal { font-size: 0.86rem; }
+  .lb-podium-figure { max-width: 176px; margin-left: -12px; transform: translateY(9px); }
+  .lb-podium-col.rank-1 .lb-podium-figure { max-width: 220px; }
   .lb-podium-info-row { gap: 16px; margin-top: 12px; }
   .lb-podium-value { font-size: 0.92rem; }
   .lb-podium-names { font-size: 0.76rem; }
