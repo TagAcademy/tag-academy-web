@@ -905,13 +905,17 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
 }
 /* The riser itself: a full, solid place color at the FOOT of the column -- where the
    representative figure stands -- fading up into the ordinary card background behind the
-   wreath, with no outline of its own (the color block and the page simply meet). The column's
-   own height (shortest for 3rd, tallest for 1st) stands in for the physical step a real podium
-   would have. 0deg (not 180deg) is what puts the gradient's first color stop at the bottom
-   instead of the top. */
-.lb-podium-col.rank-1 { order: 2; min-height: 208px; background: linear-gradient(0deg, var(--gold) 0%, var(--gold-soft) 44%, var(--surface) 90%); }
-.lb-podium-col.rank-2 { order: 1; min-height: 164px; background: linear-gradient(0deg, var(--silver) 0%, var(--silver-soft) 44%, var(--surface) 90%); }
-.lb-podium-col.rank-3 { order: 3; min-height: 138px; background: linear-gradient(0deg, var(--bronze) 0%, var(--bronze-soft) 44%, var(--surface) 90%); }
+   wreath, with no outline of its own (the color block and the page simply meet). Each column's
+   height is a fixed height, not a floor -- 1st is always tallest, then 2nd, then 3rd, no matter
+   how many students are tied onto any one of them (a big tie just shrinks that place's own
+   figures via .lb-podium-figure's flex/max-width, which only ever shrinks a column's content,
+   never grows it past what a single winner already takes up -- see the figure max-widths below,
+   sized so a lone winner's wreath+figure always fits inside their place's own fixed height).
+   0deg (not 180deg) is what puts the gradient's first color stop at the bottom instead of the
+   top. */
+.lb-podium-col.rank-1 { order: 2; height: 280px; background: linear-gradient(0deg, var(--gold) 0%, var(--gold-soft) 44%, var(--surface) 90%); }
+.lb-podium-col.rank-2 { order: 1; height: 250px; background: linear-gradient(0deg, var(--silver) 0%, var(--silver-soft) 44%, var(--surface) 90%); }
+.lb-podium-col.rank-3 { order: 3; height: 226px; background: linear-gradient(0deg, var(--bronze) 0%, var(--bronze-soft) 44%, var(--surface) 90%); }
 /* The podium wreath badge (see wreathBadgeHtml). 1st/2nd/3rd (.lb-wreath-img) are the user's own
    wreath artwork with its ordinal already baked in -- just an image, full bleed on the badge box.
    Every other place (.lb-wreath) uses the same ring without a baked-in number -- a light-mode
@@ -949,10 +953,11 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
    as a stray curve floating over the riser color. */
 .lb-podium-figures { display: flex; align-items: flex-end; justify-content: center; width: 100%; }
 .lb-podium-figure {
-  display: block; flex: 1 1 0; min-width: 0; max-width: 132px; margin-left: -8px;
+  display: block; flex: 1 1 0; min-width: 0; max-width: 118px; margin-left: -8px;
   transform: translateY(6px); filter: drop-shadow(0 3px 6px rgba(15, 23, 42, 0.28));
 }
 .lb-podium-figure:first-child { margin-left: 0; }
+.lb-podium-col.rank-2 .lb-podium-figure { max-width: 140px; }
 .lb-podium-col.rank-1 .lb-podium-figure { max-width: 166px; }
 /* Value + every tied student's name live OUTSIDE the riser, directly underneath it, in a second
    row that mirrors the same flex:1 1 0 slots and rank-N order as .lb-podium-col above so each
@@ -1053,16 +1058,17 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
      mobile. */
   .lb-podium { gap: 16px; padding: 10px 0 0; }
   .lb-podium-col { gap: 8px; padding: 18px 10px 0; }
-  .lb-podium-col.rank-1 { min-height: 280px; }
-  .lb-podium-col.rank-2 { min-height: 220px; }
-  .lb-podium-col.rank-3 { min-height: 184px; }
+  .lb-podium-col.rank-1 { height: 384px; }
+  .lb-podium-col.rank-2 { height: 348px; }
+  .lb-podium-col.rank-3 { height: 317px; }
   .lb-avatar { width: 40px; height: 40px; font-size: 0.84rem; }
   .lb-avatar-md { width: 58px; height: 58px; font-size: 1.1rem; }
   .lb-avatar-lg { width: 72px; height: 72px; font-size: 1.3rem; }
   .lb-wreath-badge { width: 108px; height: 95px; }
   .lb-wreath-ordinal { font-size: 0.86rem; }
-  .lb-podium-figure { max-width: 176px; margin-left: -12px; transform: translateY(9px); }
-  .lb-podium-col.rank-1 .lb-podium-figure { max-width: 220px; }
+  .lb-podium-figure { max-width: 164px; margin-left: -12px; transform: translateY(9px); }
+  .lb-podium-col.rank-2 .lb-podium-figure { max-width: 192px; }
+  .lb-podium-col.rank-1 .lb-podium-figure { max-width: 224px; }
   .lb-podium-info-row { gap: 16px; margin-top: 12px; }
   .lb-podium-value { font-size: 0.92rem; }
   .lb-podium-names { font-size: 0.76rem; }
