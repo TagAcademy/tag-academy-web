@@ -5297,18 +5297,23 @@ function renderStudentDetail(root, student, opts) {
   const calendarBody = (sdScope === "week" ? renderStudentWeekGridHtml(student, range.from) : "") + renderStudentCalendarHtml(student);
   if (calendarBody) html += collapsibleSectionHtml("sdCalendar", "Day by day", "Attendance calendar — tap a day to jump straight to it", calendarBody);
 
-  const reportNotes = notesForStudent(student.id, range.from, range.to);
-  const reportClusters = clusterNotes(reportNotes);
-  const narrative = generateReportNarrative(student.first, reportClusters, rangeSt, rangeSt.attCount);
-  html += '<div class="card card-pad report-card-print" style="margin-top:16px;">' +
-    '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">' +
-    '<div><span class="eyebrow">Report card</span><h3 style="margin:2px 0 0;">' + escapeHtml(fullName(student)) + '</h3>' +
-    '<div style="font-size:0.82rem;color:var(--muted);margin-top:2px;">' + escapeHtml(sdScope === "all" ? "All time" : range.title + (range.sub ? " · " + range.sub : "")) + '</div></div>' +
-    '<button class="btn btn-ghost btn-sm no-print" id="sd-print" type="button">Print</button>' +
-    '</div>' +
-    '<p style="margin-top:14px;line-height:1.65;max-width:65ch;">' + escapeHtml(narrative) + '</p>' +
-    (reportNotes.length ? '<p class="help-text" style="margin-top:10px;">Based on ' + reportNotes.length + ' comment' + (reportNotes.length === 1 ? "" : "s") + ' logged in this period.</p>' : "") +
-    "</div>";
+  // The narrative report card is a staff-facing tool (comments/notes summarized into prose for
+  // a parent or file) -- not something a student needs staring back at them on their own "My
+  // Balance" page, so it's staff/admin-only (isSelf) here.
+  if (!isSelf) {
+    const reportNotes = notesForStudent(student.id, range.from, range.to);
+    const reportClusters = clusterNotes(reportNotes);
+    const narrative = generateReportNarrative(student.first, reportClusters, rangeSt, rangeSt.attCount);
+    html += '<div class="card card-pad report-card-print" style="margin-top:16px;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">' +
+      '<div><span class="eyebrow">Report card</span><h3 style="margin:2px 0 0;">' + escapeHtml(fullName(student)) + '</h3>' +
+      '<div style="font-size:0.82rem;color:var(--muted);margin-top:2px;">' + escapeHtml(sdScope === "all" ? "All time" : range.title + (range.sub ? " · " + range.sub : "")) + '</div></div>' +
+      '<button class="btn btn-ghost btn-sm no-print" id="sd-print" type="button">Print</button>' +
+      '</div>' +
+      '<p style="margin-top:14px;line-height:1.65;max-width:65ch;">' + escapeHtml(narrative) + '</p>' +
+      (reportNotes.length ? '<p class="help-text" style="margin-top:10px;">Based on ' + reportNotes.length + ' comment' + (reportNotes.length === 1 ? "" : "s") + ' logged in this period.</p>' : "") +
+      "</div>";
+  }
 
   const classRows = periods.map((p) => ({ p: p, cs: computeStats(student.id, { period: p, from: range.from, to: range.to }) })).filter((r) => r.cs.attCount > 0 || r.cs.partCount > 0);
   let byClassBody;
