@@ -4832,9 +4832,9 @@ function renderLeaderboard(root, session) {
 /* ================================================================
    VIEW: ADMIN (Schedule · Staff · Students · Coins & Privileges)
    ================================================================ */
-let adminTab = "schedule";
+let adminTab = "students";
 function renderAdmin(root) {
-  const tabs = [["schedule", "Schedule"], ["staff", "Staff Accounts"], ["students", "Students"], ["privileges", "Coins & Privileges"]];
+  const tabs = [["students", "Students"], ["staff", "Staff Accounts"], ["privileges", "Coins & Privileges"], ["schedule", "Schedule"]];
   let html = '<div class="page-head"><div><span class="eyebrow">Set everything up</span><h1>Admin</h1>' +
     '<p>The weekly schedule, the coin rule, and every login — staff and student. Everything else in the app reads from here.</p></div></div>';
   html += '<div class="admin-tabs">' + tabs.map((t) => '<button class="admin-tab' + (adminTab === t[0] ? " active" : "") + '" data-admintab="' + t[0] + '">' + t[1] + "</button>").join("") + "</div>";
