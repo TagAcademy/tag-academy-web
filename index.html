@@ -34,6 +34,16 @@
   --coin-deep: #96701e;
   --coin-edge: #7c5c17;
 
+  /* Fixed-order categorical slots for the leaderboard progress chart (see progressChartHtml) --
+     validated with the dataviz skill's palette validator for both light and dark surfaces.
+     Never reassign a slot to a different category or reorder them -- the fixed order is the
+     colorblind-safety mechanism (see the dataviz skill's color-formula.md). */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+
   --ink: #1a2233;
   --ink-2: #4b5468;
   --muted: #757e91;
@@ -71,6 +81,12 @@
     --warn: #e08669;
     --warn-soft: #33201a;
 
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+
     --ink: #eceef4;
     --ink-2: #c2c8d6;
     --muted: #8b93a7;
@@ -100,6 +116,12 @@
   --caution-soft: #3a2c12;
   --warn: #e08669;
   --warn-soft: #33201a;
+
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
 
   --ink: #eceef4;
   --ink-2: #c2c8d6;
@@ -1022,11 +1044,27 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
 .lb-board { animation: lbBoardIn 0.4s ease; }
 @keyframes lbBoardIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .lb-board { animation: none; } .lb-auto-line svg { animation: none; } }
-/* Week in Review (see weekInReviewHtml): a student's own personal weekly recap, underneath the
-   leaderboard itself. The Torah/Avoda/GC chips are plain small pills, not full stat tiles --
-   there just to round out the picture, not compete with the 3 headline numbers above them. */
-.lb-week-cats { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-.lb-week-cat-chip { font-size: 0.76rem; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: var(--surface-2); color: var(--ink); }
+/* My Progress (see progressChartHtml): a student's own all-time chart, underneath the
+   leaderboard itself -- one colored line per percentage-based leaderboard category, plus a
+   small gold coin-bar panel below sharing the same month columns. Follows the dataviz skill's
+   component conventions: hairline recessive gridlines/axes, a line-key (not box) legend, and a
+   tooltip whose value is the strong element with the series name secondary. */
+.lb-progress-scroll { position: relative; overflow-x: auto; margin-top: 4px; }
+.lb-progress-svg { display: block; }
+.lb-progress-grid { stroke: var(--line); stroke-width: 1; shape-rendering: crispEdges; }
+.lb-progress-axis-label { font-size: 0.62rem; fill: var(--muted); font-weight: 600; }
+.lb-progress-crosshair { stroke: var(--line-strong); stroke-width: 1; pointer-events: none; transition: opacity 0.1s ease; }
+.lb-progress-hit { cursor: pointer; }
+.lb-progress-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+.lb-progress-legend-item { display: flex; align-items: center; gap: 6px; font-size: 0.76rem; font-weight: 600; color: var(--ink-2); }
+/* Line keys, not boxes -- a short stroke of the series color, per the dataviz skill's
+   interaction.md ("Line keys, not boxes"). Reused for both the legend and the tooltip rows. */
+.lb-progress-key { display: inline-block; width: 14px; height: 3px; border-radius: 2px; flex-shrink: 0; }
+.lb-progress-tooltip { position: absolute; z-index: 3; width: 150px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); pointer-events: none; }
+.lb-progress-tooltip-title { font-size: 0.7rem; font-weight: 700; color: var(--ink); margin-bottom: 4px; }
+.lb-progress-tooltip-row { display: flex; align-items: center; gap: 6px; font-size: 0.72rem; padding: 1px 0; }
+.lb-progress-tooltip-label { color: var(--ink-2); flex: 1; }
+.lb-progress-tooltip-value { color: var(--ink); font-weight: 700; }
 /* A smaller version of the same wreath-and-ordinal seal for every non-podium rank -- plain
    black/ink, since color is reserved for the podium. */
 .lb-wreath-badge-sm { width: 34px; height: 33px; }
@@ -2429,7 +2467,10 @@ function wreathBadgeHtml(place, sizeClass, title) {
 let openSections = new Set();
 function collapsibleSectionHtml(id, title, subtitle, bodyHtml) {
   const open = openSections.has(id);
-  return '<div class="card collapsible-card" style="margin-top:16px;">' +
+  // The id on this wrapper (not just the inner data-collapse toggle) is what a caller scrolls to
+  // after forcing a section open from somewhere else on the page -- see the calendar day-click
+  // handler in wireStudentDetail, which opens + scrolls to "Day in Review".
+  return '<div class="card collapsible-card" id="collapse-' + escapeHtml(id) + '" style="margin-top:16px;">' +
     '<button type="button" class="collapsible-toggle" data-collapse="' + escapeHtml(id) + '" aria-expanded="' + (open ? "true" : "false") + '">' +
     '<span class="collapsible-toggle-text"><span class="collapsible-title">' + escapeHtml(title) + "</span>" +
     (subtitle ? '<span class="collapsible-subtitle">' + escapeHtml(subtitle) + "</span>" : "") + "</span>" +
@@ -4179,33 +4220,203 @@ function pyramidRows(n) {
   }
   return rows;
 }
-/* A student's own personal recap, shown at the bottom of the leaderboard page (see
-   renderLeaderboard) -- always THIS calendar week (weekRangeFor(todayISO())), independent of
-   whatever category or time range the board above is currently showing, so it reads like a
-   steady weekly digest rather than shifting under them every time the carousel advances. Blended
-   Torah/Avoda/Gemilas Chassidim chips only show up once there's actually a class of that kind
-   marked this week, same "leave it out rather than show a misleading 0%" rule computeStats
-   already applies everywhere else. */
-function weekInReviewHtml(student) {
-  const range = weekRangeFor(todayISO());
-  const st = computeStats(student.id, { from: range.from, to: range.to });
-  const catRows = [{ id: "torah", label: "Torah" }, { id: "avoda", label: "Avoda" }, { id: "gc", label: "Gemilas Chassidim" }]
-    .map((c) => ({ label: c.label, pct: computeStats(student.id, { from: range.from, to: range.to, category: c.id }).blendedPct }))
-    .filter((r) => r.pct !== null && r.pct !== undefined);
-  return '<div class="card card-pad lb-week-review" style="margin-top:16px;">' +
-    '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;">' +
-    '<div><span class="eyebrow">Just for you</span><h3 style="margin:2px 0 0;">Week in Review</h3></div>' +
-    '<div style="font-size:0.82rem;color:var(--muted);">' + escapeHtml(fmtDateShort(range.from) + " – " + fmtDateShort(range.to)) + "</div>" +
-    "</div>" +
-    '<div class="grid-stats" style="margin:12px 0 0;">' +
-    statTile("Attendance", pct(st.attPct), pctTone(st.attPct)) +
-    statTile("Participation", pct(st.partPct), pctTone(st.partPct)) +
-    statTile("Coins earned", num2(st.coinsEarned)) +
-    "</div>" +
-    (catRows.length ? '<div class="lb-week-cats">' + catRows.map((r) =>
-      '<span class="lb-week-cat-chip">' + escapeHtml(r.label) + ": " + pct(r.pct) + "</span>"
-    ).join("") + "</div>" : "") +
-    "</div>";
+/* Earliest date this student has ANY attendance/participation record -- the natural start of
+   their "all time" progress chart (see progressChartHtml) rather than an arbitrary fixed date,
+   so a student who joined mid-year doesn't get a chart padded with empty months before they
+   existed. */
+function studentEarliestDate(studentId) {
+  let min = null;
+  state.attendance.forEach((rec) => {
+    if (rec.studentId !== studentId || !rec.scores || !Object.keys(rec.scores).length) return;
+    if (min === null || rec.date < min) min = rec.date;
+  });
+  return min;
+}
+/* One Hebrew month per bucket, from the student's earliest record through the current month --
+   the same month-stepping (shiftHebrewMonth/hebrewMonthRangeFor) already used for the "Day by
+   day" attendance calendar, so a month here always lines up with what that calendar calls it. */
+function progressBuckets(studentId) {
+  const earliest = studentEarliestDate(studentId);
+  if (!earliest) return [];
+  const buckets = [];
+  let anchor = earliest;
+  const todayStr = todayISO();
+  for (let i = 0; i < 36; i++) { // ~3 school years -- a generous safety cap, not an expected size
+    const r = hebrewMonthRangeFor(anchor);
+    if (!r) break;
+    buckets.push({ from: r.from, to: r.to, label: r.monthName });
+    if (r.to >= todayStr) break;
+    anchor = shiftHebrewMonth(anchor, 1);
+  }
+  return buckets;
+}
+// Fixed categorical order, one CSS custom property per percentage-based leaderboard category --
+// see the --series-1.. tokens in :root (validated for both light and dark, see the dataviz
+// skill's palette). TAG Coins is deliberately excluded here: it's a running count, not a
+// percentage, so it can't share this 0-100% axis (never a dual-axis chart) -- it gets its own
+// small panel in progressChartHtml, in the app's existing coin-gold instead of a 6th generic hue.
+const LB_SERIES_VARS = { attendance: "--series-1", participation: "--series-2", torah: "--series-3", avoda: "--series-4", gc: "--series-5" };
+/* All-time progress: every percentage-based leaderboard category as its own colored line, one
+   Hebrew month per point, from this student's first record through the current month -- shown
+   at the bottom of the leaderboard page (see renderLeaderboard), independent of whatever
+   category/time-range the board above is currently showing. A month with no data for a given
+   category (a class not yet held, or not marked) leaves a gap in that line rather than a false
+   0% -- same "leave it out" rule computeStats/leaderboardEntryFor already apply everywhere else;
+   the path is built as separate M/L runs so the line actually breaks there instead of drawing a
+   straight connector across the gap. TAG Coins (not a percentage) gets its own small bar panel
+   below, sharing the same month columns and the same hover tooltip -- see wireProgressChart. */
+function progressChartHtml(student) {
+  const buckets = progressBuckets(student.id);
+  const header = '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;">' +
+    '<div><span class="eyebrow">Just for you</span><h3 style="margin:2px 0 0;">My Progress</h3></div>' +
+    '<div style="font-size:0.82rem;color:var(--muted);">All time, by month</div></div>';
+  if (buckets.length < 2) {
+    return '<div class="card card-pad lb-progress" style="margin-top:16px;">' + header +
+      '<p class="help-text" style="margin-top:12px;">Check back after a few weeks of classes to see your progress here.</p></div>';
+  }
+
+  const seriesData = LEADERBOARD_CATEGORIES.filter((c) => c.id !== "coins").map((cat) => ({
+    cat: cat,
+    points: buckets.map((b) => leaderboardEntryFor(student.id, cat.id, b).value),
+  }));
+  const coinPoints = buckets.map((b) => leaderboardEntryFor(student.id, "coins", b).value);
+
+  const leftPad = 40, rightPad = 10, colW = 60, topPad = 10;
+  const mainH = 140, gap = 18, coinsH = 50, bottomPad = 22;
+  const plotW = colW * buckets.length;
+  const totalW = leftPad + rightPad + plotW;
+  const totalH = topPad + mainH + gap + coinsH + bottomPad;
+  const xAt = (i) => leftPad + colW * (i + 0.5);
+  const yMain = (pctVal) => topPad + mainH * (1 - pctVal / 100);
+  const coinsBase = topPad + mainH + gap + coinsH / 2;
+  const maxAbsCoin = Math.max(1, ...coinPoints.map((v) => Math.abs(v || 0)));
+  const yCoin = (v) => coinsBase - (v / maxAbsCoin) * (coinsH / 2 - 4);
+
+  let svg = ['<line x1="' + leftPad + '" y1="' + yMain(100) + '" x2="' + (leftPad + plotW) + '" y2="' + yMain(100) + '" class="lb-progress-grid" />',
+    '<line x1="' + leftPad + '" y1="' + yMain(50) + '" x2="' + (leftPad + plotW) + '" y2="' + yMain(50) + '" class="lb-progress-grid" />',
+    '<line x1="' + leftPad + '" y1="' + yMain(0) + '" x2="' + (leftPad + plotW) + '" y2="' + yMain(0) + '" class="lb-progress-grid" />',
+    '<text x="' + (leftPad - 6) + '" y="' + (yMain(100) + 3) + '" class="lb-progress-axis-label" text-anchor="end">100%</text>',
+    '<text x="' + (leftPad - 6) + '" y="' + (yMain(50) + 3) + '" class="lb-progress-axis-label" text-anchor="end">50%</text>',
+    '<text x="' + (leftPad - 6) + '" y="' + (yMain(0) + 3) + '" class="lb-progress-axis-label" text-anchor="end">0%</text>',
+    '<line x1="' + leftPad + '" y1="' + coinsBase + '" x2="' + (leftPad + plotW) + '" y2="' + coinsBase + '" class="lb-progress-grid" />',
+    '<text x="' + (leftPad - 6) + '" y="' + (coinsBase + 3) + '" class="lb-progress-axis-label" text-anchor="end">Coins</text>'].join("");
+
+  seriesData.forEach((s) => {
+    let d = "", open = false;
+    s.points.forEach((v, i) => {
+      if (v === null || v === undefined) { open = false; return; }
+      const x = xAt(i), y = yMain(v * 100);
+      d += (open ? "L" : "M") + x.toFixed(1) + "," + y.toFixed(1) + " ";
+      open = true;
+    });
+    if (d) svg += '<path d="' + d.trim() + '" fill="none" stroke="var(' + LB_SERIES_VARS[s.cat.id] + ')" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />';
+    let lastIdx = -1;
+    s.points.forEach((v, i) => { if (v !== null && v !== undefined) lastIdx = i; });
+    // The end dot is the one direct label this chart carries -- "where do I stand right now,"
+    // per category -- everything else (every other point's exact value) lives in the tooltip.
+    if (lastIdx >= 0) {
+      svg += '<circle cx="' + xAt(lastIdx).toFixed(1) + '" cy="' + yMain(s.points[lastIdx] * 100).toFixed(1) + '" r="4" fill="var(' + LB_SERIES_VARS[s.cat.id] + ')" stroke="var(--surface)" stroke-width="2" />';
+    }
+  });
+
+  const barW = Math.min(colW - 16, 24);
+  buckets.forEach((b, i) => {
+    const v = coinPoints[i] || 0;
+    const x = xAt(i) - barW / 2;
+    const y0 = coinsBase, y1 = yCoin(v);
+    const top = Math.min(y0, y1), h = Math.max(1, Math.abs(y1 - y0));
+    svg += '<rect x="' + x.toFixed(1) + '" y="' + top.toFixed(1) + '" width="' + barW + '" height="' + h.toFixed(1) + '" rx="3" fill="var(--gold)" opacity="' + (v ? "0.9" : "0.25") + '" />';
+  });
+
+  buckets.forEach((b, i) => {
+    svg += '<text x="' + xAt(i).toFixed(1) + '" y="' + (totalH - 6) + '" class="lb-progress-axis-label" text-anchor="middle">' + escapeHtml(b.label.slice(0, 3)) + "</text>" +
+      '<rect class="lb-progress-hit" data-bucket="' + i + '" x="' + (leftPad + colW * i) + '" y="' + topPad + '" width="' + colW + '" height="' + (mainH + gap + coinsH) + '" fill="transparent" tabindex="0" role="button" aria-label="' + escapeHtml(b.label) + '" />';
+  });
+  // Hidden until hover/focus moves it to a column -- see wireProgressChart.
+  svg += '<line id="lb-progress-crosshair" x1="0" y1="' + topPad + '" x2="0" y2="' + (topPad + mainH + gap + coinsH) + '" class="lb-progress-crosshair" style="opacity:0;" />';
+
+  const svgHtml = '<svg class="lb-progress-svg" viewBox="0 0 ' + totalW + " " + totalH + '" style="min-width:' + Math.max(totalW, 280) + 'px;" preserveAspectRatio="xMinYMid meet">' + svg + "</svg>";
+  const legendHtml = '<div class="lb-progress-legend">' + seriesData.map((s) =>
+    '<span class="lb-progress-legend-item"><span class="lb-progress-key" style="background:var(' + LB_SERIES_VARS[s.cat.id] + ')"></span>' + escapeHtml(s.cat.label) + "</span>"
+  ).join("") + '<span class="lb-progress-legend-item"><span class="lb-progress-key" style="background:var(--gold)"></span>TAG Coins (bars below)</span></div>';
+
+  return '<div class="card card-pad lb-progress" style="margin-top:16px;">' + header +
+    '<div class="lb-progress-scroll"><div class="lb-progress-tooltip" id="lb-progress-tooltip" hidden></div>' + svgHtml + "</div>" +
+    legendHtml + "</div>";
+}
+/* Hover/focus wiring for progressChartHtml -- recomputes the same buckets/series/coin points
+   (cheap, deterministic) rather than threading them through from render, since this runs from
+   renderLeaderboard's own wiring pass, separate from where the HTML was built. One shared hit
+   column per month drives both a crosshair (spanning both panels) and one tooltip listing every
+   series' value at that month, per the "one tooltip, every series" rule -- the pointer never has
+   to land on a specific line or bar to read it. */
+function wireProgressChart(root, student) {
+  const svg = root.querySelector(".lb-progress-svg");
+  const tooltip = root.querySelector("#lb-progress-tooltip");
+  const scrollEl = root.querySelector(".lb-progress-scroll");
+  if (!svg || !tooltip || !scrollEl) return;
+  const crosshair = svg.querySelector("#lb-progress-crosshair");
+  const buckets = progressBuckets(student.id);
+  const seriesData = LEADERBOARD_CATEGORIES.filter((c) => c.id !== "coins").map((cat) => ({
+    cat: cat,
+    points: buckets.map((b) => leaderboardEntryFor(student.id, cat.id, b).value),
+  }));
+  const coinPoints = buckets.map((b) => leaderboardEntryFor(student.id, "coins", b).value);
+
+  const showFor = (i, hitRect) => {
+    const b = buckets[i];
+    if (!b) return;
+    tooltip.innerHTML = "";
+    const title = document.createElement("div");
+    title.className = "lb-progress-tooltip-title";
+    title.textContent = b.label;
+    tooltip.appendChild(title);
+    const addRow = (colorVar, label, valueText) => {
+      const row = document.createElement("div");
+      row.className = "lb-progress-tooltip-row";
+      const key = document.createElement("span");
+      key.className = "lb-progress-key";
+      key.style.background = "var(" + colorVar + ")";
+      const labelEl = document.createElement("span");
+      labelEl.className = "lb-progress-tooltip-label";
+      labelEl.textContent = label;
+      const valEl = document.createElement("span");
+      valEl.className = "lb-progress-tooltip-value";
+      valEl.textContent = valueText;
+      row.appendChild(key); row.appendChild(labelEl); row.appendChild(valEl);
+      tooltip.appendChild(row);
+    };
+    seriesData.forEach((s) => {
+      const v = s.points[i];
+      addRow(LB_SERIES_VARS[s.cat.id], s.cat.label, v === null || v === undefined ? "—" : pct(v));
+    });
+    const cv = coinPoints[i];
+    addRow("--gold", "TAG Coins", cv === null || cv === undefined ? "—" : (cv >= 0 ? "+" : "") + num2(cv));
+
+    tooltip.hidden = false;
+    const scrollRect = scrollEl.getBoundingClientRect();
+    const left = hitRect.left - scrollRect.left + scrollEl.scrollLeft + hitRect.width / 2 - 75;
+    tooltip.style.left = Math.max(4, Math.min(left, scrollEl.scrollWidth - 160)) + "px";
+    tooltip.style.top = "2px";
+
+    if (crosshair) {
+      const svgRect = svg.getBoundingClientRect();
+      const scaleX = svg.viewBox.baseVal.width / svgRect.width;
+      const xInSvg = (hitRect.left + hitRect.width / 2 - svgRect.left) * scaleX;
+      crosshair.setAttribute("x1", xInSvg.toFixed(1));
+      crosshair.setAttribute("x2", xInSvg.toFixed(1));
+      crosshair.style.opacity = "1";
+    }
+  };
+  const hide = () => { tooltip.hidden = true; if (crosshair) crosshair.style.opacity = "0"; };
+  root.querySelectorAll(".lb-progress-hit").forEach((hitEl) => {
+    const i = Number(hitEl.getAttribute("data-bucket"));
+    hitEl.addEventListener("pointerenter", () => showFor(i, hitEl.getBoundingClientRect()));
+    hitEl.addEventListener("pointermove", () => showFor(i, hitEl.getBoundingClientRect()));
+    hitEl.addEventListener("focus", () => showFor(i, hitEl.getBoundingClientRect()));
+    hitEl.addEventListener("pointerleave", hide);
+    hitEl.addEventListener("blur", hide);
+  });
 }
 function renderLeaderboard(root, session) {
   const role = roleOf(session);
@@ -4384,12 +4595,15 @@ function renderLeaderboard(root, session) {
   }
   html += "</div>";
 
-  // A signed-in student gets their own personal recap below the board -- always this calendar
-  // week, regardless of whichever category/time-range the board above happens to be showing
-  // (see weekInReviewHtml) -- so the leaderboard itself stays the first thing on the page.
-  if (role === "student") html += weekInReviewHtml(session.record);
+  // A signed-in student gets their own all-time progress chart below the board -- every
+  // percentage-based leaderboard category as its own line, independent of whichever
+  // category/time-range the board above happens to be showing (see progressChartHtml) -- so
+  // the leaderboard itself stays the first thing on the page.
+  if (role === "student") html += progressChartHtml(session.record);
 
   root.innerHTML = html;
+
+  if (role === "student") wireProgressChart(root, session.record);
 
   root.querySelectorAll("[data-lbcat]").forEach((btn) => btn.addEventListener("click", () => { lbCategory = btn.getAttribute("data-lbcat"); lbAutoRotate = false; renderAll(); }));
   const autoResumeBtn = document.getElementById("lb-auto-resume");
@@ -5329,7 +5543,14 @@ function renderStudentDetail(root, student, opts) {
     });
     byClassBody += "</tbody></table></div>";
   }
-  html += collapsibleSectionHtml("sdByClass", "By class", "Tap a class to filter the calendar and stats above to just that class", byClassBody);
+  // Renamed from "By class" to "Day in Review" -- this is also the section a calendar day-click
+  // auto-expands and scrolls to (see the .sd-cal-day click handler below), where a per-class
+  // breakdown really does read as a review of that one day; it works the same as a plain
+  // per-class breakdown for any other time range too, just under the same friendlier name.
+  const byClassSubtitle = sdScope === "day"
+    ? range.title + " — tap a class to filter the calendar and stats above to just that class"
+    : "Tap a class to filter the calendar and stats above to just that class";
+  html += collapsibleSectionHtml("sdByClass", "Day in Review", byClassSubtitle, byClassBody);
 
   let coinActivityBody;
   if (trail.length === 0) {
@@ -5424,10 +5645,16 @@ function renderStudentDetail(root, student, opts) {
   if (calTodayBtn) calTodayBtn.addEventListener("click", () => { sdCalAnchor = todayISO(); renderAll(); });
   root.querySelectorAll(".sd-cal-day").forEach((btn) => btn.addEventListener("click", () => {
     // Clicking a day drills the whole page's time-range picker into just that day, so the
-    // stat tiles, report card, and log above all reflect it too -- not just the calendar.
+    // stat tiles and log above all reflect it too -- not just the calendar. "Day in Review"
+    // (the per-class breakdown, previously named "By class") is the section that actually
+    // answers "how did this one day go", so a day click also forces it open and scrolls it
+    // into view instead of leaving it collapsed somewhere below the fold.
     sdScope = "day";
     sdAnchor = btn.getAttribute("data-sd-cal-date");
+    openSections.add("sdByClass");
     renderAll();
+    const dayReview = document.getElementById("collapse-sdByClass");
+    if (dayReview) dayReview.scrollIntoView({ behavior: "smooth", block: "start" });
   }));
 }
 
