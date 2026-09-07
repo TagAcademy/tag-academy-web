@@ -4433,9 +4433,13 @@ function progressChartHtml(student) {
   // render without clipping against the viewBox edge or crowding the row above it.
   // bottomPad sizes the vertical-label band to the longest label actually in play (a double
   // parsha like "אחרי מות־קדושים" runs much longer than a bare Hebrew month), rather than a
-  // fixed height that would either clip long labels or waste space under short ones.
+  // fixed height that would either clip long labels or waste space under short ones. Labels are
+  // top-aligned (flush against labelTopGap, just under the plot) rather than centered in the
+  // band, so every label starts at the same height and only the long ones reach further down --
+  // bottomPad has to fit the FULL longest label below that top line, not just half of it.
   const maxLabelLen = Math.max(1, ...buckets.map((b) => b.axisLabel.length));
-  const mainH = 140, gap = 24, coinsH = 50, bottomPad = Math.max(46, Math.min(150, 18 + maxLabelLen * 7));
+  const labelTopGap = 10;
+  const mainH = 140, gap = 24, coinsH = 50, bottomPad = Math.max(50, Math.min(160, labelTopGap + maxLabelLen * 7 + 14));
   const plotW = colW * buckets.length;
   const totalW = leftPad + rightPad + plotW;
   const totalH = topPad + mainH + gap + coinsH + bottomPad;
@@ -4446,9 +4450,11 @@ function progressChartHtml(student) {
   const yCoin = (v) => coinsBase - (v / maxAbsCoin) * (coinsH / 2 - 4);
 
   // The same 1st/2nd/3rd wreath artwork the board itself uses (see wreathBadgeHtml /
-  // WREATH_PODIUM_IMG), centered just above a point or bar -- one appears over every bucket this
-  // student actually podiumed in for that category (podiumPlaceFor), not just the latest one, so
-  // the chart doubles as a record of every time they made the board.
+  // WREATH_PODIUM_IMG), centered just above a point or bar -- only on the MOST RECENT bucket this
+  // student podiumed in for that category (podiumPlaceFor), not every one they ever have. A
+  // student who's been consistently top-3 would otherwise rack up a wreath at nearly every point
+  // on every line, burying the chart under icons; one per line still says "you're on the podium"
+  // without turning the whole thing into a wreath collage.
   const wreathAt = (cx, topY, place) => '<image class="lb-progress-wreath" href="' + WREATH_PODIUM_IMG[place] + '" x="' +
     (cx - 8).toFixed(1) + '" y="' + (topY - 18).toFixed(1) + '" width="16" height="14" preserveAspectRatio="xMidYMid meet">' +
     "<title>" + escapeHtml(ordinalSuffix(place) + " place") + "</title></image>";
@@ -4478,31 +4484,34 @@ function progressChartHtml(student) {
     if (lastIdx >= 0) {
       svg += '<circle cx="' + xAt(lastIdx).toFixed(1) + '" cy="' + yMain(s.points[lastIdx] * 100).toFixed(1) + '" r="4" fill="var(' + LB_SERIES_VARS[s.cat.id] + ')" stroke="var(--surface)" stroke-width="2" />';
     }
-    s.points.forEach((v, i) => {
-      if (v === null || v === undefined) return;
-      const place = s.places[i];
-      if (place) svg += wreathAt(xAt(i), yMain(v * 100), place);
-    });
+    let lastPodiumIdx = -1;
+    s.places.forEach((p, i) => { if (p) lastPodiumIdx = i; });
+    if (lastPodiumIdx >= 0) svg += wreathAt(xAt(lastPodiumIdx), yMain(s.points[lastPodiumIdx] * 100), s.places[lastPodiumIdx]);
   });
 
   const barW = Math.min(colW - 16, 24);
+  let lastCoinPodiumIdx = -1;
+  coinPlaces.forEach((p, i) => { if (p) lastCoinPodiumIdx = i; });
   buckets.forEach((b, i) => {
     const v = coinPoints[i] || 0;
     const x = xAt(i) - barW / 2;
     const y0 = coinsBase, y1 = yCoin(v);
     const top = Math.min(y0, y1), h = Math.max(1, Math.abs(y1 - y0));
     svg += '<rect x="' + x.toFixed(1) + '" y="' + top.toFixed(1) + '" width="' + barW + '" height="' + h.toFixed(1) + '" rx="3" fill="var(--gold)" opacity="' + (v ? "0.9" : "0.25") + '" />';
-    const cp = coinPlaces[i];
-    if (cp) svg += wreathAt(xAt(i), top, cp);
+    if (i === lastCoinPodiumIdx) svg += wreathAt(xAt(i), top, coinPlaces[i]);
   });
 
   buckets.forEach((b, i) => {
-    // Vertical label: rotate the whole <text> -90deg about a point centered in the bottom band.
-    // text-anchor="middle" is direction-agnostic (it centers on the anchor regardless of the
-    // string's own LTR/RTL direction), so this reads correctly for Hebrew without any special
-    // handling -- the string's first character lands nearest the axis, reading top-to-bottom.
-    const axisX = xAt(i), axisY = totalH - bottomPad / 2 + 3;
-    svg += '<text class="lb-progress-axis-label" text-anchor="middle" x="' + axisX.toFixed(1) + '" y="' + axisY.toFixed(1) +
+    // Vertical label, top-aligned: rotate the whole <text> -90deg about a point flush against
+    // the top of the label band (labelTopGap below the plot), using text-anchor="start" rather
+    // than "middle" so every label begins at that same top line and hangs downward from there --
+    // a short label (a Hebrew month) just doesn't reach as far down as a long one (a double
+    // parsha) would, instead of both being centered around a shared midpoint at different
+    // heights. "start" still reads correctly for Hebrew's right-to-left text without any special
+    // handling -- the string's first character lands at the anchor (the top), reading down to
+    // its last character, same top-to-bottom order as the centered version had.
+    const axisX = xAt(i), axisY = topPad + mainH + gap + coinsH + labelTopGap;
+    svg += '<text class="lb-progress-axis-label" text-anchor="start" x="' + axisX.toFixed(1) + '" y="' + axisY.toFixed(1) +
       '" transform="rotate(-90 ' + axisX.toFixed(1) + " " + axisY.toFixed(1) + ')">' + escapeHtml(b.axisLabel) + "</text>" +
       '<rect class="lb-progress-hit" data-bucket="' + i + '" x="' + (leftPad + colW * i) + '" y="' + topPad + '" width="' + colW + '" height="' + (mainH + gap + coinsH) + '" fill="transparent" tabindex="0" role="button" aria-label="' + escapeHtml(b.tooltipLabel) + '" />';
   });
