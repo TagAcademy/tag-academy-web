@@ -1065,6 +1065,15 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
 .lb-progress-tooltip-row { display: flex; align-items: center; gap: 6px; font-size: 0.72rem; padding: 1px 0; }
 .lb-progress-tooltip-label { color: var(--ink-2); flex: 1; }
 .lb-progress-tooltip-value { color: var(--ink); font-weight: 700; }
+/* Day/Week/Month bucket-size toggle -- a plain 3-way segmented control, not a category picker,
+   so it's styled as its own small pill group rather than reusing .admin-tab. */
+.lb-progress-grain-toggle { display: flex; gap: 2px; background: var(--surface-2); border-radius: 999px; padding: 2px; flex-shrink: 0; }
+.lb-progress-grain-btn { border: none; background: transparent; font: inherit; font-size: 0.76rem; font-weight: 700; color: var(--ink-2); padding: 5px 12px; border-radius: 999px; cursor: pointer; }
+.lb-progress-grain-btn.active { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+/* The wreath overlay reuses the board's own podium artwork (see WREATH_PODIUM_IMG) at a small
+   size, dropped in as a plain SVG <image> -- pointer-events:none so it never steals the hover
+   hit-rect underneath it (see .lb-progress-hit). */
+.lb-progress-wreath { pointer-events: none; }
 /* A smaller version of the same wreath-and-ordinal seal for every non-podium rank -- plain
    black/ink, since color is reserved for the podium. */
 .lb-wreath-badge-sm { width: 34px; height: 33px; }
@@ -4106,6 +4115,9 @@ let lbAnchor = todayISO();
 let lbFrom = todayISO();
 let lbTo = todayISO();
 let lbAgeBand = "all"; // "all" or an ageBandFor().label string
+// Bucket size for a student's own "My Progress" chart (see progressChartHtml) -- independent of
+// lbScope above, which scopes the board itself, not this personal chart.
+let lbProgressGrain = "month"; // "day" | "week" | "month"
 // The board rotates through every category on its own -- a carousel, not a static default --
 // until someone taps a specific one, which locks it there (see the data-lbcat click handler in
 // renderLeaderboard). "Resume auto-rotate" hands it back. The timer itself only ever runs while
@@ -4232,23 +4244,113 @@ function studentEarliestDate(studentId) {
   });
   return min;
 }
-/* One Hebrew month per bucket, from the student's earliest record through the current month --
-   the same month-stepping (shiftHebrewMonth/hebrewMonthRangeFor) already used for the "Day by
-   day" attendance calendar, so a month here always lines up with what that calendar calls it. */
-function progressBuckets(studentId) {
+// The three bucket sizes "My Progress" can show (see the Day/Week/Month toggle in
+// progressChartHtml) -- each with its own cap on how many buckets ever render. A full multi-year
+// history at day or week grain would otherwise draw hundreds of narrow columns; capping to the
+// most RECENT `cap` buckets keeps the chart a sane, still-scrollable width while always showing
+// the current stretch ("how am I doing lately"), which is what a finer grain is for in the first
+// place. Month grain's cap is generous enough that a real multi-year history rarely hits it.
+const PROGRESS_GRAINS = [
+  { id: "day", label: "Day", cap: 60 },
+  { id: "week", label: "Week", cap: 52 },
+  { id: "month", label: "Month", cap: 36 },
+];
+// Hebrew month names by hebcal's numeric month name, keyed loosely (lowercased, letters/digits
+// only) so this doesn't depend on the vendored library's exact English spelling/punctuation for
+// a given month (e.g. matches "Sivan", "Tamuz"/"Tammuz", "Sh'vat", "Adar I"/"Adar 1" alike).
+const HEBREW_MONTH_NAMES = {
+  nisan: "ניסן", iyyar: "אייר", iyar: "אייר", sivan: "סיון", tamuz: "תמוז", tammuz: "תמוז",
+  av: "אב", elul: "אלול", tishrei: "תשרי", tishri: "תשרי", cheshvan: "חשון", heshvan: "חשון",
+  kislev: "כסלו", tevet: "טבת", teves: "טבת", shvat: "שבט", shevat: "שבט",
+  adar: "אדר", adari: "אדר א", adar1: "אדר א", adarii: "אדר ב", adar2: "אדר ב",
+};
+function hebrewMonthNameFor(monthNameEnglish) {
+  const key = String(monthNameEnglish || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  return HEBREW_MONTH_NAMES[key] || monthNameEnglish;
+}
+// "ז אלול" -- the Hebrew day numeral (hebrewDayNumeral already strips the gershayim/geresh
+// punctuation) plus the Hebrew month name, no year. Used for the day-grain axis label and as
+// the week-grain fallback for a chag week with no weekly parsha reading (see progressBuckets).
+function hebrewDayMonthLabel(dateStr) {
+  const r = hebrewMonthRangeFor(dateStr);
+  const dayNum = hebrewDayNumeral(dateStr);
+  if (!dayNum) return fmtDateShort(dateStr); // HebcalMini unavailable -- fall back rather than show nothing
+  return dayNum + " " + hebrewMonthNameFor(r ? r.monthName : "");
+}
+// "האזינו" -- just the parsha name, no "פרשת " prefix (parshaHebrewFor's is for full-sentence
+// contexts like the Today page; a chart axis label wants the bare name). Falls back to the
+// Hebrew day+month of the week's own Shabbos for a chag week with no weekly parsha.
+function parshaBareLabelFor(shabbosDateStr) {
+  const full = parshaHebrewFor(shabbosDateStr);
+  return full ? full.replace(/^פרשת /, "") : hebrewDayMonthLabel(shabbosDateStr);
+}
+/* One bucket per day/week/Hebrew-month, from the student's earliest record through today, then
+   capped to the most recent PROGRESS_GRAINS[grain].cap of them (see above). Week buckets reuse
+   weekRangeFor (Sunday-Saturday) and month buckets reuse the same Hebrew-month stepping
+   (shiftHebrewMonth/hebrewMonthRangeFor) already used for the "Day by day" attendance calendar,
+   so either always lines up with what that calendar calls it. Every label is Hebrew, matching
+   how the rest of the app already renders dates (hebrewDateFor/parshaHebrewFor): a day is its
+   Hebrew date ("ז אלול"), a week is its parsha ("האזינו"), a month is its Hebrew name ("אלול").
+   Each bucket carries both an `axisLabel` (for the column itself) and a `tooltipLabel` (for the
+   hover readout and the wreath's title attribute) -- for week/month these are the same text;
+   for a day, the tooltip also adds the Hebrew day-of-week for a little more context. */
+function progressBuckets(studentId, grain) {
   const earliest = studentEarliestDate(studentId);
   if (!earliest) return [];
-  const buckets = [];
-  let anchor = earliest;
+  const g = PROGRESS_GRAINS.find((x) => x.id === grain) || PROGRESS_GRAINS[2];
   const todayStr = todayISO();
-  for (let i = 0; i < 36; i++) { // ~3 school years -- a generous safety cap, not an expected size
-    const r = hebrewMonthRangeFor(anchor);
-    if (!r) break;
-    buckets.push({ from: r.from, to: r.to, label: r.monthName });
-    if (r.to >= todayStr) break;
-    anchor = shiftHebrewMonth(anchor, 1);
+  const buckets = [];
+  if (grain === "day") {
+    let anchor = earliest;
+    for (let i = 0; i < 1500; i++) { // hard safety stop -- the cap below always bites first
+      const label = hebrewDayMonthLabel(anchor);
+      buckets.push({ from: anchor, to: anchor, axisLabel: label, tooltipLabel: hebrewDowLabelFor(anchor) + ", " + label });
+      if (anchor >= todayStr) break;
+      anchor = shiftDate(anchor, 1);
+    }
+  } else if (grain === "week") {
+    let anchor = earliest;
+    for (let i = 0; i < 500; i++) {
+      const r = weekRangeFor(anchor);
+      const label = parshaBareLabelFor(r.to);
+      buckets.push({ from: r.from, to: r.to, axisLabel: label, tooltipLabel: label });
+      if (r.to >= todayStr) break;
+      anchor = shiftDate(anchor, 7);
+    }
+  } else {
+    let anchor = earliest;
+    for (let i = 0; i < g.cap; i++) { // ~3 school years -- a generous safety cap, not an expected size
+      const r = hebrewMonthRangeFor(anchor);
+      if (!r) break;
+      const label = hebrewMonthNameFor(r.monthName);
+      buckets.push({ from: r.from, to: r.to, axisLabel: label, tooltipLabel: label });
+      if (r.to >= todayStr) break;
+      anchor = shiftHebrewMonth(anchor, 1);
+    }
   }
-  return buckets;
+  return buckets.length > g.cap ? buckets.slice(buckets.length - g.cap) : buckets;
+}
+/* Same "top 3 distinct values" podium rule the leaderboard board itself uses (see
+   renderLeaderboard's podiumGroups) -- a tie for 1st doesn't crowd 2nd/3rd out of existence --
+   applied to one bucket's range instead of the board's current range, so the progress chart can
+   mark exactly the buckets this student actually podiumed in with the same wreath the board
+   shows. roster is passed in (rather than calling activeRoster() here) so a chart covering many
+   buckets computes it once instead of once per bucket. Returns 1, 2, 3, or null (off the podium,
+   or no data at all for anyone that bucket). */
+function podiumPlaceFor(studentId, catId, range, roster) {
+  let mine;
+  const values = [];
+  roster.forEach((s) => {
+    const v = leaderboardEntryFor(s.id, catId, range).value;
+    if (s.id === studentId) mine = v;
+    if (v !== null && v !== undefined) values.push(v);
+  });
+  if (mine === null || mine === undefined) return null;
+  values.sort((a, b) => b - a);
+  const distinctValues = [];
+  values.forEach((v) => { if (!distinctValues.length || distinctValues[distinctValues.length - 1] !== v) distinctValues.push(v); });
+  const place = distinctValues.slice(0, 3).indexOf(mine);
+  return place === -1 ? null : place + 1;
 }
 // Fixed categorical order, one CSS custom property per percentage-based leaderboard category --
 // see the --series-1.. tokens in :root (validated for both light and dark, see the dataviz
@@ -4266,23 +4368,43 @@ const LB_SERIES_VARS = { attendance: "--series-1", participation: "--series-2", 
    straight connector across the gap. TAG Coins (not a percentage) gets its own small bar panel
    below, sharing the same month columns and the same hover tooltip -- see wireProgressChart. */
 function progressChartHtml(student) {
-  const buckets = progressBuckets(student.id);
-  const header = '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;">' +
-    '<div><span class="eyebrow">Just for you</span><h3 style="margin:2px 0 0;">My Progress</h3></div>' +
-    '<div style="font-size:0.82rem;color:var(--muted);">All time, by month</div></div>';
+  const grain = PROGRESS_GRAINS.find((g) => g.id === lbProgressGrain) || PROGRESS_GRAINS[2];
+  const buckets = progressBuckets(student.id, grain.id);
+  const grainToggle = '<div class="lb-progress-grain-toggle" role="group" aria-label="Chart period">' +
+    PROGRESS_GRAINS.map((g) => '<button type="button" class="lb-progress-grain-btn' + (grain.id === g.id ? " active" : "") + '" data-progress-grain="' + g.id + '">' + g.label + "</button>").join("") +
+    "</div>";
+  const rangeLabel = grain.id === "month" ? "All time, by month" : "Last " + buckets.length + " " + (grain.id === "day" ? "days" : "weeks");
+  const header = '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap;">' +
+    '<div><span class="eyebrow">Just for you</span><h3 style="margin:2px 0 0;">My Progress</h3>' +
+    '<div style="font-size:0.82rem;color:var(--muted);margin-top:2px;">' + escapeHtml(rangeLabel) + "</div></div>" +
+    grainToggle + "</div>";
   if (buckets.length < 2) {
     return '<div class="card card-pad lb-progress" style="margin-top:16px;">' + header +
       '<p class="help-text" style="margin-top:12px;">Check back after a few weeks of classes to see your progress here.</p></div>';
   }
 
+  // Wreath overlays compare this student against the whole active roster for each bucket (see
+  // podiumPlaceFor) -- computed once here rather than inside activeRoster() per bucket/category.
+  const roster = activeRoster();
   const seriesData = LEADERBOARD_CATEGORIES.filter((c) => c.id !== "coins").map((cat) => ({
     cat: cat,
     points: buckets.map((b) => leaderboardEntryFor(student.id, cat.id, b).value),
+    places: buckets.map((b) => podiumPlaceFor(student.id, cat.id, b, roster)),
   }));
   const coinPoints = buckets.map((b) => leaderboardEntryFor(student.id, "coins", b).value);
+  const coinPlaces = buckets.map((b) => podiumPlaceFor(student.id, "coins", b, roster));
 
-  const leftPad = 40, rightPad = 10, colW = 60, topPad = 10;
-  const mainH = 140, gap = 18, coinsH = 50, bottomPad = 22;
+  // Week columns need extra width for a Hebrew parsha name -- a double parsha (e.g.
+  // "אחרי מות־קדושים") runs noticeably longer than a single Hebrew month name, so week gets its
+  // own wider column rather than reusing month's.
+  const leftPad = 40, rightPad = 10, colW = grain.id === "day" ? 34 : grain.id === "week" ? 76 : 60, topPad = 30;
+  // topPad (30, up from a plain chart's 10) and gap (24, up from 18) both carry extra headroom
+  // over the bare minimum a line/bar chart would need -- specifically so a wreath badge (see
+  // wreathAt below) sitting above a 100%-value point, or above a coin bar's peak, has room to
+  // render without clipping against the viewBox edge or crowding the row above it.
+  // bottomPad has room for a two-line axis label (a double-parsha week name split across the
+  // maqaf, see the bucket-label loop below) even though most labels only use one line.
+  const mainH = 140, gap = 24, coinsH = 50, bottomPad = 32;
   const plotW = colW * buckets.length;
   const totalW = leftPad + rightPad + plotW;
   const totalH = topPad + mainH + gap + coinsH + bottomPad;
@@ -4291,6 +4413,14 @@ function progressChartHtml(student) {
   const coinsBase = topPad + mainH + gap + coinsH / 2;
   const maxAbsCoin = Math.max(1, ...coinPoints.map((v) => Math.abs(v || 0)));
   const yCoin = (v) => coinsBase - (v / maxAbsCoin) * (coinsH / 2 - 4);
+
+  // The same 1st/2nd/3rd wreath artwork the board itself uses (see wreathBadgeHtml /
+  // WREATH_PODIUM_IMG), centered just above a point or bar -- one appears over every bucket this
+  // student actually podiumed in for that category (podiumPlaceFor), not just the latest one, so
+  // the chart doubles as a record of every time they made the board.
+  const wreathAt = (cx, topY, place) => '<image class="lb-progress-wreath" href="' + WREATH_PODIUM_IMG[place] + '" x="' +
+    (cx - 8).toFixed(1) + '" y="' + (topY - 18).toFixed(1) + '" width="16" height="14" preserveAspectRatio="xMidYMid meet">' +
+    "<title>" + escapeHtml(ordinalSuffix(place) + " place") + "</title></image>";
 
   let svg = ['<line x1="' + leftPad + '" y1="' + yMain(100) + '" x2="' + (leftPad + plotW) + '" y2="' + yMain(100) + '" class="lb-progress-grid" />',
     '<line x1="' + leftPad + '" y1="' + yMain(50) + '" x2="' + (leftPad + plotW) + '" y2="' + yMain(50) + '" class="lb-progress-grid" />',
@@ -4317,6 +4447,11 @@ function progressChartHtml(student) {
     if (lastIdx >= 0) {
       svg += '<circle cx="' + xAt(lastIdx).toFixed(1) + '" cy="' + yMain(s.points[lastIdx] * 100).toFixed(1) + '" r="4" fill="var(' + LB_SERIES_VARS[s.cat.id] + ')" stroke="var(--surface)" stroke-width="2" />';
     }
+    s.points.forEach((v, i) => {
+      if (v === null || v === undefined) return;
+      const place = s.places[i];
+      if (place) svg += wreathAt(xAt(i), yMain(v * 100), place);
+    });
   });
 
   const barW = Math.min(colW - 16, 24);
@@ -4326,11 +4461,21 @@ function progressChartHtml(student) {
     const y0 = coinsBase, y1 = yCoin(v);
     const top = Math.min(y0, y1), h = Math.max(1, Math.abs(y1 - y0));
     svg += '<rect x="' + x.toFixed(1) + '" y="' + top.toFixed(1) + '" width="' + barW + '" height="' + h.toFixed(1) + '" rx="3" fill="var(--gold)" opacity="' + (v ? "0.9" : "0.25") + '" />';
+    const cp = coinPlaces[i];
+    if (cp) svg += wreathAt(xAt(i), top, cp);
   });
 
   buckets.forEach((b, i) => {
-    svg += '<text x="' + xAt(i).toFixed(1) + '" y="' + (totalH - 6) + '" class="lb-progress-axis-label" text-anchor="middle">' + escapeHtml(b.label.slice(0, 3)) + "</text>" +
-      '<rect class="lb-progress-hit" data-bucket="' + i + '" x="' + (leftPad + colW * i) + '" y="' + topPad + '" width="' + colW + '" height="' + (mainH + gap + coinsH) + '" fill="transparent" tabindex="0" role="button" aria-label="' + escapeHtml(b.label) + '" />';
+    // A double-parsha week name (e.g. "אחרי מות־קדושים") is long enough to crowd its neighbors
+    // in one line even at week grain's wider column -- break it across the maqaf (־) into two
+    // stacked tspans instead. Every other label (a day, a single-parsha week, a Hebrew month)
+    // is short enough to stay on one line as before.
+    const lines = b.axisLabel.includes("־") ? b.axisLabel.split("־") : [b.axisLabel];
+    const lineH = 10;
+    const firstY = totalH - 6 - (lines.length - 1) * lineH;
+    const tspans = lines.map((line, li) => '<tspan x="' + xAt(i).toFixed(1) + '" dy="' + (li === 0 ? 0 : lineH) + '">' + escapeHtml(line) + "</tspan>").join("");
+    svg += '<text class="lb-progress-axis-label" y="' + firstY + '" text-anchor="middle">' + tspans + "</text>" +
+      '<rect class="lb-progress-hit" data-bucket="' + i + '" x="' + (leftPad + colW * i) + '" y="' + topPad + '" width="' + colW + '" height="' + (mainH + gap + coinsH) + '" fill="transparent" tabindex="0" role="button" aria-label="' + escapeHtml(b.tooltipLabel) + '" />';
   });
   // Hidden until hover/focus moves it to a column -- see wireProgressChart.
   svg += '<line id="lb-progress-crosshair" x1="0" y1="' + topPad + '" x2="0" y2="' + (topPad + mainH + gap + coinsH) + '" class="lb-progress-crosshair" style="opacity:0;" />';
@@ -4356,7 +4501,7 @@ function wireProgressChart(root, student) {
   const scrollEl = root.querySelector(".lb-progress-scroll");
   if (!svg || !tooltip || !scrollEl) return;
   const crosshair = svg.querySelector("#lb-progress-crosshair");
-  const buckets = progressBuckets(student.id);
+  const buckets = progressBuckets(student.id, lbProgressGrain);
   const seriesData = LEADERBOARD_CATEGORIES.filter((c) => c.id !== "coins").map((cat) => ({
     cat: cat,
     points: buckets.map((b) => leaderboardEntryFor(student.id, cat.id, b).value),
@@ -4369,7 +4514,7 @@ function wireProgressChart(root, student) {
     tooltip.innerHTML = "";
     const title = document.createElement("div");
     title.className = "lb-progress-tooltip-title";
-    title.textContent = b.label;
+    title.textContent = b.tooltipLabel;
     tooltip.appendChild(title);
     const addRow = (colorVar, label, valueText) => {
       const row = document.createElement("div");
@@ -4417,6 +4562,10 @@ function wireProgressChart(root, student) {
     hitEl.addEventListener("pointerleave", hide);
     hitEl.addEventListener("blur", hide);
   });
+  root.querySelectorAll("[data-progress-grain]").forEach((btn) => btn.addEventListener("click", () => {
+    lbProgressGrain = btn.getAttribute("data-progress-grain");
+    renderAll();
+  }));
 }
 function renderLeaderboard(root, session) {
   const role = roleOf(session);
