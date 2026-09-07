@@ -1032,6 +1032,28 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
 .lb-row-name.student-link:hover, .lb-row-name.student-link:focus-visible { color: var(--brand); text-decoration-color: var(--brand); }
 .lb-row-value { font-size: 0.76rem; color: var(--muted); }
 .lb-row-rank { margin-left: auto; }
+/* Marks the signed-in student's own avatar/figure/name wherever they appear on the board --
+   podium or list -- with a pulsing halo, in the app's blue rather than any medal color so it's
+   never confused with a gold/silver/bronze wreath. Split into separate rules (rather than one
+   combined selector) because .lb-podium-figure is a non-circular cutout image -- clipping it to
+   a circle with border-radius, the way a real .lb-avatar can be, would distort the artwork, so
+   only the halo shadow applies there. */
+.lb-avatar.lb-me-glow {
+  border-radius: 999px;
+  box-shadow: 0 0 0 3px var(--surface), 0 0 0 6px var(--brand), 0 0 14px 3px var(--brand);
+}
+.lb-podium-figure.lb-me-glow {
+  filter: drop-shadow(0 3px 6px rgba(15, 23, 42, 0.28)) drop-shadow(0 0 10px var(--brand)) drop-shadow(0 0 10px var(--brand));
+}
+.lb-me-glow.lb-row-name, .lb-podium-names .lb-me-glow {
+  color: var(--brand-ink);
+  text-shadow: 0 0 8px var(--brand);
+  font-weight: 800;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .lb-avatar.lb-me-glow, .lb-podium-figure.lb-me-glow { animation: lbMeGlowPulse 2s ease-in-out infinite; }
+}
+@keyframes lbMeGlowPulse { 0%, 100% { opacity: 0.7; } 50% { opacity: 1; } }
 /* The one-line caption above the category tabs, saying whether the board is auto-rotating
    (see lbAutoRotate/ensureLbRotation) or has been locked onto one category by a tap. */
 .lb-auto-line { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
@@ -4401,17 +4423,19 @@ function progressChartHtml(student) {
   const coinPoints = buckets.map((b) => leaderboardEntryFor(student.id, "coins", b).value);
   const coinPlaces = buckets.map((b) => podiumPlaceFor(student.id, "coins", b, roster));
 
-  // Week columns need extra width for a Hebrew parsha name -- a double parsha (e.g.
-  // "אחרי מות־קדושים") runs noticeably longer than a single Hebrew month name, so week gets its
-  // own wider column rather than reusing month's.
-  const leftPad = 40, rightPad = 10, colW = grain.id === "day" ? 34 : grain.id === "week" ? 76 : 60, topPad = 30;
+  // Axis labels are rotated vertical (see the bucket-label loop below), so a column only needs
+  // to be as wide as the data marks it holds -- a long Hebrew parsha name no longer needs a
+  // wider week column to fit horizontally, it just runs down the page instead.
+  const leftPad = 40, rightPad = 10, colW = grain.id === "day" ? 34 : grain.id === "week" ? 46 : 56, topPad = 30;
   // topPad (30, up from a plain chart's 10) and gap (24, up from 18) both carry extra headroom
   // over the bare minimum a line/bar chart would need -- specifically so a wreath badge (see
   // wreathAt below) sitting above a 100%-value point, or above a coin bar's peak, has room to
   // render without clipping against the viewBox edge or crowding the row above it.
-  // bottomPad has room for a two-line axis label (a double-parsha week name split across the
-  // maqaf, see the bucket-label loop below) even though most labels only use one line.
-  const mainH = 140, gap = 24, coinsH = 50, bottomPad = 32;
+  // bottomPad sizes the vertical-label band to the longest label actually in play (a double
+  // parsha like "אחרי מות־קדושים" runs much longer than a bare Hebrew month), rather than a
+  // fixed height that would either clip long labels or waste space under short ones.
+  const maxLabelLen = Math.max(1, ...buckets.map((b) => b.axisLabel.length));
+  const mainH = 140, gap = 24, coinsH = 50, bottomPad = Math.max(46, Math.min(150, 18 + maxLabelLen * 7));
   const plotW = colW * buckets.length;
   const totalW = leftPad + rightPad + plotW;
   const totalH = topPad + mainH + gap + coinsH + bottomPad;
@@ -4473,15 +4497,13 @@ function progressChartHtml(student) {
   });
 
   buckets.forEach((b, i) => {
-    // A double-parsha week name (e.g. "אחרי מות־קדושים") is long enough to crowd its neighbors
-    // in one line even at week grain's wider column -- break it across the maqaf (־) into two
-    // stacked tspans instead. Every other label (a day, a single-parsha week, a Hebrew month)
-    // is short enough to stay on one line as before.
-    const lines = b.axisLabel.includes("־") ? b.axisLabel.split("־") : [b.axisLabel];
-    const lineH = 10;
-    const firstY = totalH - 6 - (lines.length - 1) * lineH;
-    const tspans = lines.map((line, li) => '<tspan x="' + xAt(i).toFixed(1) + '" dy="' + (li === 0 ? 0 : lineH) + '">' + escapeHtml(line) + "</tspan>").join("");
-    svg += '<text class="lb-progress-axis-label" y="' + firstY + '" text-anchor="middle">' + tspans + "</text>" +
+    // Vertical label: rotate the whole <text> -90deg about a point centered in the bottom band.
+    // text-anchor="middle" is direction-agnostic (it centers on the anchor regardless of the
+    // string's own LTR/RTL direction), so this reads correctly for Hebrew without any special
+    // handling -- the string's first character lands nearest the axis, reading top-to-bottom.
+    const axisX = xAt(i), axisY = totalH - bottomPad / 2 + 3;
+    svg += '<text class="lb-progress-axis-label" text-anchor="middle" x="' + axisX.toFixed(1) + '" y="' + axisY.toFixed(1) +
+      '" transform="rotate(-90 ' + axisX.toFixed(1) + " " + axisY.toFixed(1) + ')">' + escapeHtml(b.axisLabel) + "</text>" +
       '<rect class="lb-progress-hit" data-bucket="' + i + '" x="' + (leftPad + colW * i) + '" y="' + topPad + '" width="' + colW + '" height="' + (mainH + gap + coinsH) + '" fill="transparent" tabindex="0" role="button" aria-label="' + escapeHtml(b.tooltipLabel) + '" />';
   });
   // Hidden until hover/focus moves it to a column -- see wireProgressChart.
@@ -4651,9 +4673,21 @@ function renderLeaderboard(root, session) {
     html += '<p class="help-text" style="margin:0;">Nobody has data for ' + escapeHtml(cat.label) + (lbAgeBand !== "all" ? " in the ages " + escapeHtml(lbAgeBand) + " group" : "") + " yet.</p>";
   } else {
     const ranks = competitionRanks(ranked);
-    const nameHtmlFor = (student, cls) => (role === "admin" || role === "teacher")
-      ? '<button type="button" class="student-link ' + cls + '" data-student-link="' + student.id + '">' + fullName(student) + "</button>"
-      : '<span class="' + cls + '">' + fullName(student) + "</span>";
+    // Who's actually looking at this board, if anyone -- used both to reorder a tied podium
+    // group (below) and to mark that student's own name/avatar/figure with a glow wherever they
+    // appear on the board, podium or list alike, so they can spot themselves at a glance.
+    const signedInId = session.type === "student" ? session.record.id : null;
+    const isMe = (student) => !!signedInId && student.id === signedInId;
+    // The leaderboard lists everyone as "First Last", no comma -- unlike fullName() (used
+    // everywhere else in the app, e.g. admin tables/report cards, as "Last, First") -- so this is
+    // its own helper, scoped to this render, rather than a change to fullName itself.
+    const lbName = (student) => escapeHtml(student.first) + " " + escapeHtml(student.last);
+    const nameHtmlFor = (student, cls) => {
+      const glowCls = isMe(student) ? " lb-me-glow" : "";
+      return (role === "admin" || role === "teacher")
+        ? '<button type="button" class="student-link ' + cls + glowCls + '" data-student-link="' + student.id + '">' + lbName(student) + "</button>"
+        : '<span class="' + cls + glowCls + '">' + lbName(student) + "</span>";
+    };
     const valueHtmlFor = (display, bigClass) => cat.id === "coins"
       ? '<span class="coin-inline">' + coinBadge("sm") + '<span style="font-weight:800;color:var(--gold);">' + display + "</span></span>"
       : '<span class="' + bigClass + '">' + display + "</span>";
@@ -4683,8 +4717,8 @@ function renderLeaderboard(root, session) {
       // of just one representative. The signed-in student, when they're part of the tie, is
       // ordered first so the board still feels personal to whoever's looking at it; otherwise the
       // group's own (stable) order is left as-is -- no reason for the lineup to shuffle every
-      // time the page redraws.
-      const signedInId = session.type === "student" ? session.record.id : null;
+      // time the page redraws. (signedInId itself is declared above, shared with the list rows
+      // below so the glow can reach both.)
       const orderedPodiumEntries = (g) => {
         const i = signedInId ? g.entries.findIndex((e) => e.student.id === signedInId) : -1;
         return i > 0 ? [g.entries[i]].concat(g.entries.slice(0, i), g.entries.slice(i + 1)) : g.entries;
@@ -4715,7 +4749,7 @@ function renderLeaderboard(root, session) {
         // also means the centered, first-consumed (signed-in) student within the front row is
         // painted last of all -- on top of their row-mates too.
         const figsHtml = figures.slice().reverse().map((f) =>
-          '<img class="lb-podium-figure" style="--row:' + f.row + ";--dx:" + f.dx.toFixed(3) + ';" src="' +
+          '<img class="lb-podium-figure' + (isMe(f.student) ? " lb-me-glow" : "") + '" style="--row:' + f.row + ";--dx:" + f.dx.toFixed(3) + ';" src="' +
           escapeHtml(f.student.photoUrl || defaultAvatarFor(f.student)) + '" alt="" />'
         ).join("");
         return '<div class="lb-podium-figures">' + figsHtml + "</div>";
@@ -4744,7 +4778,7 @@ function renderLeaderboard(root, session) {
       // down from the podium.
       html += '<div class="lb-list-panel"><span class="lb-list-arrow">' + icon("chevron") + '</span><div class="lb-list">';
       listEntries.forEach((x) => {
-        html += '<div class="lb-row">' + avatarHtml(x.e.student, "") +
+        html += '<div class="lb-row">' + avatarHtml(x.e.student, isMe(x.e.student) ? "lb-me-glow" : "") +
           '<div class="lb-row-main">' + nameHtmlFor(x.e.student, "lb-row-name") + valueHtmlFor(x.e.display, "lb-row-value") + "</div>" +
           wreathBadgeHtml(x.rank, "lb-wreath-badge-sm lb-row-rank", "Rank " + x.rank) +
           "</div>";
