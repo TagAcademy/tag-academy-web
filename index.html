@@ -4246,14 +4246,16 @@ function studentEarliestDate(studentId) {
 }
 // The three bucket sizes "My Progress" can show (see the Day/Week/Month toggle in
 // progressChartHtml) -- each with its own cap on how many buckets ever render. A full multi-year
-// history at day or week grain would otherwise draw hundreds of narrow columns; capping to the
-// most RECENT `cap` buckets keeps the chart a sane, still-scrollable width while always showing
-// the current stretch ("how am I doing lately"), which is what a finer grain is for in the first
-// place. Month grain's cap is generous enough that a real multi-year history rarely hits it.
+// history is meant to show up in full -- a student with just a week or two, or just this one
+// Hebrew month, on the books should see exactly that (one or two points), not an empty "not
+// enough data yet" placeholder. `cap` here is a generous SAFETY ceiling only (multi-year, not a
+// realistic single school year), guarding against a runaway loop/an absurdly wide chart for an
+// account with years of history -- it is never meant to bite for normal use, unlike an
+// intentional "most recent N" rolling window.
 const PROGRESS_GRAINS = [
-  { id: "day", label: "Day", cap: 60 },
-  { id: "week", label: "Week", cap: 52 },
-  { id: "month", label: "Month", cap: 36 },
+  { id: "day", label: "Day", cap: 730 },
+  { id: "week", label: "Week", cap: 260 },
+  { id: "month", label: "Month", cap: 60 },
 ];
 // Hebrew month names by hebcal's numeric month name, keyed loosely (lowercased, letters/digits
 // only) so this doesn't depend on the vendored library's exact English spelling/punctuation for
@@ -4284,8 +4286,9 @@ function parshaBareLabelFor(shabbosDateStr) {
   const full = parshaHebrewFor(shabbosDateStr);
   return full ? full.replace(/^פרשת /, "") : hebrewDayMonthLabel(shabbosDateStr);
 }
-/* One bucket per day/week/Hebrew-month, from the student's earliest record through today, then
-   capped to the most recent PROGRESS_GRAINS[grain].cap of them (see above). Week buckets reuse
+/* One bucket per day/week/Hebrew-month, from the student's earliest record through today --
+   every one of them, not just a recent slice (see PROGRESS_GRAINS above: `cap` only guards
+   against a pathological multi-year loop, it never trims a normal history). Week buckets reuse
    weekRangeFor (Sunday-Saturday) and month buckets reuse the same Hebrew-month stepping
    (shiftHebrewMonth/hebrewMonthRangeFor) already used for the "Day by day" attendance calendar,
    so either always lines up with what that calendar calls it. Every label is Hebrew, matching
@@ -4302,7 +4305,7 @@ function progressBuckets(studentId, grain) {
   const buckets = [];
   if (grain === "day") {
     let anchor = earliest;
-    for (let i = 0; i < 1500; i++) { // hard safety stop -- the cap below always bites first
+    for (let i = 0; i < g.cap; i++) {
       const label = hebrewDayMonthLabel(anchor);
       buckets.push({ from: anchor, to: anchor, axisLabel: label, tooltipLabel: hebrewDowLabelFor(anchor) + ", " + label });
       if (anchor >= todayStr) break;
@@ -4310,7 +4313,7 @@ function progressBuckets(studentId, grain) {
     }
   } else if (grain === "week") {
     let anchor = earliest;
-    for (let i = 0; i < 500; i++) {
+    for (let i = 0; i < g.cap; i++) {
       const r = weekRangeFor(anchor);
       const label = parshaBareLabelFor(r.to);
       buckets.push({ from: r.from, to: r.to, axisLabel: label, tooltipLabel: label });
@@ -4319,7 +4322,7 @@ function progressBuckets(studentId, grain) {
     }
   } else {
     let anchor = earliest;
-    for (let i = 0; i < g.cap; i++) { // ~3 school years -- a generous safety cap, not an expected size
+    for (let i = 0; i < g.cap; i++) {
       const r = hebrewMonthRangeFor(anchor);
       if (!r) break;
       const label = hebrewMonthNameFor(r.monthName);
@@ -4328,7 +4331,7 @@ function progressBuckets(studentId, grain) {
       anchor = shiftHebrewMonth(anchor, 1);
     }
   }
-  return buckets.length > g.cap ? buckets.slice(buckets.length - g.cap) : buckets;
+  return buckets;
 }
 /* Same "top 3 distinct values" podium rule the leaderboard board itself uses (see
    renderLeaderboard's podiumGroups) -- a tie for 1st doesn't crowd 2nd/3rd out of existence --
@@ -4373,14 +4376,18 @@ function progressChartHtml(student) {
   const grainToggle = '<div class="lb-progress-grain-toggle" role="group" aria-label="Chart period">' +
     PROGRESS_GRAINS.map((g) => '<button type="button" class="lb-progress-grain-btn' + (grain.id === g.id ? " active" : "") + '" data-progress-grain="' + g.id + '">' + g.label + "</button>").join("") +
     "</div>";
-  const rangeLabel = grain.id === "month" ? "All time, by month" : "Last " + buckets.length + " " + (grain.id === "day" ? "days" : "weeks");
+  // "All time" is always true here -- every grain shows the student's FULL history at that
+  // bucket size (see progressBuckets), never a rolling recent-only window. A brand new student
+  // legitimately sees just one bucket (their first day/week/Hebrew month) at first, which is
+  // expected, not an error state -- so the placeholder below is reserved for truly zero data.
+  const rangeLabel = grain.id === "day" ? "All time, by day" : grain.id === "week" ? "All time, by week" : "All time, by month";
   const header = '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap;">' +
     '<div><span class="eyebrow">Just for you</span><h3 style="margin:2px 0 0;">My Progress</h3>' +
     '<div style="font-size:0.82rem;color:var(--muted);margin-top:2px;">' + escapeHtml(rangeLabel) + "</div></div>" +
     grainToggle + "</div>";
-  if (buckets.length < 2) {
+  if (buckets.length < 1) {
     return '<div class="card card-pad lb-progress" style="margin-top:16px;">' + header +
-      '<p class="help-text" style="margin-top:12px;">Check back after a few weeks of classes to see your progress here.</p></div>';
+      '<p class="help-text" style="margin-top:12px;">Check back after your first day of classes to see your progress here.</p></div>';
   }
 
   // Wreath overlays compare this student against the whole active roster for each bucket (see
@@ -4480,7 +4487,13 @@ function progressChartHtml(student) {
   // Hidden until hover/focus moves it to a column -- see wireProgressChart.
   svg += '<line id="lb-progress-crosshair" x1="0" y1="' + topPad + '" x2="0" y2="' + (topPad + mainH + gap + coinsH) + '" class="lb-progress-crosshair" style="opacity:0;" />';
 
-  const svgHtml = '<svg class="lb-progress-svg" viewBox="0 0 ' + totalW + " " + totalH + '" style="min-width:' + Math.max(totalW, 280) + 'px;" preserveAspectRatio="xMinYMid meet">' + svg + "</svg>";
+  // Explicit width/height (not just a min-width + aspect-fit) so the SVG renders at its actual
+  // designed pixel size instead of stretching to fill the card -- with only a bucket or two
+  // (a brand new student), totalW is much smaller than totalH, and stretching THAT narrow shape
+  // to fill a wide card would blow the height up to match (a real bug this once had). A wide
+  // chart (many buckets) still simply overflows into .lb-progress-scroll's horizontal scroll,
+  // same as always.
+  const svgHtml = '<svg class="lb-progress-svg" width="' + totalW + '" height="' + totalH + '" viewBox="0 0 ' + totalW + " " + totalH + '">' + svg + "</svg>";
   const legendHtml = '<div class="lb-progress-legend">' + seriesData.map((s) =>
     '<span class="lb-progress-legend-item"><span class="lb-progress-key" style="background:var(' + LB_SERIES_VARS[s.cat.id] + ')"></span>' + escapeHtml(s.cat.label) + "</span>"
   ).join("") + '<span class="lb-progress-legend-item"><span class="lb-progress-key" style="background:var(--gold)"></span>TAG Coins (bars below)</span></div>';
