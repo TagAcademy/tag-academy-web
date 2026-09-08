@@ -812,6 +812,31 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
 .att-grid td.score-cell { padding: 4px 6px; text-align: center; }
 .att-grid td.score-cell.na { background: repeating-linear-gradient(135deg, var(--surface-2), var(--surface-2) 4px, var(--paper) 4px, var(--paper) 8px); }
 .att-grid th.col-active, .att-grid td.col-active { background: var(--brand-soft); }
+/* "This week at a glance" (see renderWeekGlanceHtml) can run to dozens of columns -- 7 days,
+   each with its own several classes -- so it deliberately trades the Day view's roomy layout for
+   a denser one instead of trying to squeeze everything to fit without scrolling: much narrower
+   columns, the class-name header row turned on its side (reads bottom-to-top) so a short column
+   can still show a full class name, and smaller circles/text throughout. More horizontal
+   scrolling is the expected trade-off, not a bug. */
+.week-glance-table th:not(:first-child), .week-glance-table td:not(.student-cell) { width: 34px; }
+.week-glance-table th:first-child, .week-glance-table td.student-cell { width: 120px; }
+.week-glance-table thead th { padding: 4px 2px; }
+.week-glance-table thead tr:first-child .period-name { font-size: 0.6rem; }
+.week-glance-table thead tr:first-child .sub { font-size: 0.56rem; }
+/* A vertical class name needs real height to stay legible -- "Chassidus"/"Selichos" are 9
+   characters, so this header row is tall (a one-time cost at the top of the table, not per
+   row) rather than clipping/squeezing the text down to illegible marks. */
+.week-glance-table thead tr:last-child th { height: 150px; vertical-align: bottom; padding-bottom: 6px; }
+.week-glance-table thead tr:last-child .period-name {
+  writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap;
+  font-size: 0.72rem; display: inline-block;
+}
+.week-glance-table thead tr:last-child .sub { writing-mode: vertical-rl; transform: rotate(180deg); font-size: 0.6rem; }
+.week-glance-table td.score-cell { padding: 3px 1px; }
+.week-glance-table .glance-row { gap: 3px; }
+.week-glance-table .glance-circle, .week-glance-table .glance-circle-empty { width: 15px; height: 15px; font-size: 0.5rem; }
+.week-glance-table .glance-circle-label { font-size: 0.48rem; }
+.week-glance-table .glance-circle-label.is-revealed { font-size: 0.4rem; }
 .summary-period-btn { background: none; border: none; font: inherit; font-weight: 800; color: inherit; cursor: pointer; padding: 0; }
 .summary-period-btn:hover { text-decoration: underline; color: var(--brand-ink); }
 
@@ -2459,6 +2484,10 @@ const ROUTES = [
   { id: "leaderboard", label: "Leaderboard", icon: "trophy", roles: ["teacher", "admin", "student"] },
   { id: "admin", label: "Admin", icon: "gear", roles: ["admin"] },
   { id: "balance", label: "My Balance", icon: "search", roles: ["student"] },
+  // Only ever shown to the one student(s) admin has granted isTA permission to (see
+  // renderChazzanTab/Admin > Students) -- `visible` is an extra per-session check beyond the
+  // role list above, since "student" alone isn't narrow enough here.
+  { id: "chazzan", label: "Chazzan", icon: "crown", roles: ["student"], visible: (session) => !!(session.record && session.record.isTA) },
 ];
 function roleOf(session) {
   if (!session) return null;
@@ -2467,7 +2496,7 @@ function roleOf(session) {
 function routesFor(session) {
   const role = roleOf(session);
   if (!role) return [];
-  return ROUTES.filter((r) => r.roles.includes(role));
+  return ROUTES.filter((r) => r.roles.includes(role) && (!r.visible || r.visible(session)));
 }
 // The current top-level tab is tracked here, not read fresh from location.hash each time.
 // Reason: every successful save re-publishes the page, and the hosting page's own reload of
@@ -2998,22 +3027,31 @@ function renderToday(root, session) {
   // period they're currently marking (see staffSelfRecord/wireSelfMark). Kept entirely separate
   // from the roster below: it's stored under state.staffAttendance, keyed to this signed-in
   // staff member's own id, so no one else marking this same class ever sees or overwrites it.
+  // Deliberately built from the exact same compact-row pieces (compactSlotHtml's tap-to-slide
+  // circles, the present/absent quick-mark buttons) as a student's own row below, rather than
+  // plain number fields, so it reads as "one more row of the same UI" instead of a bolted-on
+  // form -- see wireSelfMark for how it drives those shared pieces against staffAttendance
+  // instead of the roster's buildTodayPatch/attendance.
   let selfMarkHtml = "";
   if (canWrite && selectedPeriod) {
     const staffId = session.record.id;
     const staffRec = staffSelfRecord(todayDate, staffId);
     const staffPair = (staffRec && staffRec.scores && staffRec.scores[selectedPeriod]) || [null, null];
-    const selfAttVal = (staffPair[0] === null || staffPair[0] === undefined) ? "" : staffPair[0];
-    const selfPartVal = (staffPair[1] === null || staffPair[1] === undefined) ? "" : staffPair[1];
+    const selfLinked = !(staffPair[0] !== null && staffPair[0] !== undefined && staffPair[1] !== null && staffPair[1] !== undefined && staffPair[0] !== staffPair[1]);
     selfMarkHtml = '<div class="card card-pad" style="margin-top:14px;border-style:dashed;">' +
       '<div class="section-title" style="font-size:0.95rem;">Mark yourself — ' + escapeHtml(selectedPeriod) + "</div>" +
       '<p class="help-text" style="margin:2px 0 10px;">Private to your account — no one else marking ' + escapeHtml(selectedPeriod) + " sees or changes this.</p>" +
-      '<div class="field-row" style="align-items:flex-end;">' +
-      '<div class="field" style="max-width:120px;"><label for="self-att">Attendance</label><input type="number" id="self-att" min="0" max="' + periodMax + '" step="0.05" value="' + selfAttVal + '"></div>' +
-      '<div class="field" style="max-width:120px;"><label for="self-part">Participation</label><input type="number" id="self-part" min="0" max="' + periodMax + '" step="0.05" value="' + selfPartVal + '"></div>' +
-      '<div class="field" style="flex-shrink:0;"><button class="btn btn-ghost btn-sm" id="self-mark-present" type="button">Mark myself present</button></div>' +
-      '<span id="self-mark-status" style="font-size:0.8rem;color:var(--muted);"></span>' +
-      "</div></div>";
+      '<div class="student-rows">' +
+      '<div class="student-card student-row-compact" id="self-mark-row">' +
+      '<span class="src-name">' + escapeHtml(session.record.name) + "</span>" +
+      '<span class="src-vals"><span class="src-val-normal">' +
+      compactSlotHtml("att", staffPair[0], false, "", periodMax) +
+      compactSlotHtml("part", staffPair[1], false, 'data-linked="' + (selfLinked ? "1" : "0") + '"', periodMax) +
+      "</span></span>" +
+      '<span class="src-actions">' +
+      '<button type="button" class="btn-icon-sm src-check-present" data-check="present" title="Mark present">&#10003;</button>' +
+      '<button type="button" class="btn-icon-sm src-check-absent" data-check="absent" title="Mark absent">&#10007;</button>' +
+      "</span></div></div></div>";
   }
   html += selfMarkHtml;
 
@@ -3167,13 +3205,17 @@ function wireCompactStudentNames(root) {
    note/marked-by) so callers can each decide how to represent "nothing here" -- the Today grid
    shows a plain "—", while the weekly sheets (see weeklySheetCellHtml) go further and
    distinguish "not scheduled" from "scheduled but missed" from "not due yet". */
-function attendanceCellHtml(dateStr, period, studentId) {
+// opts.showMarkedBy (default true) -- the week-glance view (see renderWeekGlanceHtml) turns this
+// off: with up to 7 days x several classes each, the marked-by initials just add clutter to an
+// already-tight grid, and staff already know who marked what from the Day view.
+function attendanceCellHtml(dateStr, period, studentId, opts) {
+  const showMarkedBy = !(opts && opts.showMarkedBy === false);
   const rec = attendanceRecord(dateStr, studentId);
   const pair = rec && rec.scores && rec.scores[period];
   const has = pair && pair[0] !== null && pair[0] !== undefined;
   const hasPart = pair && pair[1] !== null && pair[1] !== undefined;
   const note = pair && pair[2];
-  const by = pair && pair[3];
+  const by = showMarkedBy && pair && pair[3];
   const excused = pair && !!pair[4];
   const pMax = periodMaxFor(period);
   const meta = (by || note)
@@ -3194,12 +3236,12 @@ function attendanceCellHtml(dateStr, period, studentId) {
    that was scheduled but nothing's been entered for it -- shown as "Missed" once that day is in
    the past, or a plain "—" for today/a future day so an empty cell for tomorrow doesn't read as
    a missed class. Returns the full <td> markup (class + content) so callers just concatenate. */
-function weeklySheetCellHtml(dateStr, period, studentId, extraClass) {
+function weeklySheetCellHtml(dateStr, period, studentId, extraClass, opts) {
   const cls = extraClass ? " " + extraClass : "";
   if (!periodsForDate(dateStr).includes(period)) {
     return '<td class="score-cell na' + cls + '" title="Not scheduled"></td>';
   }
-  const marked = attendanceCellHtml(dateStr, period, studentId);
+  const marked = attendanceCellHtml(dateStr, period, studentId, opts);
   if (marked !== null) return '<td class="score-cell' + cls + '">' + marked + "</td>";
   // Scheduled but nothing entered -- left blank rather than labeled "Missed"/"—" so an
   // unmarked cell doesn't read as a flag or a judgment; the hatched "not scheduled" cells
@@ -3270,7 +3312,21 @@ function renderWeekGlanceHtml(weekFrom, roster, restrictedPeriod) {
     const ps = periodsForDate(d);
     return restrictedPeriod ? ps.filter((p) => p === restrictedPeriod) : ps;
   });
-  let html = '<div class="att-grid-scroll"><table class="att-grid"><thead><tr><th style="position:sticky;left:0;background:var(--surface-2);z-index:2;" rowspan="2">Student</th>';
+  // week-glance-table (see its CSS): this grid can run to dozens of columns (7 days x several
+  // classes each), so it trades the Day view's full-size, horizontal layout for a deliberately
+  // denser one -- smaller circles/text, vertical class-name headers, and a lot more horizontal
+  // scrolling, which is fine here since there's no single-day reading task to protect.
+  // .att-grid uses table-layout:fixed, and a fixed table only takes its column widths from
+  // <col> elements or the FIRST header row -- not from row 2. Row 1 here is the day-name header,
+  // whose <th> span multiple columns via colspan, so a plain width:34px CSS rule on those cells
+  // gets divided across every column it spans (e.g. 34px / 3 periods = ~11px each, not 34px) and
+  // row 2's per-period <th> widths are ignored entirely for sizing. An explicit <colgroup> is
+  // authoritative regardless of colspans in the header, so it's the only reliable way to make
+  // every real column 34px (with the sticky student column first).
+  let colgroupHtml = '<colgroup><col style="width:120px;">';
+  dayPeriods.forEach((ps) => { for (let k = 0; k < Math.max(1, ps.length); k++) colgroupHtml += '<col style="width:34px;">'; });
+  colgroupHtml += "</colgroup>";
+  let html = '<div class="att-grid-scroll"><table class="att-grid week-glance-table">' + colgroupHtml + '<thead><tr><th style="position:sticky;left:0;background:var(--surface-2);z-index:2;" rowspan="2">Student</th>';
   days.forEach((d, i) => {
     const span = Math.max(1, dayPeriods[i].length);
     html += '<th colspan="' + span + '" class="' + (d === todayGregISO ? "col-active" : "") + '"><span class="period-name">' + escapeHtml(DAY_NAMES[i].slice(0, 3)) +
@@ -3290,7 +3346,7 @@ function renderWeekGlanceHtml(weekFrom, roster, restrictedPeriod) {
       const ps = dayPeriods[i];
       const activeCls = d === todayGregISO ? "col-active" : "";
       if (!ps.length) html += '<td class="score-cell na ' + activeCls + '" title="No classes"></td>';
-      else ps.forEach((p) => { html += weeklySheetCellHtml(d, p, s.id, activeCls); });
+      else ps.forEach((p) => { html += weeklySheetCellHtml(d, p, s.id, activeCls, { showMarkedBy: false }); });
     });
     html += "</tr>";
   });
@@ -3399,13 +3455,40 @@ function wireChazzanControl(root, session) {
   sel.addEventListener("change", apply);
   if (portionSel) portionSel.addEventListener("change", apply);
 }
+// Drives the "Mark yourself" row's shared dial pieces (compactSlotHtml's circles, the
+// present/absent quick-mark buttons) exactly the way wireTodayGrid drives them for a real
+// student card -- just against staffAttendance/this one signed-in staff member instead of
+// buildTodayPatch/the roster. Only ever one such row on the page, so there's no card loop:
+// everything below is scoped to the single #self-mark-row element.
 function wireSelfMark(root, session) {
-  const attInp = document.getElementById("self-att");
-  const partInp = document.getElementById("self-part");
-  const presentBtn = document.getElementById("self-mark-present");
-  if (!attInp && !partInp && !presentBtn) return;
-  const statusEl = document.getElementById("self-mark-status");
+  const cardEl = document.getElementById("self-mark-row");
+  if (!cardEl) return;
   const periodMax = periodMaxFor(selectedPeriod);
+  const attInp = cardEl.querySelector('.score-input[data-slot="att"]');
+  const partInp = cardEl.querySelector('.score-input[data-slot="part"]');
+  const presentBtn = cardEl.querySelector(".src-check-present");
+  const absentBtn = cardEl.querySelector(".src-check-absent");
+
+  function updateSrcCircles() {
+    const setCircle = (slot, input) => {
+      const circle = cardEl.querySelector(".src-circle-" + slot);
+      if (!circle || !input) return;
+      const v = input.value === "" ? null : Math.max(0, Math.min(periodMax, Number(input.value) || 0));
+      circle.style.setProperty("--fill", circleFillPct(v, periodMax) + "%");
+      const tone = v === null ? "" : scoreTone(v, periodMax);
+      if (tone) circle.style.setProperty("--circle-color", "var(--" + tone + ")");
+      else circle.style.removeProperty("--circle-color");
+    };
+    setCircle("att", attInp);
+    setCircle("part", partInp);
+  }
+  function syncCheckButtons() {
+    const a = attInp && attInp.value !== "" ? Number(attInp.value) : null;
+    const p = partInp && partInp.value !== "" ? Number(partInp.value) : null;
+    const triState = compactTriState([a, p, null, null, false], periodMax);
+    if (presentBtn) presentBtn.classList.toggle("active", triState === "present");
+    if (absentBtn) absentBtn.classList.toggle("active", triState === "absent");
+  }
   async function save() {
     const date = todayDate, period = selectedPeriod, staffId = session.record.id;
     const a = clampScore(attInp ? attInp.value : "", periodMax);
@@ -3419,17 +3502,49 @@ function wireSelfMark(root, session) {
       if (!rec) { rec = { id: uid("sa"), date, staffId, scores: {} }; newState.staffAttendance.push(rec); }
       rec.scores[period] = [a, p];
     }
-    if (statusEl) statusEl.textContent = "Saving…";
-    const res = await saveState(newState);
-    if (statusEl) statusEl.textContent = (res.ok || res.local) ? "Saved." : "";
+    await saveState(newState);
   }
-  if (attInp) attInp.addEventListener("blur", save);
-  if (partInp) partInp.addEventListener("blur", save);
-  if (presentBtn) presentBtn.addEventListener("click", () => {
-    if (attInp) attInp.value = String(periodMax);
-    if (partInp) partInp.value = String(periodMax);
-    save();
+  if (attInp && partInp) {
+    const syncPart = () => {
+      if (partInp.dataset.linked !== "0") { partInp.value = attInp.value; refreshPillForInput(partInp); }
+      refreshPillForInput(attInp);
+      updateSrcCircles();
+      syncCheckButtons();
+    };
+    attInp.addEventListener("input", syncPart);
+    attInp.addEventListener("blur", () => { const v = clampScore(attInp.value, periodMax); attInp.value = v === null ? "" : v; syncPart(); save(); });
+    partInp.addEventListener("input", () => { partInp.dataset.linked = "0"; refreshPillForInput(partInp); updateSrcCircles(); syncCheckButtons(); });
+    partInp.addEventListener("blur", () => { const v = clampScore(partInp.value, periodMax); partInp.value = v === null ? "" : v; refreshPillForInput(partInp); updateSrcCircles(); syncCheckButtons(); save(); });
+  }
+  // Tap a circle to reveal its slider, same as a real student row -- the existing document-level
+  // "close on outside click" listener (see above, near wireNotePopovers) already handles closing
+  // it again since it targets every .src-slot.is-open on the page, not just ones inside the roster.
+  cardEl.querySelectorAll(".src-circle").forEach((btn) => {
+    btn.addEventListener("click", (evt) => {
+      evt.stopPropagation();
+      const wrap = btn.closest(".src-slot");
+      if (!wrap) return;
+      const willOpen = !wrap.classList.contains("is-open");
+      document.querySelectorAll(".src-slot.is-open").forEach((w) => { if (w !== wrap) w.classList.remove("is-open"); });
+      wrap.classList.toggle("is-open", willOpen);
+    });
   });
+  if (presentBtn) presentBtn.addEventListener("click", () => {
+    const v = presentBtn.classList.contains("active") ? "" : String(periodMax);
+    if (attInp) { attInp.value = v; refreshPillForInput(attInp); }
+    if (partInp) { partInp.value = v; partInp.dataset.linked = "1"; refreshPillForInput(partInp); }
+    updateSrcCircles(); syncCheckButtons(); save();
+  });
+  if (absentBtn) absentBtn.addEventListener("click", () => {
+    const v = absentBtn.classList.contains("active") ? "" : "0";
+    if (attInp) { attInp.value = v; refreshPillForInput(attInp); }
+    if (partInp) { partInp.value = v; partInp.dataset.linked = "1"; refreshPillForInput(partInp); }
+    updateSrcCircles(); syncCheckButtons(); save();
+  });
+  // Dragging a dial's track to a value only "commits" once the pointer lifts, same as a real
+  // student row (see wirePillTracks/wireTodayGrid) -- this just saves to staffAttendance instead.
+  wirePillTracks(cardEl, () => save());
+  syncCheckButtons(); // reflect whatever was already saved, right after this re-render
 }
 function wireExtraPeriod(root) {
   const openBtn = document.getElementById("extra-period-open");
@@ -3808,6 +3923,11 @@ function renderMyBalance(root, session) {
   if (!sdWeekDefaultAppliedForSelf) {
     sdScope = "week";
     sdWeekDefaultAppliedForSelf = true;
+    // "Day by day" (the calendar + the week grid sdScope="week" adds above it) is collapsed by
+    // default for everyone -- but since a student's very first look here already defaults to
+    // "This week" instead of "All time", that week's actual breakdown is worth showing right
+    // away instead of hiding it behind a tap.
+    openSections.add("sdCalendar");
   }
   renderStudentDetail(root, session.record, { self: true });
 }
@@ -4915,6 +5035,10 @@ function renderLeaderboard(root, session) {
   if (role === "student" && !lbWeekDefaultAppliedForStudent) {
     lbScope = "week";
     lbWeekDefaultAppliedForStudent = true;
+    // The Filters disclosure (Time range/Age group) is collapsed by default for everyone -- but
+    // when a student's very first look at the board already defaults to "This week" rather than
+    // "All time", that range is worth showing right away instead of hiding it behind a tap.
+    openSections.add("lbFilters");
   }
   const roster = activeRoster();
   const bands = ageBandsPresent(roster);
@@ -5731,41 +5855,39 @@ let sdCalAnchor = todayISO(); // which Hebrew month the attendance calendar is s
 let cgDate = todayISO();
 let cgPeriod = "Shacharis";
 /* A student with isTA permission (Admin > Students > "Allow to grant Chazzan coins") gets this
-   card at the top of their own My Balance -- the same chazzan-picking control staff have on
-   Today (see wireChazzanControl), just with its own date+tefilah picker instead of riding on
-   todayDate/selectedPeriod, since a student viewing My Balance has neither. Only offers the
-   tefillos actually scheduled on the picked date (Musaf only shows up on Shabbos, same as Today). */
+   card on their own dedicated "Chazzan" tab (see ROUTES' visible check + renderChazzanTab below)
+   -- the same chazzan-picking control staff have on Today (see wireChazzanControl), just with
+   its own date+tefilah picker instead of riding on todayDate/selectedPeriod, since a student's
+   own nav has neither. Only offers the tefillos actually scheduled on the picked date (Musaf
+   only shows up on Shabbos, same as Today). */
 function renderChazzanGrantCard() {
-  const dayPeriods = periodsForDate(cgDate);
-  const offeredPeriods = CHAZZAN_PERIODS.filter((p) => dayPeriods.includes(p));
-  if (!offeredPeriods.includes(cgPeriod)) cgPeriod = offeredPeriods[0] || "Shacharis";
-  const current = cgPeriod ? chazzanFor(cgDate, cgPeriod) : null;
+  // Unlike Today's staff control (which only offers whatever tefilah is actually on TODAY's
+  // schedule), this is a deliberate record-keeping tool that can reach back to any date -- so
+  // all four tefillos are always offered here, Musaf included, regardless of what's scheduled
+  // on the picked date. Picking Musaf for a non-Shabbos date is unusual but not blocked; the
+  // coin math (chazzanCoinsFor) doesn't care either way.
+  const current = chazzanFor(cgDate, cgPeriod);
   const portion = (current && current.portion) || "full";
-  const amount = offeredPeriods.length ? chazzanCoinsFor(cgPeriod, portion, cgDate) : 0;
+  const amount = chazzanCoinsFor(cgPeriod, portion, cgDate);
   const roster = activeRoster();
   let html = '<div class="card card-pad" style="margin-bottom:16px;">' +
     '<div class="section-title">Grant Chazzan coins</div>' +
     '<p class="help-text" style="margin:2px 0 10px;">You\'ve been given permission to record who led davening and award their bonus coins.</p>' +
     '<div class="field-row" style="align-items:flex-end;">' +
-    '<div class="field" style="min-width:150px;"><label for="cg-date">Date</label><input type="date" id="cg-date" value="' + escapeHtml(cgDate) + '"></div>';
-  if (!offeredPeriods.length) {
-    html += '</div><p class="help-text" style="margin:8px 0 0;">' + escapeHtml(dayNameFor(cgDate)) + " doesn't have Shacharis, Mincha, Maariv, or Musaf scheduled.</p>";
-  } else {
-    html += '<div class="field" style="min-width:150px;"><label for="cg-period">Tefilah</label><select id="cg-period">' +
-      offeredPeriods.map((p) => '<option value="' + p + '"' + (p === cgPeriod ? " selected" : "") + '>' + p + "</option>").join("") +
-      "</select></div>" +
-      '<div class="field" style="min-width:190px;"><label for="cg-student">Chazzan</label><select id="cg-student">' +
-      '<option value="">— none —</option>' +
-      roster.map((s) => '<option value="' + s.id + '"' + (current && current.studentId === s.id ? " selected" : "") + '>' + escapeHtml(s.first + " " + s.last) + "</option>").join("") +
-      "</select></div>" +
-      (cgPeriod === "Shacharis" ? '<div class="field" style="min-width:140px;"><label for="cg-portion">Led</label><select id="cg-portion">' +
-        '<option value="full"' + (portion === "full" ? " selected" : "") + '>Full Shacharis</option>' +
-        '<option value="half"' + (portion === "half" ? " selected" : "") + '>Half Shacharis</option>' +
-        "</select></div>" : "") +
-      (current && current.studentId ? '<span class="pill pill-gold">+' + num2(amount) + " coin" + (amount === 1 ? "" : "s") + "</span>" : "") +
-      "</div>";
-  }
-  html += "</div>";
+    '<div class="field" style="min-width:150px;"><label for="cg-date">Date</label><input type="date" id="cg-date" value="' + escapeHtml(cgDate) + '"></div>' +
+    '<div class="field" style="min-width:150px;"><label for="cg-period">Tefilah</label><select id="cg-period">' +
+    CHAZZAN_PERIODS.map((p) => '<option value="' + p + '"' + (p === cgPeriod ? " selected" : "") + '>' + p + "</option>").join("") +
+    "</select></div>" +
+    '<div class="field" style="min-width:190px;"><label for="cg-student">Chazzan</label><select id="cg-student">' +
+    '<option value="">— none —</option>' +
+    roster.map((s) => '<option value="' + s.id + '"' + (current && current.studentId === s.id ? " selected" : "") + '>' + escapeHtml(s.first + " " + s.last) + "</option>").join("") +
+    "</select></div>" +
+    (cgPeriod === "Shacharis" ? '<div class="field" style="min-width:140px;"><label for="cg-portion">Led</label><select id="cg-portion">' +
+      '<option value="full"' + (portion === "full" ? " selected" : "") + '>Full Shacharis</option>' +
+      '<option value="half"' + (portion === "half" ? " selected" : "") + '>Half Shacharis</option>' +
+      "</select></div>" : "") +
+    (current && current.studentId ? '<span class="pill pill-gold">+' + num2(amount) + " coin" + (amount === 1 ? "" : "s") + "</span>" : "") +
+    "</div></div>";
   return html;
 }
 function wireChazzanGrantCard(root, student) {
@@ -5790,6 +5912,42 @@ function wireChazzanGrantCard(root, student) {
   }
   studentSel.addEventListener("change", apply);
   if (portionSel) portionSel.addEventListener("change", apply);
+}
+/* The "Chazzan" tab -- only ever reachable by a student admin has granted isTA permission to
+   (see the ROUTES entry's `visible` check). Its own dedicated page rather than a card bolted
+   onto My Balance, so it reads as a real responsibility of theirs, not a side effect of looking
+   up their own balance. */
+function renderChazzanTab(root, session) {
+  const student = session.record;
+  let html = '<div class="page-head"><div><span class="eyebrow">Teacher\'s helper</span><h1>Chazzan</h1>' +
+    "<p>Record who led each tefilah and award their bonus coins.</p></div></div>";
+  html += renderChazzanGrantCard();
+
+  const recent = (state.ledger || [])
+    .filter((tx) => tx.type === "Chazzan Bonus")
+    .sort((a, b) => (b.date < a.date ? -1 : b.date > a.date ? 1 : (b.enteredAt || 0) - (a.enteredAt || 0)))
+    .slice(0, 20);
+  let recentBody;
+  if (!recent.length) {
+    recentBody = '<p class="help-text">No chazzan coins granted yet.</p>';
+  } else {
+    recentBody = '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Tefilah</th><th>Chazzan</th><th class="num">Coins</th></tr></thead><tbody>';
+    recent.forEach((tx) => {
+      const picked = studentById(tx.studentId);
+      // note is "Chazzan — <period>" or "Chazzan — <period> (half)" (see applyChazzanChoice) --
+      // just show that period/portion detail without repeating the word "Chazzan" a second time.
+      const detail = (tx.note || "").replace(/^Chazzan — /, "");
+      // Plain text, not the usual clickable studentLink -- that link drills into a staff-only
+      // student-detail view this student session can't open anyway.
+      recentBody += "<tr><td>" + fmtDateShort(tx.date) + "</td><td>" + escapeHtml(detail) + "</td><td>" +
+        (picked ? escapeHtml(picked.first + " " + picked.last) : "—") + '</td><td class="num">' + num2(tx.amount) + "</td></tr>";
+    });
+    recentBody += "</tbody></table></div>";
+  }
+  html += '<div class="card card-pad"><div class="section-title">Recent grants</div>' + recentBody + "</div>";
+
+  root.innerHTML = html;
+  wireChazzanGrantCard(root, student);
 }
 function wireStudentLinks(root) {
   root.querySelectorAll("[data-student-link]").forEach((el) => el.addEventListener("click", () => {
@@ -6077,8 +6235,6 @@ function renderStudentDetail(root, student, opts) {
       : "Username: " + escapeHtml(student.username || "—") + " · TAG coins are always a running total; pick a day, week, month, or custom range below to see attendance and participation for that window."
     ) + "</p></div></div>";
 
-  if (isSelf && student.isTA) html += renderChazzanGrantCard();
-
   html += '<div class="card card-pad coin-hero" style="margin-bottom:16px;">' + coinBadge("lg") +
     '<div><div class="coin-hero-label">TAG Coin Balance</div><div class="coin-hero-value">' + num2(allTimeSt.balance) + '</div>' +
     '<div class="coin-hero-sub">' + allTimeSt.coinsEarned + ' earned from classes · ' + (allTimeSt.ledgerNet >= 0 ? "+" : "") + num2(allTimeSt.ledgerNet) + ' from staff &amp; transfers</div></div></div>';
@@ -6206,7 +6362,6 @@ function renderStudentDetail(root, student, opts) {
 
   root.innerHTML = html;
   wireGlanceCircles(root); // lets a tap on the weekly sheet reveal the exact number
-  if (isSelf && student.isTA) wireChazzanGrantCard(root, student);
   const backBtn = document.getElementById("sd-back");
   if (backBtn) backBtn.addEventListener("click", () => { viewingStudentId = null; renderAll(); });
 
@@ -6313,7 +6468,7 @@ function renderAll() {
   // building its HTML/wiring, so restoring it right after is safe).
   const savedCanWrite = canWrite;
   if (previewing) canWrite = false;
-  ({ today: renderToday, ledger: renderLedger, overview: renderOverview, leaderboard: renderLeaderboard, admin: renderAdmin, balance: renderMyBalance })[route](root, session);
+  ({ today: renderToday, ledger: renderLedger, overview: renderOverview, leaderboard: renderLeaderboard, admin: renderAdmin, balance: renderMyBalance, chazzan: renderChazzanTab })[route](root, session);
   canWrite = savedCanWrite;
   wireStudentLinks(root);
   wireCollapsibleSections(root);
