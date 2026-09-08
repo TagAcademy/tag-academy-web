@@ -2379,7 +2379,10 @@ function toast(msg, kind) {
    ROUTER
    ================================================================ */
 const ROUTES = [
-  { id: "today", label: "Today", icon: "check", roles: ["teacher", "admin"] },
+  // "limited" (see the staff role select in Admin > Staff Accounts) is a single-class account --
+  // e.g. a cleaning person who should only ever see the one period they're restricted to, not the
+  // rest of the app -- so it's deliberately the only role added to ONLY this one route.
+  { id: "today", label: "Today", icon: "check", roles: ["teacher", "admin", "limited"] },
   { id: "ledger", label: "TAG Coins", icon: "coin", roles: ["teacher", "admin"] },
   { id: "overview", label: "Reports", icon: "grid", roles: ["teacher", "admin"] },
   { id: "leaderboard", label: "Leaderboard", icon: "trophy", roles: ["teacher", "admin", "student"] },
@@ -2534,7 +2537,9 @@ function renderShell(session, previewing) {
     ? '<div class="mode-pill writer"><span class="dot"></span>Live &amp; editable</div>'
     : '<div class="mode-pill"><span class="dot"></span>Read-only view</div>';
   const person = session.type === "staff" ? session.record.name : (session.record.first + " " + session.record.last);
-  const roleLabel = session.type === "staff" ? (session.record.role === "admin" ? "Admin" : "Teacher") : "Student";
+  const roleLabel = session.type === "staff"
+    ? (session.record.role === "admin" ? "Admin" : session.record.role === "limited" ? "Limited Staff" : "Teacher")
+    : "Student";
   // Your own avatar chip doubles as the button that opens the avatar picker (see
   // renderAvatarPickerModal) -- your own photo if you've picked one, a default face for your
   // role otherwise (see defaultAvatarFor). Inert while previewing someone else, same as the
@@ -2722,7 +2727,14 @@ function periodMarkedCount(date, period, roster) {
 }
 
 function renderToday(root, session) {
-  const periods = periodsForDate(todayDate);
+  // A "limited" staff account (see Admin > Staff Accounts) only ever sees its own restricted
+  // period -- everything else about this page (marking, notes, the daily summary) works exactly
+  // as it does for a full teacher, just narrowed to one class instead of the day's whole list.
+  const isLimitedStaff = session.record.role === "limited";
+  let periods = periodsForDate(todayDate);
+  if (isLimitedStaff && session.record.restrictedPeriod) {
+    periods = periods.filter((p) => p === session.record.restrictedPeriod);
+  }
   const roster = activeRoster();
   const teacherName = session.record.name;
   if (!periods.includes(selectedPeriod)) selectedPeriod = periods[0] || "";
@@ -2816,9 +2828,12 @@ function renderToday(root, session) {
   // actions below, or -- once clicked -- a wider field-row (select, name input, Add/Cancel)
   // that needs its own full-width line instead. extraPeriodButtonHtml is the inline piece;
   // extraPeriodFormHtml (only non-empty while the form is open) renders below the action row.
-  const extraPeriodButtonHtml = canWrite && !showAddExtraPeriod
+  // A limited (single-class) account never gets to add an unrelated one-off class -- extra
+  // periods aren't per-user, so that would hand them a second class beyond the one they're
+  // restricted to.
+  const extraPeriodButtonHtml = canWrite && !isLimitedStaff && !showAddExtraPeriod
     ? '<button class="btn btn-ghost btn-sm" id="extra-period-open" type="button" title="Add a class just for today">+ Class</button>' : "";
-  const extraPeriodFormHtml = canWrite && showAddExtraPeriod ? (() => {
+  const extraPeriodFormHtml = canWrite && !isLimitedStaff && showAddExtraPeriod ? (() => {
     const otherPeriods = state.settings.periods.filter((p) => !periods.includes(p));
     return '<div class="field-row" style="margin-top:10px;align-items:flex-end;">' +
       '<div class="field" style="min-width:220px;"><label for="extra-period-select">Add a class just for today</label><select id="extra-period-select">' +
@@ -5007,9 +5022,16 @@ function renderAdminStaff(root) {
     '<div class="field"><label for="st-name">Name</label><input type="text" id="st-name"></div>' +
     '<div class="field"><label for="st-username">Username</label><input type="text" id="st-username"></div>' +
     '<div class="field"><label for="st-password">Password</label>' + passwordFieldHtml("st-password", { placeholder: "leave blank to auto-generate" }) + "</div>" +
-    '<div class="field" style="max-width:150px;"><label for="st-role">Role</label><select id="st-role"><option value="teacher">Teacher</option><option value="admin">Admin</option></select></div>' +
+    '<div class="field" style="max-width:170px;"><label for="st-role">Role</label><select id="st-role"><option value="teacher">Teacher</option><option value="admin">Admin</option><option value="limited">Limited (one class)</option></select></div>' +
+    // Only meaningful for the "limited" role -- a single-class account (e.g. a cleaning person)
+    // that should see nothing but its one restricted period. Hidden unless that role is picked
+    // (see the st-role change listener below); state.settings.periods is a plain list of period
+    // name strings (see renderAdminSchedule), so this is just a select over that same list.
+    '<div class="field" id="st-restricted-period-wrap" style="max-width:200px;display:none;"><label for="st-restricted-period">Restricted to class</label><select id="st-restricted-period">' +
+    state.settings.periods.map((p) => '<option value="' + escapeHtml(p) + '">' + escapeHtml(p) + "</option>").join("") +
+    "</select></div>" +
     "</div><button class=\"btn btn-primary btn-sm\" id=\"st-add\">Add staff member</button>" +
-    '<p class="help-text" style="margin-top:12px;">Admins can set everything up here; teachers only see Today, TAG Coins, and Reports — kept simple on purpose.</p>' +
+    '<p class="help-text" style="margin-top:12px;">Admins can set everything up here; teachers see Today, TAG Coins, and Reports — kept simple on purpose; a Limited account sees only Today, locked to the one class it\'s restricted to (nothing else in the app).</p>' +
     (showBulkStaffForm ? "" : '<button class="btn btn-ghost btn-sm" id="st-bulk-toggle" style="margin-top:12px;">Bulk add multiple staff…</button>') +
     "</div>";
 
@@ -5034,24 +5056,34 @@ function renderAdminStaff(root) {
   html += '<div class="card card-pad"><div class="table-wrap"><table><thead><tr><th>Name</th><th>Username</th><th>Password</th><th>Role</th><th class="sticky-col-r"></th></tr></thead><tbody>';
   state.staff.forEach((s) => {
     html += "<tr><td>" + escapeHtml(s.name) + '</td><td class="num">' + escapeHtml(s.username) + '</td><td class="num">' + passwordCellHtml(s.password, "staff:" + s.id) +
-      '</td><td>' + (s.role === "admin" ? '<span class="pill pill-gold">Admin</span>' : '<span class="pill pill-muted">Teacher</span>') +
+      '</td><td>' + (s.role === "admin" ? '<span class="pill pill-gold">Admin</span>'
+        : s.role === "limited" ? '<span class="pill pill-muted">Limited: ' + escapeHtml(s.restrictedPeriod || "?") + "</span>"
+        : '<span class="pill pill-muted">Teacher</span>') +
       '</td><td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;"><button class="btn btn-ghost btn-sm" data-view-as-staff="' + s.id + '">View as</button>' +
       '<button class="btn btn-ghost btn-sm" data-reset-staff="' + s.id + '">Reset password</button></td></tr>';
   });
   html += "</tbody></table></div></div>";
   root.innerHTML = html;
   wirePasswordToggles(root);
+  const roleSelect = document.getElementById("st-role");
+  const restrictedPeriodWrap = document.getElementById("st-restricted-period-wrap");
+  const syncRestrictedPeriodVisibility = () => { restrictedPeriodWrap.style.display = roleSelect.value === "limited" ? "" : "none"; };
+  syncRestrictedPeriodVisibility();
+  roleSelect.addEventListener("change", syncRestrictedPeriodVisibility);
   document.getElementById("st-add").addEventListener("click", async () => {
     const name = document.getElementById("st-name").value.trim();
     const username = document.getElementById("st-username").value.trim();
     let password = document.getElementById("st-password").value.trim();
-    const role = document.getElementById("st-role").value;
+    const role = roleSelect.value;
     if (!name || !username) { toast("Enter a name and username.", "warn"); return; }
+    if (role === "limited" && !state.settings.periods.length) { toast("Add a class in Schedule first, then you can restrict a staff account to it.", "warn"); return; }
     const taken = new Set(state.staff.map((s) => s.username.toLowerCase()).concat(state.roster.map((s) => (s.username || "").toLowerCase())));
     if (taken.has(username.toLowerCase())) { toast("That username is already taken.", "warn"); return; }
     if (!password) password = randomPassword();
     const newState = JSON.parse(JSON.stringify(state));
-    newState.staff.push({ id: uid("st"), name, username, password, role });
+    const rec = { id: uid("st"), name, username, password, role };
+    if (role === "limited") rec.restrictedPeriod = document.getElementById("st-restricted-period").value;
+    newState.staff.push(rec);
     const res = await saveState(newState);
     if (res.ok || res.local) { toast("Added " + name + " — password: " + password, "good"); renderAll(); }
   });
