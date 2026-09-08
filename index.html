@@ -1347,7 +1347,21 @@ try {
 
 /* ---------- constants ---------- */
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Shabbos"];
-const TX_TYPES = ["Manual Grant", "Spent/Redeemed", "Transfer Out", "Transfer In"];
+const TX_TYPES = ["Manual Grant", "Spent/Redeemed", "Transfer Out", "Transfer In", "Chazzan Bonus"];
+/* Chazzan (leading davening) bonus coins -- student.isTA is a PERMISSION, not an eligibility
+   flag: admin grants it (Admin > Students > "Allow to grant Chazzan coins") to a student who's
+   effectively the teacher's helper/gabbai, and that one student can then record who led davening
+   themselves, from their own My Balance page (see renderChazzanGrantCard/wireChazzanGrantCard).
+   Any staff member can also set it from Today while marking that tefilah (see
+   wireChazzanControl) -- isTA never restricts who can be PICKED as chazzan (any active student
+   is a valid pick in both places), only who among the students can do the picking. Either path
+   calls the same applyChazzanChoice, which auto-grants the fixed coin amount below as a real
+   ledger entry (type "Chazzan Bonus") -- only one chazzan per tefilah per date, enforced
+   structurally by storing a single {studentId, portion} object per date+period rather than a
+   list. Shacharis is the only one with a Full/Half distinction (see chazzanCoinsFor for the
+   Shabbos half-Shacharis special case). */
+const CHAZZAN_PERIODS = ["Shacharis", "Mincha", "Maariv", "Musaf"];
+const CHAZZAN_COIN_TABLE = { Shacharis: 1, Mincha: 0.5, Maariv: 0.25, Musaf: 1 };
 const SESSION_KEY = "tagacademy_session_v2";
 const LAST_DATE_KEY = "tagacademy_last_date_v1";
 const TODAY_VIEW_KEY = "tagacademy_today_view_v1";
@@ -1903,6 +1917,7 @@ function seedState() {
       ],
       extraPeriods: {}, // { "YYYY-MM-DD": ["Class name", ...] } — one-off classes added for a single day
       bonusPeriods: {}, // { "YYYY-MM-DD": ["Class name", ...] } — that day's class only ever helps a student's average, never hurts it (see isBonusPeriod)
+      chazzan: {}, // { "YYYY-MM-DD": { "Shacharis": { studentId, portion: "full"|"half" }, "Mincha": {...}, ... } } — see chazzanFor/CHAZZAN_PERIODS
     },
     staff: [
       { id: stAdmin, username: "admin", name: "Example Admin", password: "admin1234", role: "admin" },
@@ -1927,6 +1942,11 @@ function seedState() {
       { id: l3, date: exampleDate, studentId: s1, type: "Transfer Out", amount: 2, note: "Gift to Levi, Sruly", enteredBy: "Example Teacher", enteredAt: Date.now() },
       { id: l4, date: exampleDate, studentId: s2, type: "Transfer In", amount: 2, note: "Gift from Cohen, Mendy", enteredBy: "Example Teacher", enteredAt: Date.now() },
     ],
+    // A staff member's own attendance/participation for whatever period they're marking --
+    // entirely separate from `attendance` (which is keyed by studentId against the roster) so
+    // it can never leak into a student's stats/leaderboard/exports. Keyed by staffId, and only
+    // ever rendered for the signed-in staff member's own id -- see staffSelfRecord/wireSelfMark.
+    staffAttendance: [],
   };
 }
 
@@ -2005,8 +2025,59 @@ function extraPeriodsFor(dateStr) {
 function isBonusPeriod(dateStr, period) {
   return !!(state.settings.bonusPeriods && state.settings.bonusPeriods[dateStr] && state.settings.bonusPeriods[dateStr].includes(period));
 }
+/* ---------- Chazzan bonus coins (see CHAZZAN_PERIODS/CHAZZAN_COIN_TABLE) ---------- */
+function chazzanFor(dateStr, period) {
+  return (state.settings.chazzan && state.settings.chazzan[dateStr] && state.settings.chazzan[dateStr][period]) || null;
+}
+// Half-Shacharis is worth the same half coin as any other single bonus -- except on Shabbos,
+// where leading even half of Shacharis is worth a full coin (Shabbos Shacharis being longer).
+// Every other tefilah (Mincha/Maariv/Musaf) always pays its flat table amount; only Shacharis
+// has a full/half distinction at all.
+function chazzanCoinsFor(period, portion, dateStr) {
+  if (period === "Shacharis" && portion === "half") {
+    return dayNameFor(dateStr) === "Shabbos" ? 1 : 0.5;
+  }
+  return CHAZZAN_COIN_TABLE[period] || 0;
+}
+// Ledger entries created by the chazzan control carry this deterministic id (one per date+period,
+// matching "only one chazzan per tefilah") so re-picking a different student, switching Full/Half,
+// or clearing back to "none" can find and replace/remove the exact same entry instead of piling
+// up duplicates.
+function chazzanLedgerId(dateStr, period) { return "chazzan_" + dateStr + "_" + period; }
+// Shared by both places a chazzan gets picked -- a staff member on Today (see wireChazzanControl)
+// and a student who's been granted isTA permission, from their own My Balance page (see
+// wireChazzanGrantCard) -- so the actual ledger read-modify-write only lives in one place.
+// enteredByName is whoever performed the action (a staff member's name, or the granting
+// student's own name), recorded on the ledger entry the same as any other coin transaction.
+async function applyChazzanChoice(dateStr, period, studentId, portion, enteredByName) {
+  const newState = JSON.parse(JSON.stringify(state));
+  newState.settings.chazzan = newState.settings.chazzan || {};
+  newState.settings.chazzan[dateStr] = newState.settings.chazzan[dateStr] || {};
+  newState.ledger = newState.ledger || [];
+  const ledgerId = chazzanLedgerId(dateStr, period);
+  // Always drop any prior entry for this exact date+period first -- whether we're about to
+  // replace it with a new one (different student/portion) or clear it back to "none".
+  newState.ledger = newState.ledger.filter((tx) => tx.id !== ledgerId);
+  if (studentId) {
+    newState.settings.chazzan[dateStr][period] = { studentId, portion };
+    const amount = chazzanCoinsFor(period, portion, dateStr);
+    newState.ledger.push({
+      id: ledgerId, date: dateStr, studentId, type: "Chazzan Bonus", amount,
+      note: "Chazzan — " + period + (period === "Shacharis" && portion === "half" ? " (half)" : ""),
+      enteredBy: enteredByName, enteredAt: Date.now(),
+    });
+  } else {
+    delete newState.settings.chazzan[dateStr][period];
+  }
+  return saveState(newState);
+}
 function attendanceRecord(dateStr, studentId) {
   return state.attendance.find((r) => r.date === dateStr && r.studentId === studentId);
+}
+// A staff member's own private self-mark for a date (see wireSelfMark) -- entirely separate from
+// `attendance`, so it's never visible outside this one staff member's own Today page.
+function staffSelfRecord(dateStr, staffId) {
+  return (state.staffAttendance || []).find((r) => r.date === dateStr && r.staffId === staffId);
 }
 /* opts: { from, to } — inclusive ISO date bounds, either omittable; { period } — restrict to one
    class/period (its own possible-count only counts days that period was actually scheduled);
@@ -2693,6 +2764,13 @@ let selectedPeriod = "";
 let showAddExtraPeriod = false;
 let showHebrewCal = false;
 let todayView = (function () { try { return localStorage.getItem(TODAY_VIEW_KEY) || "compact"; } catch (e) { return "compact"; } })();
+// "Today at a glance" (the roster-wide summary below the marking grid, see renderTodaySummary)
+// can widen out to show the whole week instead of just the selected day -- todayGlanceScope
+// picks which; todayGlanceWeekAnchor is that view's own week anchor, kept separate from both
+// todayDate (the single-day picker above it) and Reports' own repWeekAnchor so stepping through
+// weeks in one place never moves the other two.
+let todayGlanceScope = "day"; // "day" | "week"
+let todayGlanceWeekAnchor = todayISO();
 // The single most recent Today-page save, kept just long enough to offer one level of Undo --
 // { date, period, snapshot: { studentId: prevPairOrUndefined } }, where prevPairOrUndefined is
 // exactly what that student's pair[selectedPeriod] was immediately before the save that set
@@ -2886,6 +2964,59 @@ function renderToday(root, session) {
   }
   html += extraPeriodFormHtml;
 
+  // Chazzan: only shows up for the four tefillos (see CHAZZAN_PERIODS) -- any active student is
+  // a valid pick (isTA is a PERMISSION to grant this, not an eligibility restriction on who can
+  // receive it, see the comment on CHAZZAN_PERIODS above). Picking a student auto-grants that
+  // tefilah's fixed bonus coin amount as a real ledger entry the moment it's picked; switching to
+  // a different student, changing Full/Half, or picking "— none —" replaces/clears that same
+  // entry (see wireChazzanControl/applyChazzanChoice) rather than piling up duplicates. Any
+  // signed-in staff who can write can set it here, same as marking the class itself -- a student
+  // with isTA permission can do the exact same thing themselves from My Balance (see
+  // renderChazzanGrantCard), for when it's the teacher's helper doing the recording instead.
+  let chazzanHtml = "";
+  if (canWrite && selectedPeriod && CHAZZAN_PERIODS.includes(selectedPeriod)) {
+    const current = chazzanFor(todayDate, selectedPeriod);
+    const portion = (current && current.portion) || "full";
+    const amount = chazzanCoinsFor(selectedPeriod, portion, todayDate);
+    chazzanHtml = '<div class="card card-pad" style="margin-top:14px;">' +
+      '<div class="section-title" style="font-size:0.95rem;">Chazzan — ' + escapeHtml(selectedPeriod) + "</div>" +
+      '<div class="field-row" style="align-items:flex-end;">' +
+      '<div class="field" style="min-width:200px;"><label for="chazzan-student">Today\'s chazzan</label><select id="chazzan-student">' +
+      '<option value="">— none —</option>' +
+      roster.map((s) => '<option value="' + s.id + '"' + (current && current.studentId === s.id ? " selected" : "") + '>' + escapeHtml(s.first + " " + s.last) + "</option>").join("") +
+      "</select></div>" +
+      (selectedPeriod === "Shacharis" ? '<div class="field" style="min-width:140px;"><label for="chazzan-portion">Led</label><select id="chazzan-portion">' +
+        '<option value="full"' + (portion === "full" ? " selected" : "") + '>Full Shacharis</option>' +
+        '<option value="half"' + (portion === "half" ? " selected" : "") + '>Half Shacharis</option>' +
+        "</select></div>" : "") +
+      (current && current.studentId ? '<span class="pill pill-gold">+' + num2(amount) + " coin" + (amount === 1 ? "" : "s") + "</span>" : "") +
+      "</div></div>";
+  }
+  html += chazzanHtml;
+
+  // "Mark yourself" -- a staff member's own private attendance/participation for whatever
+  // period they're currently marking (see staffSelfRecord/wireSelfMark). Kept entirely separate
+  // from the roster below: it's stored under state.staffAttendance, keyed to this signed-in
+  // staff member's own id, so no one else marking this same class ever sees or overwrites it.
+  let selfMarkHtml = "";
+  if (canWrite && selectedPeriod) {
+    const staffId = session.record.id;
+    const staffRec = staffSelfRecord(todayDate, staffId);
+    const staffPair = (staffRec && staffRec.scores && staffRec.scores[selectedPeriod]) || [null, null];
+    const selfAttVal = (staffPair[0] === null || staffPair[0] === undefined) ? "" : staffPair[0];
+    const selfPartVal = (staffPair[1] === null || staffPair[1] === undefined) ? "" : staffPair[1];
+    selfMarkHtml = '<div class="card card-pad" style="margin-top:14px;border-style:dashed;">' +
+      '<div class="section-title" style="font-size:0.95rem;">Mark yourself — ' + escapeHtml(selectedPeriod) + "</div>" +
+      '<p class="help-text" style="margin:2px 0 10px;">Private to your account — no one else marking ' + escapeHtml(selectedPeriod) + " sees or changes this.</p>" +
+      '<div class="field-row" style="align-items:flex-end;">' +
+      '<div class="field" style="max-width:120px;"><label for="self-att">Attendance</label><input type="number" id="self-att" min="0" max="' + periodMax + '" step="0.05" value="' + selfAttVal + '"></div>' +
+      '<div class="field" style="max-width:120px;"><label for="self-part">Participation</label><input type="number" id="self-part" min="0" max="' + periodMax + '" step="0.05" value="' + selfPartVal + '"></div>' +
+      '<div class="field" style="flex-shrink:0;"><button class="btn btn-ghost btn-sm" id="self-mark-present" type="button">Mark myself present</button></div>' +
+      '<span id="self-mark-status" style="font-size:0.8rem;color:var(--muted);"></span>' +
+      "</div></div>";
+  }
+  html += selfMarkHtml;
+
   const VIEW_LABELS = { cards: "Cards", compact: "Compact" };
   html += '<div class="view-toggle-row"><span class="view-toggle-hint">View</span>' +
     '<div class="view-toggle" role="group" aria-label="Student list view">' +
@@ -2971,7 +3102,7 @@ function renderToday(root, session) {
   // .today-wrap's parent had already ended right there. Removing the stray close (this comment
   // marks where it was) lets .today-wrap -- and the sticky bar inside it -- run the full height
   // of the page, "Today at a glance" included.
-  html += renderTodaySummary(todayDate, periods, roster);
+  html += renderTodaySummary(todayDate, periods, roster, isLimitedStaff ? session.record.restrictedPeriod : null);
   html += "</div>"; // .today-wrap
 
   root.innerHTML = html;
@@ -2979,8 +3110,11 @@ function renderToday(root, session) {
   wirePeriodSelect(root);
   wireExtraPeriod(root);
   wireBonusToggle(root);
+  wireChazzanControl(root, session);
   wireTodayGrid(root, teacherName);
+  wireSelfMark(root, session);
   wireGlanceCircles(root);
+  wireTodaySummary(root);
 }
 
 /* A read-only circle for the "Today at a glance" table: same fill+color language as
@@ -3073,23 +3207,94 @@ function weeklySheetCellHtml(dateStr, period, studentId, extraClass) {
   return '<td class="score-cell' + cls + '" title="Nothing entered"></td>';
 }
 
-function renderTodaySummary(date, periods, roster) {
-  let html = '<div class="card card-pad" style="margin-top:18px;"><div class="section-title"><span>Today at a glance</span></div>' +
-    '<p style="margin:2px 0 12px;font-size:0.82rem;color:var(--muted);">Every class entered so far for this day — click a class name to jump to it. Tap a circle for the exact number; A/P are colored the same as the marking dials above.</p>';
-  html += '<div class="att-grid-scroll"><table class="att-grid"><thead><tr><th style="position:sticky;left:0;background:var(--surface-2);z-index:2;">Student</th>';
-  periods.forEach((p) => {
-    html += '<th class="' + (p === selectedPeriod ? "col-active" : "") + '"><button type="button" class="summary-period-btn" data-period="' + escapeHtml(p) + '">' + escapeHtml(p) + "</button></th>";
+/* Today's own roster-wide summary, toggled between two shapes (see todayGlanceScope):
+   "Day" -- the original one-row-per-student, one-column-per-today's-class table, cells from
+   attendanceCellHtml -- and "Week" -- every day of a picked week side by side, each day's own
+   columns for whichever classes actually ran that day, cells from weeklySheetCellHtml (see
+   renderWeekGlanceHtml). restrictedPeriod (a "limited" staff account's one allowed class, see
+   renderToday) narrows Week the same way `periods` already narrows Day for that role. */
+function renderTodaySummary(date, periods, roster, restrictedPeriod) {
+  const toggleHtml = '<div class="bubble-group" style="flex-shrink:0;">' +
+    [["day", "Day"], ["week", "Week"]].map(([v, label]) =>
+      '<button type="button" class="bubble-btn' + (todayGlanceScope === v ? " active" : "") + '" data-glance-scope="' + v + '">' + label + "</button>"
+    ).join("") + "</div>";
+  let html = '<div class="card card-pad" style="margin-top:18px;">' +
+    '<div class="section-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">' +
+    "<span>" + (todayGlanceScope === "week" ? "This week at a glance" : "Today at a glance") + "</span>" + toggleHtml + "</div>";
+
+  if (todayGlanceScope === "week") {
+    const weekRange = weekRangeFor(todayGlanceWeekAnchor);
+    html += '<p style="margin:2px 0 12px;font-size:0.82rem;color:var(--muted);">Every class, every day this week, for the whole roster — same glance circles as Day view, one column per class per day.</p>' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">' +
+      '<button class="btn btn-ghost btn-sm" id="glance-week-prev" type="button">&larr;</button>' +
+      '<button class="btn btn-ghost btn-sm" id="glance-week-today" type="button">This week</button>' +
+      '<button class="btn btn-ghost btn-sm" id="glance-week-next" type="button">&rarr;</button>' +
+      '<span class="glance-week-range" style="font-size:0.82rem;color:var(--muted);margin-left:4px;">' + escapeHtml(fmtDateShort(weekRange.from)) + " – " + escapeHtml(fmtDateShort(weekRange.to)) + "</span>" +
+      "</div>";
+    html += renderWeekGlanceHtml(weekRange.from, roster, restrictedPeriod);
+  } else {
+    html += '<p style="margin:2px 0 12px;font-size:0.82rem;color:var(--muted);">Every class entered so far for this day — click a class name to jump to it. Tap a circle for the exact number; A/P are colored the same as the marking dials above.</p>';
+    html += '<div class="att-grid-scroll"><table class="att-grid"><thead><tr><th style="position:sticky;left:0;background:var(--surface-2);z-index:2;">Student</th>';
+    periods.forEach((p) => {
+      html += '<th class="' + (p === selectedPeriod ? "col-active" : "") + '"><button type="button" class="summary-period-btn" data-period="' + escapeHtml(p) + '">' + escapeHtml(p) + "</button></th>";
+    });
+    html += "</tr></thead><tbody>";
+    roster.forEach((student) => {
+      html += '<tr><td class="student-cell">' + studentLink(student) + "</td>";
+      periods.forEach((p) => {
+        const text = attendanceCellHtml(date, p, student.id);
+        html += '<td class="num' + (p === selectedPeriod ? " col-active" : "") + '">' + (text === null ? "—" : text) + "</td>";
+      });
+      html += "</tr>";
+    });
+    html += "</tbody></table></div>";
+  }
+  html += "</div>";
+  return html;
+}
+/* The "whole week" counterpart to Today's own Day-view summary above -- instead of one column
+   per class held on a single day, groups by day FIRST: each of the week's 7 days gets a header
+   spanning that day's own classes (however many that day happens to have), with the class names
+   themselves in a second header row underneath. Every such column is, by construction, a class
+   that WAS scheduled that day (straight from periodsForDate), so this reuses weeklySheetCellHtml
+   purely for its "nothing entered yet" styling -- the "not scheduled" hatching it also knows how
+   to draw never actually triggers here (contrast renderRosterWeekGridHtml, the Reports version of
+   a roster-wide week grid, which fixes on ONE class across all 7 days and so needs that hatching
+   for the days that one class isn't held). A day with no classes at all still gets a single
+   placeholder column so the week keeps its 7-day shape. restrictedPeriod, when given (a
+   "limited" staff account's one allowed class), narrows every day down to just that one class. */
+function renderWeekGlanceHtml(weekFrom, roster, restrictedPeriod) {
+  const days = Array.from({ length: 7 }, (_, i) => shiftDate(weekFrom, i));
+  const todayGregISO = todayISO();
+  const dayPeriods = days.map((d) => {
+    const ps = periodsForDate(d);
+    return restrictedPeriod ? ps.filter((p) => p === restrictedPeriod) : ps;
+  });
+  let html = '<div class="att-grid-scroll"><table class="att-grid"><thead><tr><th style="position:sticky;left:0;background:var(--surface-2);z-index:2;" rowspan="2">Student</th>';
+  days.forEach((d, i) => {
+    const span = Math.max(1, dayPeriods[i].length);
+    html += '<th colspan="' + span + '" class="' + (d === todayGregISO ? "col-active" : "") + '"><span class="period-name">' + escapeHtml(DAY_NAMES[i].slice(0, 3)) +
+      '</span><br><span class="sub">' + escapeHtml(fmtDateShort(d)) + "</span></th>";
+  });
+  html += "</tr><tr>";
+  days.forEach((d, i) => {
+    const ps = dayPeriods[i];
+    const activeCls = d === todayGregISO ? "col-active" : "";
+    if (!ps.length) html += '<th class="' + activeCls + '"><span class="sub">No classes</span></th>';
+    else ps.forEach((p) => { html += '<th class="' + activeCls + '"><span class="period-name">' + escapeHtml(p) + "</span></th>"; });
   });
   html += "</tr></thead><tbody>";
-  roster.forEach((student) => {
-    html += '<tr><td class="student-cell">' + studentLink(student) + "</td>";
-    periods.forEach((p) => {
-      const text = attendanceCellHtml(date, p, student.id);
-      html += '<td class="num' + (p === selectedPeriod ? " col-active" : "") + '">' + (text === null ? "—" : text) + "</td>";
+  roster.forEach((s) => {
+    html += '<tr><td class="student-cell">' + studentLink(s) + "</td>";
+    days.forEach((d, i) => {
+      const ps = dayPeriods[i];
+      const activeCls = d === todayGregISO ? "col-active" : "";
+      if (!ps.length) html += '<td class="score-cell na ' + activeCls + '" title="No classes"></td>';
+      else ps.forEach((p) => { html += weeklySheetCellHtml(d, p, s.id, activeCls); });
     });
     html += "</tr>";
   });
-  html += "</tbody></table></div></div>";
+  html += "</tbody></table></div>";
   return html;
 }
 
@@ -3148,6 +3353,17 @@ function wirePeriodSelect(root) {
     btn.addEventListener("click", () => { selectedPeriod = btn.getAttribute("data-period"); renderAll(); });
   });
 }
+function wireTodaySummary(root) {
+  root.querySelectorAll("[data-glance-scope]").forEach((btn) => {
+    btn.addEventListener("click", () => { todayGlanceScope = btn.getAttribute("data-glance-scope"); renderAll(); });
+  });
+  const prevBtn = document.getElementById("glance-week-prev");
+  if (prevBtn) prevBtn.addEventListener("click", () => { todayGlanceWeekAnchor = shiftDate(todayGlanceWeekAnchor, -7); renderAll(); });
+  const nextBtn = document.getElementById("glance-week-next");
+  if (nextBtn) nextBtn.addEventListener("click", () => { todayGlanceWeekAnchor = shiftDate(todayGlanceWeekAnchor, 7); renderAll(); });
+  const todayBtn = document.getElementById("glance-week-today");
+  if (todayBtn) todayBtn.addEventListener("click", () => { todayGlanceWeekAnchor = todayISO(); renderAll(); });
+}
 function wireBonusToggle(root) {
   const btn = document.getElementById("toggle-bonus");
   if (!btn) return;
@@ -3163,6 +3379,56 @@ function wireBonusToggle(root) {
       toast(wasOn ? "Removed bonus for " + period + " today." : period + " marked as bonus for today — it'll only ever help students' averages.", "good");
       renderAll();
     }
+  });
+}
+function wireChazzanControl(root, session) {
+  const sel = document.getElementById("chazzan-student");
+  if (!sel) return;
+  const portionSel = document.getElementById("chazzan-portion");
+  async function apply() {
+    const date = todayDate, period = selectedPeriod;
+    const studentId = sel.value;
+    const portion = portionSel ? portionSel.value : "full";
+    const res = await applyChazzanChoice(date, period, studentId, portion, session.record.name);
+    if (res.ok || res.local) {
+      const student = studentId ? studentById(studentId) : null;
+      toast(student ? "Set " + student.first + " " + student.last + " as chazzan for " + period + "." : "Cleared chazzan for " + period + ".", "good");
+      renderAll();
+    }
+  }
+  sel.addEventListener("change", apply);
+  if (portionSel) portionSel.addEventListener("change", apply);
+}
+function wireSelfMark(root, session) {
+  const attInp = document.getElementById("self-att");
+  const partInp = document.getElementById("self-part");
+  const presentBtn = document.getElementById("self-mark-present");
+  if (!attInp && !partInp && !presentBtn) return;
+  const statusEl = document.getElementById("self-mark-status");
+  const periodMax = periodMaxFor(selectedPeriod);
+  async function save() {
+    const date = todayDate, period = selectedPeriod, staffId = session.record.id;
+    const a = clampScore(attInp ? attInp.value : "", periodMax);
+    const p = clampScore(partInp ? partInp.value : "", periodMax);
+    const newState = JSON.parse(JSON.stringify(state));
+    newState.staffAttendance = newState.staffAttendance || [];
+    let rec = newState.staffAttendance.find((r) => r.date === date && r.staffId === staffId);
+    if (a === null && p === null) {
+      if (rec) delete rec.scores[period];
+    } else {
+      if (!rec) { rec = { id: uid("sa"), date, staffId, scores: {} }; newState.staffAttendance.push(rec); }
+      rec.scores[period] = [a, p];
+    }
+    if (statusEl) statusEl.textContent = "Saving…";
+    const res = await saveState(newState);
+    if (statusEl) statusEl.textContent = (res.ok || res.local) ? "Saved." : "";
+  }
+  if (attInp) attInp.addEventListener("blur", save);
+  if (partInp) partInp.addEventListener("blur", save);
+  if (presentBtn) presentBtn.addEventListener("click", () => {
+    if (attInp) attInp.value = String(periodMax);
+    if (partInp) partInp.value = String(periodMax);
+    save();
   });
 }
 function wireExtraPeriod(root) {
@@ -3531,14 +3797,25 @@ function coinBadge(size) {
 // for whatever range you pick, the day-by-day calendar with click-to-drill-in, the by-class
 // breakdown, the report-card narrative, and the log), just headed as their own page instead of
 // someone else's. See renderStudentDetail's opts.self handling for what's different.
+// A student's first look at their own "My Balance" defaults to "This week" rather than sdScope's
+// staff-drill-down default of "all" -- same one-time-only pattern as the Leaderboard's
+// lbWeekDefaultAppliedForStudent (see there), kept as its own flag/branch here rather than
+// touching sdScope's own default, since that default is staff's (wireStudentLinks resets it to
+// "all" on every click into a student, so it's never actually reached from a self-view anyway --
+// this just makes the "default" explicit rather than relying on that coincidence).
+let sdWeekDefaultAppliedForSelf = false;
 function renderMyBalance(root, session) {
+  if (!sdWeekDefaultAppliedForSelf) {
+    sdScope = "week";
+    sdWeekDefaultAppliedForSelf = true;
+  }
   renderStudentDetail(root, session.record, { self: true });
 }
 function statTile(label, value, tone) {
   return '<div class="stat-tile"><div class="label">' + escapeHtml(label) + '</div><div class="value' + (tone ? " " + tone : "") + '">' + value + "</div></div>";
 }
 function txPill(type) {
-  const cls = (type === "Spent/Redeemed" || type === "Transfer Out") ? "pill-warn" : (type === "Manual Grant" ? "pill-gold" : "pill-good");
+  const cls = (type === "Spent/Redeemed" || type === "Transfer Out") ? "pill-warn" : ((type === "Manual Grant" || type === "Chazzan Bonus") ? "pill-gold" : "pill-good");
   return '<span class="pill ' + cls + '">' + escapeHtml(type) + "</span>";
 }
 
@@ -4148,6 +4425,13 @@ const LEADERBOARD_CATEGORIES = [
 ];
 let lbCategory = "attendance";
 let lbScope = "all"; // "all" | "week" | "hmonth" | "custom"
+// A student's own first look at the board defaults to "This week" instead of all-time -- more
+// relevant day to day than their whole history, and it's what most students actually want to see
+// first. Staff get the original "All time" default unchanged. This only ever fires ONCE per page
+// load (renderLeaderboard flips the flag right after applying it), so it's strictly a *default*:
+// a student who switches back to "All time" has it stick for the rest of the session, the same
+// as any other scope change -- it doesn't fight them on every re-render.
+let lbWeekDefaultAppliedForStudent = false;
 let lbAnchor = todayISO();
 let lbFrom = todayISO();
 let lbTo = todayISO();
@@ -4628,6 +4912,10 @@ function wireProgressChart(root, student) {
 }
 function renderLeaderboard(root, session) {
   const role = roleOf(session);
+  if (role === "student" && !lbWeekDefaultAppliedForStudent) {
+    lbScope = "week";
+    lbWeekDefaultAppliedForStudent = true;
+  }
   const roster = activeRoster();
   const bands = ageBandsPresent(roster);
   const range = lbRange();
@@ -5181,6 +5469,7 @@ function studentRow(s, archived) {
     actions = '<button class="btn btn-ghost btn-sm" data-view-as-student="' + s.id + '">View as</button>' +
       '<button class="btn btn-ghost btn-sm" data-edit-student="' + s.id + '">Edit</button>' +
       '<button class="btn btn-ghost btn-sm" data-toggle="' + s.id + '">' + (archived ? "Unarchive" : "Archive") + '</button>' +
+      '<button class="btn btn-ghost btn-sm" data-toggle-ta="' + s.id + '">' + (s.isTA ? "Remove Chazzan-granting permission" : "Allow to grant Chazzan coins") + '</button>' +
       '<button class="btn btn-ghost btn-sm" data-reset-student="' + s.id + '">Reset pw</button>' +
       '<button class="btn btn-ghost btn-sm" data-delete-student="' + s.id + '" style="color:var(--warn);">Delete</button>' +
       '<button class="btn btn-ghost btn-sm" data-student-menu-toggle="' + s.id + '">Close</button>';
@@ -5188,7 +5477,9 @@ function studentRow(s, archived) {
     actions = '<button class="btn btn-ghost btn-sm" data-student-menu-toggle="' + s.id + '">Actions ' + icon("chevron") + "</button>";
   }
   return "<tr><td>" + escapeHtml(s.last) + "</td><td>" + escapeHtml(s.first) + '</td><td class="num">' + escapeHtml(s.username || "—") + '</td><td class="num">' + passwordCellHtml(s.password, "student:" + s.id) + '</td><td class="num">' + (s.yearOfBirth ? escapeHtml(String(s.yearOfBirth)) : "—") + "</td><td>" +
-    (archived ? '<span class="pill pill-muted">Archived</span>' : '<span class="pill pill-good">Active</span>') + '</td><td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
+    (archived ? '<span class="pill pill-muted">Archived</span>' : '<span class="pill pill-good">Active</span>') +
+    (s.isTA ? ' <span class="pill pill-gold" title="Can record who led davening and grant their Chazzan bonus coins, from their own My Balance page">★ TA (Chazzan)</span>' : "") +
+    '</td><td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
     actions + "</td></tr>";
 }
 function renderAdminStudents(root) {
@@ -5281,6 +5572,14 @@ function renderAdminStudents(root) {
     s.active = !(s.active !== false);
     const res = await saveState(newState);
     if (res.ok || res.local) renderAll();
+  }));
+  root.querySelectorAll("[data-toggle-ta]").forEach((btn) => btn.addEventListener("click", async () => {
+    const id = btn.getAttribute("data-toggle-ta");
+    const newState = JSON.parse(JSON.stringify(state));
+    const s = newState.roster.find((x) => x.id === id);
+    s.isTA = !s.isTA;
+    const res = await saveState(newState);
+    if (res.ok || res.local) { toast(s.isTA ? s.first + " " + s.last + " can now grant Chazzan bonus coins from their own My Balance page." : s.first + " " + s.last + " can no longer grant Chazzan coins.", "good"); renderAll(); }
   }));
   root.querySelectorAll("[data-reset-student]").forEach((btn) => btn.addEventListener("click", async () => {
     const id = btn.getAttribute("data-reset-student");
@@ -5425,6 +5724,73 @@ let sdFrom = todayISO();
 let sdTo = todayISO();
 let sdClassFilter = null; // null = every class combined; otherwise one period name
 let sdCalAnchor = todayISO(); // which Hebrew month the attendance calendar is showing
+// "Grant Chazzan coins" (see renderChazzanGrantCard/wireChazzanGrantCard) -- its own date+tefilah
+// picker, entirely separate from sdAnchor/sdScope above (those control what date range THIS
+// student's own attendance/participation stats are shown for; cgDate/cgPeriod instead control
+// which OTHER student's chazzan pick this card is looking at/editing).
+let cgDate = todayISO();
+let cgPeriod = "Shacharis";
+/* A student with isTA permission (Admin > Students > "Allow to grant Chazzan coins") gets this
+   card at the top of their own My Balance -- the same chazzan-picking control staff have on
+   Today (see wireChazzanControl), just with its own date+tefilah picker instead of riding on
+   todayDate/selectedPeriod, since a student viewing My Balance has neither. Only offers the
+   tefillos actually scheduled on the picked date (Musaf only shows up on Shabbos, same as Today). */
+function renderChazzanGrantCard() {
+  const dayPeriods = periodsForDate(cgDate);
+  const offeredPeriods = CHAZZAN_PERIODS.filter((p) => dayPeriods.includes(p));
+  if (!offeredPeriods.includes(cgPeriod)) cgPeriod = offeredPeriods[0] || "Shacharis";
+  const current = cgPeriod ? chazzanFor(cgDate, cgPeriod) : null;
+  const portion = (current && current.portion) || "full";
+  const amount = offeredPeriods.length ? chazzanCoinsFor(cgPeriod, portion, cgDate) : 0;
+  const roster = activeRoster();
+  let html = '<div class="card card-pad" style="margin-bottom:16px;">' +
+    '<div class="section-title">Grant Chazzan coins</div>' +
+    '<p class="help-text" style="margin:2px 0 10px;">You\'ve been given permission to record who led davening and award their bonus coins.</p>' +
+    '<div class="field-row" style="align-items:flex-end;">' +
+    '<div class="field" style="min-width:150px;"><label for="cg-date">Date</label><input type="date" id="cg-date" value="' + escapeHtml(cgDate) + '"></div>';
+  if (!offeredPeriods.length) {
+    html += '</div><p class="help-text" style="margin:8px 0 0;">' + escapeHtml(dayNameFor(cgDate)) + " doesn't have Shacharis, Mincha, Maariv, or Musaf scheduled.</p>";
+  } else {
+    html += '<div class="field" style="min-width:150px;"><label for="cg-period">Tefilah</label><select id="cg-period">' +
+      offeredPeriods.map((p) => '<option value="' + p + '"' + (p === cgPeriod ? " selected" : "") + '>' + p + "</option>").join("") +
+      "</select></div>" +
+      '<div class="field" style="min-width:190px;"><label for="cg-student">Chazzan</label><select id="cg-student">' +
+      '<option value="">— none —</option>' +
+      roster.map((s) => '<option value="' + s.id + '"' + (current && current.studentId === s.id ? " selected" : "") + '>' + escapeHtml(s.first + " " + s.last) + "</option>").join("") +
+      "</select></div>" +
+      (cgPeriod === "Shacharis" ? '<div class="field" style="min-width:140px;"><label for="cg-portion">Led</label><select id="cg-portion">' +
+        '<option value="full"' + (portion === "full" ? " selected" : "") + '>Full Shacharis</option>' +
+        '<option value="half"' + (portion === "half" ? " selected" : "") + '>Half Shacharis</option>' +
+        "</select></div>" : "") +
+      (current && current.studentId ? '<span class="pill pill-gold">+' + num2(amount) + " coin" + (amount === 1 ? "" : "s") + "</span>" : "") +
+      "</div>";
+  }
+  html += "</div>";
+  return html;
+}
+function wireChazzanGrantCard(root, student) {
+  const dateInp = document.getElementById("cg-date");
+  if (!dateInp) return;
+  dateInp.addEventListener("change", () => { cgDate = dateInp.value || cgDate; renderAll(); });
+  const periodSel = document.getElementById("cg-period");
+  if (periodSel) periodSel.addEventListener("change", () => { cgPeriod = periodSel.value; renderAll(); });
+  const studentSel = document.getElementById("cg-student");
+  const portionSel = document.getElementById("cg-portion");
+  if (!studentSel) return;
+  async function apply() {
+    const date = cgDate, period = cgPeriod;
+    const studentId = studentSel.value;
+    const portion = portionSel ? portionSel.value : "full";
+    const res = await applyChazzanChoice(date, period, studentId, portion, student.first + " " + student.last);
+    if (res.ok || res.local) {
+      const picked = studentId ? studentById(studentId) : null;
+      toast(picked ? "Set " + picked.first + " " + picked.last + " as chazzan for " + period + "." : "Cleared chazzan for " + period + ".", "good");
+      renderAll();
+    }
+  }
+  studentSel.addEventListener("change", apply);
+  if (portionSel) portionSel.addEventListener("change", apply);
+}
 function wireStudentLinks(root) {
   root.querySelectorAll("[data-student-link]").forEach((el) => el.addEventListener("click", () => {
     viewingStudentId = el.getAttribute("data-student-link");
@@ -5711,6 +6077,8 @@ function renderStudentDetail(root, student, opts) {
       : "Username: " + escapeHtml(student.username || "—") + " · TAG coins are always a running total; pick a day, week, month, or custom range below to see attendance and participation for that window."
     ) + "</p></div></div>";
 
+  if (isSelf && student.isTA) html += renderChazzanGrantCard();
+
   html += '<div class="card card-pad coin-hero" style="margin-bottom:16px;">' + coinBadge("lg") +
     '<div><div class="coin-hero-label">TAG Coin Balance</div><div class="coin-hero-value">' + num2(allTimeSt.balance) + '</div>' +
     '<div class="coin-hero-sub">' + allTimeSt.coinsEarned + ' earned from classes · ' + (allTimeSt.ledgerNet >= 0 ? "+" : "") + num2(allTimeSt.ledgerNet) + ' from staff &amp; transfers</div></div></div>';
@@ -5838,6 +6206,7 @@ function renderStudentDetail(root, student, opts) {
 
   root.innerHTML = html;
   wireGlanceCircles(root); // lets a tap on the weekly sheet reveal the exact number
+  if (isSelf && student.isTA) wireChazzanGrantCard(root, student);
   const backBtn = document.getElementById("sd-back");
   if (backBtn) backBtn.addEventListener("click", () => { viewingStudentId = null; renderAll(); });
 
