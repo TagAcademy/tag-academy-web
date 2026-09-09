@@ -725,7 +725,16 @@ td.num, th.num { font-family: var(--font-mono); text-align: right; }
 .att-grid th:first-child, .att-grid td.student-cell { width: 150px; }
 .att-grid th:not(:first-child), .att-grid td:not(.student-cell) { width: 112px; }
 .att-grid td.num { font-size: 0.82rem; text-align: center; padding-left: 4px; padding-right: 4px; position: relative; }
-.att-glance-excused { color: var(--gold); font-weight: 600; font-size: 0.76rem; }
+/* A small round chip matching the glance circles' own size/shape (see .glance-circle below) --
+   just the letter "E" (with a "title" tooltip carrying the full word "Excused") rather than the
+   whole word, which was wide enough to blow out the tight glance columns, especially in the
+   dense week view (see .week-glance-table). */
+.att-glance-excused {
+  display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px;
+  border-radius: 50%; border: 1px solid var(--gold); color: var(--gold); background: var(--gold-soft);
+  font-weight: 800; font-size: 0.66rem; flex-shrink: 0;
+}
+.week-glance-table .att-glance-excused { width: 15px; height: 15px; font-size: 0.52rem; }
 /* "Today at a glance": each marked cell is three small columns -- an Attendance circle, a
    Participation circle, then who marked it plus a dot if there's a note -- instead of a
    "0.8/0.7" pair of numbers with a marked-by badge and note dot tacked on after. The circles
@@ -812,6 +821,14 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
 .att-grid td.score-cell { padding: 4px 6px; text-align: center; }
 .att-grid td.score-cell.na { background: repeating-linear-gradient(135deg, var(--surface-2), var(--surface-2) 4px, var(--paper) 4px, var(--paper) 8px); }
 .att-grid th.col-active, .att-grid td.col-active { background: var(--brand-soft); }
+/* "col-sel" -- the one day currently drilled into (sdScope==="day"), whether that click came
+   from a calendar day or a week-grid day header (see renderStudentWeekGridHtml) -- a stronger,
+   persistent highlight than col-active's "this is today" tint, and the two can combine (today
+   AND selected). "day-start" marks the first column of each day's group with a heavier left
+   border so adjacent days are easy to tell apart at a glance -- used by both the dense
+   multi-student week-glance table and the single-student week grid. */
+.att-grid th.col-sel, .att-grid td.col-sel { box-shadow: inset 0 0 0 2px var(--brand); }
+.att-grid .day-start { border-left: 2px solid var(--line-strong); }
 /* "This week at a glance" (see renderWeekGlanceHtml) can run to dozens of columns -- 7 days,
    each with its own several classes -- so it deliberately trades the Day view's roomy layout for
    a denser one instead of trying to squeeze everything to fit without scrolling: much narrower
@@ -3224,7 +3241,9 @@ function attendanceCellHtml(dateStr, period, studentId, opts) {
       (note ? '<span class="note-dot" title="' + escapeHtml(note) + '"></span>' : "") +
       "</span>"
     : "";
-  if (excused) return '<span class="att-glance-excused">Excused</span>' + meta;
+  // Just "E" here (not the full word) -- this cell has to fit inside the same tight column as
+  // the two glance circles, especially in the dense week view; the tooltip carries the full word.
+  if (excused) return '<span class="att-glance-excused" title="Excused">E</span>' + meta;
   if (has || meta) return '<span class="glance-row">' + glanceCircleHtml("att", has ? pair[0] : null, pMax) + glanceCircleHtml("part", has && hasPart ? pair[1] : null, pMax) + meta + "</span>";
   return null;
 }
@@ -3326,18 +3345,22 @@ function renderWeekGlanceHtml(weekFrom, roster, restrictedPeriod) {
   let colgroupHtml = '<colgroup><col style="width:120px;">';
   dayPeriods.forEach((ps) => { for (let k = 0; k < Math.max(1, ps.length); k++) colgroupHtml += '<col style="width:34px;">'; });
   colgroupHtml += "</colgroup>";
+  // "day-start" marks the first column of each day's group (row 2's per-period headers, and
+  // the matching body cell in every row below) with a heavier left border -- with the class
+  // names now vertical and every column the same skinny 34px, adjacent days blurred together
+  // without some stronger break than the thin 1px column rule shared by every cell.
   let html = '<div class="att-grid-scroll"><table class="att-grid week-glance-table">' + colgroupHtml + '<thead><tr><th style="position:sticky;left:0;background:var(--surface-2);z-index:2;" rowspan="2">Student</th>';
   days.forEach((d, i) => {
     const span = Math.max(1, dayPeriods[i].length);
-    html += '<th colspan="' + span + '" class="' + (d === todayGregISO ? "col-active" : "") + '"><span class="period-name">' + escapeHtml(DAY_NAMES[i].slice(0, 3)) +
+    html += '<th colspan="' + span + '" class="day-start ' + (d === todayGregISO ? "col-active" : "") + '"><span class="period-name">' + escapeHtml(DAY_NAMES[i].slice(0, 3)) +
       '</span><br><span class="sub">' + escapeHtml(fmtDateShort(d)) + "</span></th>";
   });
   html += "</tr><tr>";
   days.forEach((d, i) => {
     const ps = dayPeriods[i];
     const activeCls = d === todayGregISO ? "col-active" : "";
-    if (!ps.length) html += '<th class="' + activeCls + '"><span class="sub">No classes</span></th>';
-    else ps.forEach((p) => { html += '<th class="' + activeCls + '"><span class="period-name">' + escapeHtml(p) + "</span></th>"; });
+    if (!ps.length) html += '<th class="day-start ' + activeCls + '"><span class="sub">No classes</span></th>';
+    else ps.forEach((p, pi) => { html += '<th class="' + (pi === 0 ? "day-start " : "") + activeCls + '"><span class="period-name">' + escapeHtml(p) + "</span></th>"; });
   });
   html += "</tr></thead><tbody>";
   roster.forEach((s) => {
@@ -3345,8 +3368,8 @@ function renderWeekGlanceHtml(weekFrom, roster, restrictedPeriod) {
     days.forEach((d, i) => {
       const ps = dayPeriods[i];
       const activeCls = d === todayGregISO ? "col-active" : "";
-      if (!ps.length) html += '<td class="score-cell na ' + activeCls + '" title="No classes"></td>';
-      else ps.forEach((p) => { html += weeklySheetCellHtml(d, p, s.id, activeCls, { showMarkedBy: false }); });
+      if (!ps.length) html += '<td class="score-cell na day-start ' + activeCls + '" title="No classes"></td>';
+      else ps.forEach((p, pi) => { html += weeklySheetCellHtml(d, p, s.id, (pi === 0 ? "day-start " : "") + activeCls, { showMarkedBy: false }); });
     });
     html += "</tr>";
   });
@@ -3920,14 +3943,13 @@ function coinBadge(size) {
 // this just makes the "default" explicit rather than relying on that coincidence).
 let sdWeekDefaultAppliedForSelf = false;
 function renderMyBalance(root, session) {
+  // A student's own simplified view (renderStudentSelfBalance) always defaults to "This week"
+  // (sdSelfView's own declared default) -- this just makes sure sdScope (shared with the
+  // staff drill-down) actually starts on "week" too the very first time a student ever opens
+  // this page, same one-time-only pattern as the Leaderboard's lbWeekDefaultAppliedForStudent.
   if (!sdWeekDefaultAppliedForSelf) {
     sdScope = "week";
     sdWeekDefaultAppliedForSelf = true;
-    // "Day by day" (the calendar + the week grid sdScope="week" adds above it) is collapsed by
-    // default for everyone -- but since a student's very first look here already defaults to
-    // "This week" instead of "All time", that week's actual breakdown is worth showing right
-    // away instead of hiding it behind a tap.
-    openSections.add("sdCalendar");
   }
   renderStudentDetail(root, session.record, { self: true });
 }
@@ -5848,18 +5870,29 @@ let sdFrom = todayISO();
 let sdTo = todayISO();
 let sdClassFilter = null; // null = every class combined; otherwise one period name
 let sdCalAnchor = todayISO(); // which Hebrew month the attendance calendar is showing
+// A student's own simplified "My Balance" view (see renderStudentSelfBalance) only ever offers
+// two containers -- "This week" (a week-grid review) or "Month" (the calendar heatmap) -- rather
+// than staff's full all/day/week/hmonth/custom picker. This tracks which of those two is chosen,
+// independent of sdScope, which can still become "day" underneath it (tapping a specific day
+// drills the stat tiles/"Day in Review" below into just that day without changing which
+// container is on screen -- see the sd-self-view/[data-sd-week-day]/.sd-cal-day handlers).
+let sdSelfView = "week"; // "week" | "month"
 // "Grant Chazzan coins" (see renderChazzanGrantCard/wireChazzanGrantCard) -- its own date+tefilah
 // picker, entirely separate from sdAnchor/sdScope above (those control what date range THIS
 // student's own attendance/participation stats are shown for; cgDate/cgPeriod instead control
 // which OTHER student's chazzan pick this card is looking at/editing).
 let cgDate = todayISO();
 let cgPeriod = "Shacharis";
+// Which past Chazzan Bonus ledger entry (by id) is mid-"delete permanently?" confirmation in the
+// "Recent grants" list below (see renderChazzanTab) -- same two-step confirm pattern as deleting
+// a student in Admin (confirmDeleteStudentId).
+let confirmDeleteChazzanId = null;
 /* A student with isTA permission (Admin > Students > "Allow to grant Chazzan coins") gets this
    card on their own dedicated "Chazzan" tab (see ROUTES' visible check + renderChazzanTab below)
    -- the same chazzan-picking control staff have on Today (see wireChazzanControl), just with
    its own date+tefilah picker instead of riding on todayDate/selectedPeriod, since a student's
-   own nav has neither. Only offers the tefillos actually scheduled on the picked date (Musaf
-   only shows up on Shabbos, same as Today). */
+   own nav has neither. Unlike Today's live control, this always offers all four tefillos
+   (see renderChazzanGrantCard) since it's a record-keeping tool that can reach any date. */
 function renderChazzanGrantCard() {
   // Unlike Today's staff control (which only offers whatever tefilah is actually on TODAY's
   // schedule), this is a deliberate record-keeping tool that can reach back to any date -- so
@@ -5870,9 +5903,9 @@ function renderChazzanGrantCard() {
   const portion = (current && current.portion) || "full";
   const amount = chazzanCoinsFor(cgPeriod, portion, cgDate);
   const roster = activeRoster();
-  let html = '<div class="card card-pad" style="margin-bottom:16px;">' +
+  let html = '<div class="card card-pad" style="margin-bottom:16px;" id="chazzan-grant-card">' +
     '<div class="section-title">Grant Chazzan coins</div>' +
-    '<p class="help-text" style="margin:2px 0 10px;">You\'ve been given permission to record who led davening and award their bonus coins.</p>' +
+    '<p class="help-text" style="margin:2px 0 10px;">You\'ve been given permission to record who led davening and award their bonus coins. Pick any past date to fix a mistake — choosing "— none —" clears it.</p>' +
     '<div class="field-row" style="align-items:flex-end;">' +
     '<div class="field" style="min-width:150px;"><label for="cg-date">Date</label><input type="date" id="cg-date" value="' + escapeHtml(cgDate) + '"></div>' +
     '<div class="field" style="min-width:150px;"><label for="cg-period">Tefilah</label><select id="cg-period">' +
@@ -5917,6 +5950,14 @@ function wireChazzanGrantCard(root, student) {
    (see the ROUTES entry's `visible` check). Its own dedicated page rather than a card bolted
    onto My Balance, so it reads as a real responsibility of theirs, not a side effect of looking
    up their own balance. */
+// Chazzan Bonus ledger entries carry a deterministic id ("chazzan_<date>_<period>", see
+// chazzanLedgerId) but no separate period field of their own -- this pulls the period back out
+// of that id so "Recent grants" can offer an Edit/Delete action without re-deriving it from the
+// note text (which also carries a "(half)" suffix that isn't part of the period name).
+function periodFromChazzanLedgerId(id) {
+  const parts = String(id || "").split("_");
+  return parts.length >= 3 ? parts[2] : null;
+}
 function renderChazzanTab(root, session) {
   const student = session.record;
   let html = '<div class="page-head"><div><span class="eyebrow">Teacher\'s helper</span><h1>Chazzan</h1>' +
@@ -5931,7 +5972,7 @@ function renderChazzanTab(root, session) {
   if (!recent.length) {
     recentBody = '<p class="help-text">No chazzan coins granted yet.</p>';
   } else {
-    recentBody = '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Tefilah</th><th>Chazzan</th><th class="num">Coins</th></tr></thead><tbody>';
+    recentBody = '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Tefilah</th><th>Chazzan</th><th class="num">Coins</th><th></th></tr></thead><tbody>';
     recent.forEach((tx) => {
       const picked = studentById(tx.studentId);
       // note is "Chazzan — <period>" or "Chazzan — <period> (half)" (see applyChazzanChoice) --
@@ -5939,15 +5980,60 @@ function renderChazzanTab(root, session) {
       const detail = (tx.note || "").replace(/^Chazzan — /, "");
       // Plain text, not the usual clickable studentLink -- that link drills into a staff-only
       // student-detail view this student session can't open anyway.
+      let actionsHtml;
+      if (confirmDeleteChazzanId === tx.id) {
+        actionsHtml = '<span style="color:var(--warn);font-weight:600;white-space:nowrap;">Delete this grant?</span> ' +
+          '<button class="btn btn-danger btn-sm" data-chazzan-confirm-delete="' + tx.id + '">Yes, delete</button>' +
+          '<button class="btn btn-ghost btn-sm" data-chazzan-cancel-delete="' + tx.id + '">Cancel</button>';
+      } else {
+        actionsHtml = '<button class="btn btn-ghost btn-sm" data-chazzan-edit="' + tx.id + '">Edit</button>' +
+          '<button class="btn btn-ghost btn-sm" data-chazzan-delete="' + tx.id + '" style="color:var(--warn);">Delete</button>';
+      }
       recentBody += "<tr><td>" + fmtDateShort(tx.date) + "</td><td>" + escapeHtml(detail) + "</td><td>" +
-        (picked ? escapeHtml(picked.first + " " + picked.last) : "—") + '</td><td class="num">' + num2(tx.amount) + "</td></tr>";
+        (picked ? escapeHtml(picked.first + " " + picked.last) : "—") + '</td><td class="num">' + num2(tx.amount) +
+        '</td><td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' + actionsHtml + "</td></tr>";
     });
     recentBody += "</tbody></table></div>";
   }
-  html += '<div class="card card-pad"><div class="section-title">Recent grants</div>' + recentBody + "</div>";
+  html += '<div class="card card-pad"><div class="section-title">Recent grants</div>' +
+    '<p class="help-text" style="margin:2px 0 10px;">Edit jumps the picker above to that date/tefilah so you can change or clear it; Delete removes it directly.</p>' +
+    recentBody + "</div>";
 
   root.innerHTML = html;
   wireChazzanGrantCard(root, student);
+
+  root.querySelectorAll("[data-chazzan-edit]").forEach((btn) => btn.addEventListener("click", () => {
+    const tx = recent.find((t) => t.id === btn.getAttribute("data-chazzan-edit"));
+    if (!tx) return;
+    const period = periodFromChazzanLedgerId(tx.id);
+    if (!period) return;
+    cgDate = tx.date;
+    cgPeriod = period;
+    confirmDeleteChazzanId = null;
+    renderAll();
+    const card = document.getElementById("chazzan-grant-card");
+    if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+  }));
+  root.querySelectorAll("[data-chazzan-delete]").forEach((btn) => btn.addEventListener("click", () => {
+    confirmDeleteChazzanId = btn.getAttribute("data-chazzan-delete");
+    renderAll();
+  }));
+  root.querySelectorAll("[data-chazzan-cancel-delete]").forEach((btn) => btn.addEventListener("click", () => {
+    confirmDeleteChazzanId = null;
+    renderAll();
+  }));
+  root.querySelectorAll("[data-chazzan-confirm-delete]").forEach((btn) => btn.addEventListener("click", async () => {
+    const id = btn.getAttribute("data-chazzan-confirm-delete");
+    const tx = recent.find((t) => t.id === id);
+    const period = tx && periodFromChazzanLedgerId(tx.id);
+    if (!tx || !period) { confirmDeleteChazzanId = null; renderAll(); return; }
+    const res = await applyChazzanChoice(tx.date, period, null, "full", student.first + " " + student.last);
+    confirmDeleteChazzanId = null;
+    if (res.ok || res.local) {
+      toast("Deleted the chazzan grant for " + period + " on " + fmtDateShort(tx.date) + ".", "good");
+    }
+    renderAll();
+  }));
 }
 function wireStudentLinks(root) {
   root.querySelectorAll("[data-student-link]").forEach((el) => el.addEventListener("click", () => {
@@ -6132,27 +6218,39 @@ function notesForStudent(studentId, from, to) {
    or just one class when sdClassFilter is set). Clicking a day drills the whole page's
    time-range picker into that single day; the class dropdown here and the "By class" table's
    clickable rows both write the same sdClassFilter, so either one narrows both the calendar
-   and the stat tiles above it to a single class. */
-function renderStudentCalendarHtml(student) {
-  const monthRange = hebrewMonthRangeFor(sdCalAnchor);
-  const hdayOptions = hebrewDayOptionsFor(sdCalAnchor);
+   and the stat tiles above it to a single class.
+   opts (used only by the student's own simplified self-view, renderStudentSelfBalance): `anchor`
+   overrides which month is shown (defaults to sdCalAnchor, the staff drill-down's own
+   independent month cursor); `hideClassFilter` drops the class dropdown, since the self-view is
+   deliberately all-classes-only; `hideNav` drops this calendar's own prev/today/next row, since
+   the self-view already has one shared row driving both its week and month containers. */
+function renderStudentCalendarHtml(student, opts) {
+  opts = opts || {};
+  const anchor = opts.anchor || sdCalAnchor;
+  const monthRange = hebrewMonthRangeFor(anchor);
+  const hdayOptions = hebrewDayOptionsFor(anchor);
   if (!monthRange || !hdayOptions.length) return ""; // Hebrew calendar library unavailable
   const firstDow = jsDateFor(hdayOptions[0].date).getDay();
   const todayGregISO = todayISO();
   const periods = state.settings.periods;
 
-  let html = '<div style="display:flex;justify-content:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:12px;">' +
-    '<div class="field" style="min-width:180px;margin-bottom:0;"><label for="sd-cal-class">Class</label><select id="sd-cal-class">' +
-    '<option value=""' + (!sdClassFilter ? " selected" : "") + '>All classes</option>' +
-    periods.map((p) => '<option value="' + escapeHtml(p) + '"' + (sdClassFilter === p ? " selected" : "") + '>' + escapeHtml(p) + "</option>").join("") +
-    "</select></div></div>";
+  let html = "";
+  if (!opts.hideClassFilter) {
+    html += '<div style="display:flex;justify-content:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:12px;">' +
+      '<div class="field" style="min-width:180px;margin-bottom:0;"><label for="sd-cal-class">Class</label><select id="sd-cal-class">' +
+      '<option value=""' + (!sdClassFilter ? " selected" : "") + '>All classes</option>' +
+      periods.map((p) => '<option value="' + escapeHtml(p) + '"' + (sdClassFilter === p ? " selected" : "") + '>' + escapeHtml(p) + "</option>").join("") +
+      "</select></div></div>";
+  }
 
-  html += '<div class="sd-cal-nav">' +
-    '<button class="btn btn-ghost btn-sm" id="sd-cal-prev" type="button" title="Previous Hebrew month">&larr;</button>' +
-    '<span class="sd-cal-title">' + escapeHtml(monthRange.monthName + " " + monthRange.year) + "</span>" +
-    '<button class="btn btn-ghost btn-sm" id="sd-cal-next" type="button" title="Next Hebrew month">&rarr;</button>' +
-    '<button class="btn btn-ghost btn-sm" id="sd-cal-today" type="button">This month</button>' +
-    "</div>";
+  if (!opts.hideNav) {
+    html += '<div class="sd-cal-nav">' +
+      '<button class="btn btn-ghost btn-sm" id="sd-cal-prev" type="button" title="Previous Hebrew month">&larr;</button>' +
+      '<span class="sd-cal-title">' + escapeHtml(monthRange.monthName + " " + monthRange.year) + "</span>" +
+      '<button class="btn btn-ghost btn-sm" id="sd-cal-next" type="button" title="Next Hebrew month">&rarr;</button>' +
+      '<button class="btn btn-ghost btn-sm" id="sd-cal-today" type="button">This month</button>' +
+      "</div>";
+  }
 
   html += '<div class="sd-cal-grid">' +
     DAY_NAMES.map((n) => '<div class="sd-cal-dow">' + escapeHtml(n.slice(0, 2)) + "</div>").join("") +
@@ -6185,37 +6283,174 @@ function renderStudentCalendarHtml(student) {
    scheduled that day -- the same read a printed weekly attendance sheet gives. Only shown
    while sdScope is "week" (see renderStudentDetail), since it needs one specific week to lay
    out as columns; reuses the same weeklySheetCellHtml/att-grid machinery as the teacher-facing
-   roster-wide version of this in Reports (renderRosterWeekGridHtml). */
+   roster-wide version of this in Reports (renderRosterWeekGridHtml). Each day's header is
+   itself a button (data-sd-week-day) -- clicking it drills into that one day the same way
+   tapping a calendar day does (see the .sd-cal-day and [data-sd-week-day] handlers below). */
 function renderStudentWeekGridHtml(student, weekFrom) {
   const days = Array.from({ length: 7 }, (_, i) => shiftDate(weekFrom, i));
   const todayGregISO = todayISO();
   const weekPeriods = state.settings.periods.filter((p) => days.some((d) => periodsForDate(d).includes(p)));
   let html = '<div class="section-title"><span>Week at a glance</span></div>' +
-    '<p style="margin:2px 0 12px;font-size:0.82rem;color:var(--muted);">Every class this week, day by day — a hatched cell means that class wasn’t scheduled that day.</p>';
+    '<p style="margin:2px 0 12px;font-size:0.82rem;color:var(--muted);">Every class this week, day by day — a hatched cell means that class wasn’t scheduled that day. Tap a day to see just that day below.</p>';
   if (!weekPeriods.length) {
     html += '<p class="help-text">No classes are scheduled this week.</p>';
     return html;
   }
   html += '<div class="att-grid-scroll"><table class="att-grid"><thead><tr><th style="position:sticky;left:0;background:var(--surface-2);z-index:2;">Class</th>';
   days.forEach((d, i) => {
-    html += '<th class="' + (d === todayGregISO ? "col-active" : "") + '"><span class="period-name">' + escapeHtml(DAY_NAMES[i].slice(0, 3)) +
-      '</span><br><span class="sub">' + escapeHtml(fmtDateShort(d)) + "</span></th>";
+    const isSel = sdScope === "day" && d === sdAnchor;
+    html += '<th class="day-start' + (d === todayGregISO ? " col-active" : "") + (isSel ? " col-sel" : "") + '">' +
+      '<button type="button" class="summary-period-btn" data-sd-week-day="' + d + '"><span class="period-name">' + escapeHtml(DAY_NAMES[i].slice(0, 3)) +
+      '</span><br><span class="sub">' + escapeHtml(fmtDateShort(d)) + "</span></button></th>";
   });
   html += "</tr></thead><tbody>";
   weekPeriods.forEach((p) => {
     html += '<tr><td class="student-cell">' + escapeHtml(p) + "</td>";
-    days.forEach((d) => { html += weeklySheetCellHtml(d, p, student.id, d === todayGregISO ? "col-active" : ""); });
+    days.forEach((d) => {
+      const isSel = sdScope === "day" && d === sdAnchor;
+      html += weeklySheetCellHtml(d, p, student.id, "day-start" + (d === todayGregISO ? " col-active" : "") + (isSel ? " col-sel" : ""));
+    });
     html += "</tr>";
   });
   html += "</tbody></table></div>";
   return html;
 }
 
+/* The student's own simplified "My Balance" view -- a deliberately smaller surface than the
+   staff/admin drill-down below (renderStudentDetail's non-self path), which keeps its full
+   all/day/week/hmonth/custom picker plus per-class filtering for a teacher who needs that power.
+   A student instead gets exactly two containers -- "This week" (a week-grid review, default) or
+   "Month" (the Hebrew-month calendar heatmap) -- always summarizing every class combined, never
+   filtered to one. Tapping any day in either container drills the stat tiles and "Day in
+   Review" below into just that one day and scrolls down to it; there's no collapsible chrome to
+   tap through first -- everything here is always on screen. */
+function renderStudentSelfBalance(root, student) {
+  const allTimeSt = studentStats(student.id);
+  const range = sdRange(); // sdScope is "week"/"hmonth" for the whole container, or "day" once a specific day's been tapped
+  const rangeSt = computeStats(student.id, { from: range.from, to: range.to }); // always every class combined -- self view has no class filter
+
+  let html = '<div class="page-head"><div>' +
+    '<span class="eyebrow">Welcome, ' + escapeHtml(student.first) + '</span>' +
+    "<h1>My Balance</h1>" +
+    "<p>Your attendance, participation, and current TAG coin balance. Tap a day below to see just that day.</p></div></div>";
+
+  html += '<div class="card card-pad coin-hero" style="margin-bottom:16px;">' + coinBadge("lg") +
+    '<div><div class="coin-hero-label">TAG Coin Balance</div><div class="coin-hero-value">' + num2(allTimeSt.balance) + '</div>' +
+    '<div class="coin-hero-sub">' + allTimeSt.coinsEarned + ' earned from classes · ' + (allTimeSt.ledgerNet >= 0 ? "+" : "") + num2(allTimeSt.ledgerNet) + ' from staff &amp; transfers</div></div></div>';
+
+  const toggleHtml = '<div class="bubble-group" style="flex-shrink:0;">' +
+    [["week", "This week"], ["month", "Month"]].map(([v, label]) =>
+      '<button type="button" class="bubble-btn' + (sdSelfView === v ? " active" : "") + '" data-sd-self-view="' + v + '">' + label + "</button>"
+    ).join("") + "</div>";
+  html += '<div class="card card-pad" style="margin-bottom:16px;">' +
+    '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">' +
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
+    '<button class="btn btn-ghost btn-sm" id="sds-prev" type="button">&larr;</button>' +
+    '<button class="btn btn-ghost btn-sm" id="sds-today" type="button">' + (sdSelfView === "week" ? "This week" : "This month") + "</button>" +
+    '<button class="btn btn-ghost btn-sm" id="sds-next" type="button">&rarr;</button>' +
+    "</div>" + toggleHtml + "</div>" +
+    '<div style="margin-top:10px;font-family:var(--font-display);font-weight:800;font-size:1.05rem;">' + escapeHtml(range.title) + "</div>" +
+    (range.sub ? '<div style="font-size:0.82rem;color:var(--muted);margin-top:2px;">' + escapeHtml(range.sub) + "</div>" : "") +
+    "</div>";
+
+  html += '<div class="grid-stats">' +
+    statTile("Attendance", pct(rangeSt.attPct), pctTone(rangeSt.attPct)) +
+    statTile("Participation", pct(rangeSt.partPct), pctTone(rangeSt.partPct)) + "</div>";
+
+  html += '<div class="card card-pad" style="margin-top:16px;">' +
+    (sdSelfView === "month"
+      ? renderStudentCalendarHtml(student, { anchor: sdAnchor, hideClassFilter: true, hideNav: true })
+      : renderStudentWeekGridHtml(student, weekRangeFor(sdAnchor).from)) +
+    "</div>";
+
+  // "Day in Review" -- always present (no collapsible toggle to tap through), just a prompt
+  // until a specific day gets tapped in the week grid or calendar above.
+  const periods = state.settings.periods;
+  let dayReviewBody;
+  if (sdScope === "day") {
+    const classRows = periods.map((p) => ({ p: p, cs: computeStats(student.id, { period: p, from: range.from, to: range.to }) })).filter((r) => r.cs.attCount > 0 || r.cs.partCount > 0);
+    if (classRows.length === 0) {
+      dayReviewBody = '<p class="help-text">Nothing entered for this day yet.</p>';
+    } else {
+      dayReviewBody = '<div class="table-wrap"><table><thead><tr><th>Class</th><th class="num">Attendance</th><th class="num">Participation</th></tr></thead><tbody>';
+      classRows.forEach((r) => {
+        dayReviewBody += "<tr><td>" + escapeHtml(r.p) + '</td><td class="num">' + pctPill(r.cs.attPct) + '</td><td class="num">' + pctPill(r.cs.partPct) + "</td></tr>";
+      });
+      dayReviewBody += "</tbody></table></div>";
+    }
+    dayReviewBody += '<p style="margin-top:10px;"><button type="button" class="link-btn" id="sds-clear-day">&larr; Back to ' + (sdSelfView === "week" ? "the whole week" : "the whole month") + "</button></p>";
+  } else {
+    dayReviewBody = '<p class="help-text">Tap a day above to see its attendance and participation, class by class.</p>';
+  }
+  html += '<div class="card card-pad" id="collapse-sdByClass" style="margin-top:16px;">' +
+    '<div class="section-title">Day in Review' + (sdScope === "day" ? " — " + escapeHtml(range.title) : "") + "</div>" + dayReviewBody + "</div>";
+
+  const trail = ledgerBalanceTrail(student.id).slice(0, 12);
+  let coinActivityBody;
+  if (trail.length === 0) {
+    coinActivityBody = '<p class="help-text">No coin activity yet.</p>';
+  } else {
+    coinActivityBody = '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Type</th><th class="num">Amount</th><th class="num">Balance after</th><th>Note</th></tr></thead><tbody>';
+    trail.forEach((tx) => {
+      const out = tx.type === "Spent/Redeemed" || tx.type === "Transfer Out";
+      coinActivityBody += "<tr><td>" + fmtDateShort(tx.date) + "</td><td>" + txPill(tx.type) + '</td><td class="num" style="font-weight:700;color:' + (out ? "var(--warn)" : "var(--gold)") + ';">' + (out ? "−" : "+") + num2(tx.amount) + '</td><td class="num">' + num2(tx.balanceAfter) + "</td><td>" + escapeHtml(tx.note || "") + "</td></tr>";
+    });
+    coinActivityBody += "</tbody></table></div>";
+  }
+  html += collapsibleSectionHtml("sdCoinActivity", "Recent coin activity", null, coinActivityBody);
+
+  root.innerHTML = html;
+  wireGlanceCircles(root); // lets a tap on the week grid reveal the exact number
+
+  function goToDay(dateStr) {
+    sdScope = "day";
+    sdAnchor = dateStr;
+    renderAll();
+    const dayReview = document.getElementById("collapse-sdByClass");
+    if (dayReview) dayReview.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  root.querySelectorAll("[data-sd-self-view]").forEach((btn) => btn.addEventListener("click", () => {
+    sdSelfView = btn.getAttribute("data-sd-self-view");
+    sdScope = sdSelfView === "week" ? "week" : "hmonth";
+    renderAll();
+  }));
+  const prevBtn = document.getElementById("sds-prev");
+  if (prevBtn) prevBtn.addEventListener("click", () => {
+    sdAnchor = sdSelfView === "week" ? shiftDate(sdAnchor, -7) : shiftHebrewMonth(sdAnchor, -1);
+    sdScope = sdSelfView === "week" ? "week" : "hmonth";
+    renderAll();
+  });
+  const nextBtn = document.getElementById("sds-next");
+  if (nextBtn) nextBtn.addEventListener("click", () => {
+    sdAnchor = sdSelfView === "week" ? shiftDate(sdAnchor, 7) : shiftHebrewMonth(sdAnchor, 1);
+    sdScope = sdSelfView === "week" ? "week" : "hmonth";
+    renderAll();
+  });
+  const todayBtn = document.getElementById("sds-today");
+  if (todayBtn) todayBtn.addEventListener("click", () => {
+    sdAnchor = todayISO();
+    sdScope = sdSelfView === "week" ? "week" : "hmonth";
+    renderAll();
+  });
+  const clearDayBtn = document.getElementById("sds-clear-day");
+  if (clearDayBtn) clearDayBtn.addEventListener("click", () => {
+    sdScope = sdSelfView === "week" ? "week" : "hmonth";
+    renderAll();
+  });
+  root.querySelectorAll("[data-sd-week-day]").forEach((btn) => btn.addEventListener("click", () => goToDay(btn.getAttribute("data-sd-week-day"))));
+  root.querySelectorAll(".sd-cal-day").forEach((btn) => btn.addEventListener("click", () => goToDay(btn.getAttribute("data-sd-cal-date"))));
+}
+
 function renderStudentDetail(root, student, opts) {
   // opts.self: a student viewing their own record (from the "My Balance" tab) rather than a
-  // staff member browsing the roster. Same page, same calendar/log/report-card machinery --
-  // just no "Back" button (there's no roster to go back to) and a friendlier header.
+  // staff member browsing the roster. A student's own view is now a deliberately simpler,
+  // separate render path (see renderStudentSelfBalance above) -- everything below this point is
+  // the staff/admin drill-down, with its full all/day/week/hmonth/custom picker, per-class
+  // filtering, report-card narrative, and raw log, none of which the simplified self-view has.
   const isSelf = !!(opts && opts.self);
+  if (isSelf) { renderStudentSelfBalance(root, student); return; }
+  // Everything from here down is the staff/admin drill-down only (isSelf is always false past
+  // the guard above).
   const allTimeSt = studentStats(student.id);
   const range = sdRange();
   const rangeSt = computeStats(student.id, { from: range.from, to: range.to });
@@ -6226,14 +6461,11 @@ function renderStudentDetail(root, student, opts) {
   const periods = state.settings.periods;
 
   let html = '<div class="page-head"><div>' +
-    (isSelf ? "" : '<button type="button" class="btn btn-ghost btn-sm" id="sd-back" style="margin-bottom:10px;">&larr; Back</button>') +
-    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="eyebrow">' + (isSelf ? "Welcome, " + escapeHtml(student.first) : "Student") + '</span>' +
-    (!isSelf && student.active === false ? '<span class="pill pill-muted">Inactive</span>' : "") + "</div>" +
-    "<h1>" + (isSelf ? "My Balance" : escapeHtml(student.first) + " " + escapeHtml(student.last)) + "</h1>" +
-    "<p>" + (isSelf
-      ? "Your attendance, participation, and current TAG coin balance. Pick a day, week, month, or custom range below, or tap a day on the calendar to jump straight to it."
-      : "Username: " + escapeHtml(student.username || "—") + " · TAG coins are always a running total; pick a day, week, month, or custom range below to see attendance and participation for that window."
-    ) + "</p></div></div>";
+    '<button type="button" class="btn btn-ghost btn-sm" id="sd-back" style="margin-bottom:10px;">&larr; Back</button>' +
+    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="eyebrow">Student</span>' +
+    (student.active === false ? '<span class="pill pill-muted">Inactive</span>' : "") + "</div>" +
+    "<h1>" + escapeHtml(student.first) + " " + escapeHtml(student.last) + "</h1>" +
+    "<p>Username: " + escapeHtml(student.username || "—") + " · TAG coins are always a running total; pick a day, week, month, or custom range below to see attendance and participation for that window.</p></div></div>";
 
   html += '<div class="card card-pad coin-hero" style="margin-bottom:16px;">' + coinBadge("lg") +
     '<div><div class="coin-hero-label">TAG Coin Balance</div><div class="coin-hero-value">' + num2(allTimeSt.balance) + '</div>' +
@@ -6273,9 +6505,9 @@ function renderStudentDetail(root, student, opts) {
   if (calendarBody) html += collapsibleSectionHtml("sdCalendar", "Day by day", "Attendance calendar — tap a day to jump straight to it", calendarBody);
 
   // The narrative report card is a staff-facing tool (comments/notes summarized into prose for
-  // a parent or file) -- not something a student needs staring back at them on their own "My
-  // Balance" page, so it's staff/admin-only (isSelf) here.
-  if (!isSelf) {
+  // a parent or file) -- not something a student needs staring back at them, which is why it's
+  // only ever reached from this staff/admin drill-down path, never renderStudentSelfBalance.
+  {
     const reportNotes = notesForStudent(student.id, range.from, range.to);
     const reportClusters = clusterNotes(reportNotes);
     const narrative = generateReportNarrative(student.first, reportClusters, rangeSt, rangeSt.attCount);
