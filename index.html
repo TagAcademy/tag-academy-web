@@ -1397,12 +1397,16 @@ const TX_TYPES = ["Manual Grant", "Spent/Redeemed", "Transfer Out", "Transfer In
    Any staff member can also set it from Today while marking that tefilah (see
    wireChazzanControl) -- isTA never restricts who can be PICKED as chazzan (any active student
    is a valid pick in both places), only who among the students can do the picking. Either path
-   calls the same applyChazzanChoice, which auto-grants the fixed coin amount below as a real
-   ledger entry (type "Chazzan Bonus") -- only one chazzan per tefilah per date, enforced
-   structurally by storing a single {studentId, portion} object per date+period rather than a
-   list. Shacharis is the only one with a Full/Half distinction (see chazzanCoinsFor for the
-   Shabbos half-Shacharis special case). */
-const CHAZZAN_PERIODS = ["Shacharis", "Mincha", "Maariv", "Musaf"];
+   calls the same applyChazzanChoice, which auto-grants the fixed coin amount below as real
+   ledger entries (type "Chazzan Bonus") -- up to TWO chazzanim can split one tefilah (never
+   more), enforced by storing a {studentIds, portion} object (studentIds has at most 2 entries)
+   per date+period rather than a single id. Shacharis is the only one with a Full/Half
+   distinction (see chazzanCoinsFor for the Shabbos half-Shacharis special case, and the Friday-
+   night-Maariv special case). CHAZZAN_PERIODS is listed in chronological order for the day;
+   which of the four are actually offered for a given date is date-aware (see
+   chazzanPeriodsForDate/hebrewDayInfoFor), not a fixed list -- Musaf only shows up on a day that
+   actually has one. */
+const CHAZZAN_PERIODS = ["Shacharis", "Musaf", "Mincha", "Maariv"];
 const CHAZZAN_COIN_TABLE = { Shacharis: 1, Mincha: 0.5, Maariv: 0.25, Musaf: 1 };
 const SESSION_KEY = "tagacademy_session_v2";
 const LAST_DATE_KEY = "tagacademy_last_date_v1";
@@ -1520,6 +1524,44 @@ function parshaHebrewFor(dateStr) {
     if (r.chag) return "";
     return "פרשת " + r.parsha.map((p) => PARSHA_HE[p] || p).join("־");
   } catch (e) { return ""; }
+}
+/* Which days add a Mussaf -- used only to decide which tefillos chazzanPeriodsForDate offers
+   for Chazzan-granting (see there). Diaspora Yom Tov calendar, matching parshaFor/getSedra's own
+   Diaspora reading schedule above. The vendored HebcalMini bundle is Hebrew-date math only
+   (HDate) -- no built-in holiday/event list -- so this hand-computes Mussaf days from their
+   fixed Hebrew month/day: Yom Tov and Rosh Chodesh dates are the same every Hebrew year, unlike
+   their shifting Gregorian date, so a plain month/day table is exact and doesn't need a real
+   holiday-events library. Deliberately scoped to just what changes which tefillos are offered:
+   Shabbos, Rosh Chodesh, Chol Hamoed, and the Yamim Tovim all add a Mussaf; fast days, Purim,
+   and Chanukah don't add a new tefilah, so they're not modeled here at all. */
+function hebrewDayInfoFor(dateStr) {
+  const isShabbos = dayNameFor(dateStr) === "Shabbos";
+  if (!HebcalMini || !dateStr) return { isMusafDay: isShabbos, label: isShabbos ? "Shabbos" : "" };
+  try {
+    const hd = new HebcalMini.HDate(jsDateFor(dateStr));
+    const M = HebcalMini.months;
+    const m = hd.getMonth(), d = hd.getDate();
+    let name = "", isYomTov = false, isCholHamoed = false;
+    if (m === M.TISHREI && d <= 2) { isYomTov = true; name = "Rosh Hashana"; }
+    else if (m === M.TISHREI && d === 10) { isYomTov = true; name = "Yom Kippur"; }
+    else if (m === M.TISHREI && (d === 15 || d === 16)) { isYomTov = true; name = "Sukkos"; }
+    else if (m === M.TISHREI && d >= 17 && d <= 21) { isCholHamoed = true; name = "Chol Hamoed Sukkos"; }
+    else if (m === M.TISHREI && d === 22) { isYomTov = true; name = "Shmini Atzeres"; }
+    else if (m === M.TISHREI && d === 23) { isYomTov = true; name = "Simchas Torah"; }
+    else if (m === M.NISAN && (d === 15 || d === 16)) { isYomTov = true; name = "Pesach"; }
+    else if (m === M.NISAN && d >= 17 && d <= 20) { isCholHamoed = true; name = "Chol Hamoed Pesach"; }
+    else if (m === M.NISAN && (d === 21 || d === 22)) { isYomTov = true; name = "Pesach"; }
+    else if (m === M.SIVAN && (d === 6 || d === 7)) { isYomTov = true; name = "Shavuos"; }
+    // Rosh Chodesh is either day 30 of a 30-day month (day 1 of a 2-day RC) or day 1 of the
+    // following month (its 2nd day, or its only day when the preceding month has 29 days) --
+    // Tishrei 1 is excluded since that's Rosh Hashana, not a plain Rosh Chodesh.
+    const isRoshChodesh = !name && (d === 30 || (d === 1 && m !== M.TISHREI));
+    if (isRoshChodesh) name = "Rosh Chodesh";
+    const label = isShabbos ? (name ? "Shabbos — " + name : "Shabbos") : name;
+    return { isMusafDay: isShabbos || isYomTov || isCholHamoed || isRoshChodesh, label };
+  } catch (e) {
+    return { isMusafDay: isShabbos, label: isShabbos ? "Shabbos" : "" };
+  }
 }
 /* Drop the gershayim/geresh punctuation (״ ׳) that renderGematriya() adds -- fine to lose
    for the compact mobile-width spots below (a picker trigger button, calendar-grid cells);
@@ -1959,7 +2001,7 @@ function seedState() {
       ],
       extraPeriods: {}, // { "YYYY-MM-DD": ["Class name", ...] } — one-off classes added for a single day
       bonusPeriods: {}, // { "YYYY-MM-DD": ["Class name", ...] } — that day's class only ever helps a student's average, never hurts it (see isBonusPeriod)
-      chazzan: {}, // { "YYYY-MM-DD": { "Shacharis": { studentId, portion: "full"|"half" }, "Mincha": {...}, ... } } — see chazzanFor/CHAZZAN_PERIODS
+      chazzan: {}, // { "YYYY-MM-DD": { "Shacharis": { studentIds: [id] or [id1,id2] (split), portion: "full"|"half" }, "Mincha": {...}, ... } } — see chazzanFor/CHAZZAN_PERIODS
     },
     staff: [
       { id: stAdmin, username: "admin", name: "Example Admin", password: "admin1234", role: "admin" },
@@ -2071,42 +2113,74 @@ function isBonusPeriod(dateStr, period) {
 function chazzanFor(dateStr, period) {
   return (state.settings.chazzan && state.settings.chazzan[dateStr] && state.settings.chazzan[dateStr][period]) || null;
 }
+// Which of the four tefillos are actually offered for a given date -- Musaf only when
+// hebrewDayInfoFor says the date actually has one (Shabbos, Rosh Chodesh, Chol Hamoed, or a Yom
+// Tov); Shacharis/Mincha/Maariv are offered every day. Used by the TA's own Chazzan tab (see
+// renderChazzanGrantCard), which can reach any past date -- unlike Today's live staff control,
+// which only ever shows up when the school's OWN schedule literally has a period named to match
+// (see CHAZZAN_PERIODS.includes(selectedPeriod) in renderToday), already inherently tied to
+// whatever the admin scheduled that day.
+function chazzanPeriodsForDate(dateStr) {
+  return CHAZZAN_PERIODS.filter((p) => p !== "Musaf" || hebrewDayInfoFor(dateStr).isMusafDay);
+}
 // Half-Shacharis is worth the same half coin as any other single bonus -- except on Shabbos,
 // where leading even half of Shacharis is worth a full coin (Shabbos Shacharis being longer).
-// Every other tefilah (Mincha/Maariv/Musaf) always pays its flat table amount; only Shacharis
-// has a full/half distinction at all.
+// Maariv recorded against a Friday's date is understood as that Friday NIGHT's Maariv (Kabbolas
+// Shabbos, ushering in Shabbos) -- worth a full coin like Shacharis, not the usual smaller
+// weekday amount. Musaf always pays its flat table amount; only Shacharis and Friday-night
+// Maariv have a special-case bump.
 function chazzanCoinsFor(period, portion, dateStr) {
   if (period === "Shacharis" && portion === "half") {
     return dayNameFor(dateStr) === "Shabbos" ? 1 : 0.5;
   }
+  if (period === "Maariv" && dayNameFor(dateStr) === "Friday") return 1;
   return CHAZZAN_COIN_TABLE[period] || 0;
 }
-// Ledger entries created by the chazzan control carry this deterministic id (one per date+period,
-// matching "only one chazzan per tefilah") so re-picking a different student, switching Full/Half,
-// or clearing back to "none" can find and replace/remove the exact same entry instead of piling
-// up duplicates.
-function chazzanLedgerId(dateStr, period) { return "chazzan_" + dateStr + "_" + period; }
-// Shared by both places a chazzan gets picked -- a staff member on Today (see wireChazzanControl)
-// and a student who's been granted isTA permission, from their own My Balance page (see
+// Ledger entries created by the chazzan control share a common id PREFIX per date+period
+// (chazzanLedgerPrefix) with one full entry per student appended -- up to two, when a tefilah
+// is split. Re-picking different student(s), switching Full/Half, adding or removing a split
+// partner, or clearing back to "none" all work the same way: drop every entry under that
+// prefix first, then rebuild from the current student list, so there's never a stale or
+// duplicate entry left behind no matter how the set of students changes between calls.
+function chazzanLedgerPrefix(dateStr, period) { return "chazzan_" + dateStr + "_" + period; }
+function chazzanLedgerId(dateStr, period, studentId) { return chazzanLedgerPrefix(dateStr, period) + "_" + studentId; }
+// Legacy fallback for ledger entries written before "period"/"portion" were stored directly on
+// the transaction (see applyChazzanChoice) -- the id itself still encodes the period as its 3rd
+// "_"-separated segment (chazzan_<date>_<period>[_<studentId>]); dateStr has no underscores and
+// period is always one of the fixed CHAZZAN_PERIODS names, so this stays correct even once a
+// trailing "_<studentId>" (itself often containing underscores) is appended.
+function periodFromChazzanLedgerId(id) {
+  const parts = String(id || "").split("_");
+  return parts.length >= 3 ? parts[2] : null;
+}
+// Shared by every place a chazzan gets picked -- a staff member on Today (see wireChazzanControl)
+// and a student who's been granted isTA permission, from their own dedicated Chazzan tab (see
 // wireChazzanGrantCard) -- so the actual ledger read-modify-write only lives in one place.
+// studentIds is an array of 0, 1, or 2 student ids (more than 2 is trimmed, never enforced by
+// the caller); when there are two, chazzanCoinsFor's total is split evenly between them.
 // enteredByName is whoever performed the action (a staff member's name, or the granting
-// student's own name), recorded on the ledger entry the same as any other coin transaction.
-async function applyChazzanChoice(dateStr, period, studentId, portion, enteredByName) {
+// student's own name), recorded on each ledger entry the same as any other coin transaction.
+async function applyChazzanChoice(dateStr, period, studentIds, portion, enteredByName) {
+  const ids = (studentIds || []).filter(Boolean).slice(0, 2);
   const newState = JSON.parse(JSON.stringify(state));
   newState.settings.chazzan = newState.settings.chazzan || {};
   newState.settings.chazzan[dateStr] = newState.settings.chazzan[dateStr] || {};
   newState.ledger = newState.ledger || [];
-  const ledgerId = chazzanLedgerId(dateStr, period);
-  // Always drop any prior entry for this exact date+period first -- whether we're about to
-  // replace it with a new one (different student/portion) or clear it back to "none".
-  newState.ledger = newState.ledger.filter((tx) => tx.id !== ledgerId);
-  if (studentId) {
-    newState.settings.chazzan[dateStr][period] = { studentId, portion };
-    const amount = chazzanCoinsFor(period, portion, dateStr);
-    newState.ledger.push({
-      id: ledgerId, date: dateStr, studentId, type: "Chazzan Bonus", amount,
-      note: "Chazzan — " + period + (period === "Shacharis" && portion === "half" ? " (half)" : ""),
-      enteredBy: enteredByName, enteredAt: Date.now(),
+  const prefix = chazzanLedgerPrefix(dateStr, period);
+  // Always drop every prior entry under this exact date+period prefix first -- whether we're
+  // about to replace it with new student(s)/portion, or clear it back to "none".
+  newState.ledger = newState.ledger.filter((tx) => !String(tx.id).startsWith(prefix));
+  if (ids.length) {
+    newState.settings.chazzan[dateStr][period] = { studentIds: ids, portion };
+    const total = chazzanCoinsFor(period, portion, dateStr);
+    const share = total / ids.length; // an even split when two students lead together
+    const noteBase = "Chazzan — " + period + (period === "Shacharis" && portion === "half" ? " (half)" : "") + (ids.length === 2 ? " (split)" : "");
+    ids.forEach((studentId) => {
+      newState.ledger.push({
+        id: chazzanLedgerId(dateStr, period, studentId), date: dateStr, studentId, type: "Chazzan Bonus",
+        amount: share, period, portion, note: noteBase,
+        enteredBy: enteredByName, enteredAt: Date.now(),
+      });
     });
   } else {
     delete newState.settings.chazzan[dateStr][period];
@@ -3015,27 +3089,34 @@ function renderToday(root, session) {
   // receive it, see the comment on CHAZZAN_PERIODS above). Picking a student auto-grants that
   // tefilah's fixed bonus coin amount as a real ledger entry the moment it's picked; switching to
   // a different student, changing Full/Half, or picking "— none —" replaces/clears that same
-  // entry (see wireChazzanControl/applyChazzanChoice) rather than piling up duplicates. Any
+  // entry (see wireChazzanControl/applyChazzanChoice) rather than piling up duplicates. This
+  // quick control stays a plain single-student dropdown (picking a name here always sets that
+  // ONE student as the sole chazzan, collapsing away any split); the TA's own dedicated Chazzan
+  // tab (see renderChazzanGrantCard) is the only place two chazzanim can split a tefilah. Any
   // signed-in staff who can write can set it here, same as marking the class itself -- a student
-  // with isTA permission can do the exact same thing themselves from My Balance (see
-  // renderChazzanGrantCard), for when it's the teacher's helper doing the recording instead.
+  // with isTA permission can do the exact same thing themselves from their own Chazzan tab.
   let chazzanHtml = "";
   if (canWrite && selectedPeriod && CHAZZAN_PERIODS.includes(selectedPeriod)) {
     const current = chazzanFor(todayDate, selectedPeriod);
+    const currentIds = (current && current.studentIds) || [];
     const portion = (current && current.portion) || "full";
-    const amount = chazzanCoinsFor(selectedPeriod, portion, todayDate);
+    const total = chazzanCoinsFor(selectedPeriod, portion, todayDate);
+    const share = currentIds.length ? total / currentIds.length : total;
+    const splitNote = currentIds.length === 2
+      ? (() => { const other = studentById(currentIds[1]); return other ? " (split with " + escapeHtml(other.first + " " + other.last) + " — see their Chazzan tab)" : ""; })()
+      : "";
     chazzanHtml = '<div class="card card-pad" style="margin-top:14px;">' +
       '<div class="section-title" style="font-size:0.95rem;">Chazzan — ' + escapeHtml(selectedPeriod) + "</div>" +
       '<div class="field-row" style="align-items:flex-end;">' +
       '<div class="field" style="min-width:200px;"><label for="chazzan-student">Today\'s chazzan</label><select id="chazzan-student">' +
       '<option value="">— none —</option>' +
-      roster.map((s) => '<option value="' + s.id + '"' + (current && current.studentId === s.id ? " selected" : "") + '>' + escapeHtml(s.first + " " + s.last) + "</option>").join("") +
+      roster.map((s) => '<option value="' + s.id + '"' + (currentIds[0] === s.id ? " selected" : "") + '>' + escapeHtml(s.first + " " + s.last) + "</option>").join("") +
       "</select></div>" +
       (selectedPeriod === "Shacharis" ? '<div class="field" style="min-width:140px;"><label for="chazzan-portion">Led</label><select id="chazzan-portion">' +
         '<option value="full"' + (portion === "full" ? " selected" : "") + '>Full Shacharis</option>' +
         '<option value="half"' + (portion === "half" ? " selected" : "") + '>Half Shacharis</option>' +
         "</select></div>" : "") +
-      (current && current.studentId ? '<span class="pill pill-gold">+' + num2(amount) + " coin" + (amount === 1 ? "" : "s") + "</span>" : "") +
+      (currentIds.length ? '<span class="pill pill-gold">+' + num2(share) + " coin" + (share === 1 ? "" : "s") + splitNote + "</span>" : "") +
       "</div></div>";
   }
   html += chazzanHtml;
@@ -3464,19 +3545,28 @@ function wireChazzanControl(root, session) {
   const sel = document.getElementById("chazzan-student");
   if (!sel) return;
   const portionSel = document.getElementById("chazzan-portion");
-  async function apply() {
-    const date = todayDate, period = selectedPeriod;
+  const date = todayDate, period = selectedPeriod;
+  // Picking a student here always sets that ONE student as the sole chazzan -- if a TA had
+  // split this tefilah between two students from their own Chazzan tab, choosing anyone here
+  // (including re-selecting who's already first) collapses that back down to just this one pick.
+  sel.addEventListener("change", async () => {
     const studentId = sel.value;
     const portion = portionSel ? portionSel.value : "full";
-    const res = await applyChazzanChoice(date, period, studentId, portion, session.record.name);
+    const res = await applyChazzanChoice(date, period, studentId ? [studentId] : [], portion, session.record.name);
     if (res.ok || res.local) {
       const student = studentId ? studentById(studentId) : null;
       toast(student ? "Set " + student.first + " " + student.last + " as chazzan for " + period + "." : "Cleared chazzan for " + period + ".", "good");
       renderAll();
     }
-  }
-  sel.addEventListener("change", apply);
-  if (portionSel) portionSel.addEventListener("change", apply);
+  });
+  // Changing Full/Half keeps whoever's currently picked (1 or 2 -- e.g. a TA-set split) exactly
+  // as-is, just recomputed at the new portion's amount.
+  if (portionSel) portionSel.addEventListener("change", async () => {
+    const current = chazzanFor(date, period);
+    const ids = (current && current.studentIds) || [];
+    const res = await applyChazzanChoice(date, period, ids, portionSel.value, session.record.name);
+    if (res.ok || res.local) renderAll();
+  });
 }
 // Drives the "Mark yourself" row's shared dial pieces (compactSlotHtml's circles, the
 // present/absent quick-mark buttons) exactly the way wireTodayGrid drives them for a real
@@ -5889,75 +5979,98 @@ let cgPeriod = "Shacharis";
 let confirmDeleteChazzanId = null;
 /* A student with isTA permission (Admin > Students > "Allow to grant Chazzan coins") gets this
    card on their own dedicated "Chazzan" tab (see ROUTES' visible check + renderChazzanTab below)
-   -- the same chazzan-picking control staff have on Today (see wireChazzanControl), just with
-   its own date+tefilah picker instead of riding on todayDate/selectedPeriod, since a student's
-   own nav has neither. Unlike Today's live control, this always offers all four tefillos
-   (see renderChazzanGrantCard) since it's a record-keeping tool that can reach any date. */
+   -- the same underlying pick (applyChazzanChoice) staff can also set from Today (see
+   wireChazzanControl), just with its own date+tefilah picker instead of riding on
+   todayDate/selectedPeriod, since a student's own nav has neither. A tap-list of every active
+   student (up to two -- tap a second name to split the tefilah between them) instead of a
+   dropdown, and tap-buttons for the tefilah and Full/Half instead of <select>s -- this is the
+   only screen where a tefilah can be split between two chazzanim; Today's own staff control
+   (wireChazzanControl) stays a plain single-student dropdown. */
 function renderChazzanGrantCard() {
-  // Unlike Today's staff control (which only offers whatever tefilah is actually on TODAY's
-  // schedule), this is a deliberate record-keeping tool that can reach back to any date -- so
-  // all four tefillos are always offered here, Musaf included, regardless of what's scheduled
-  // on the picked date. Picking Musaf for a non-Shabbos date is unusual but not blocked; the
-  // coin math (chazzanCoinsFor) doesn't care either way.
+  const info = hebrewDayInfoFor(cgDate);
+  // Unlike Today's staff control (which only ever shows up when the school's own schedule has a
+  // period literally named to match, already inherently tied to what's scheduled that day),
+  // this is a deliberate record-keeping tool that can reach back to any date -- so which
+  // tefillos it offers has to figure that out itself (see chazzanPeriodsForDate/hebrewDayInfoFor)
+  // rather than relying on an admin-configured schedule. If the currently-picked tefilah isn't
+  // actually offered on the newly-picked date (e.g. cgPeriod was "Musaf" and cgDate just changed
+  // to a plain weekday), fall back to the first one that is.
+  const availablePeriods = chazzanPeriodsForDate(cgDate);
+  if (!availablePeriods.includes(cgPeriod)) cgPeriod = availablePeriods[0];
   const current = chazzanFor(cgDate, cgPeriod);
+  const currentIds = (current && current.studentIds) || [];
   const portion = (current && current.portion) || "full";
-  const amount = chazzanCoinsFor(cgPeriod, portion, cgDate);
+  const total = chazzanCoinsFor(cgPeriod, portion, cgDate);
+  const share = currentIds.length ? total / currentIds.length : total;
   const roster = activeRoster();
+
   let html = '<div class="card card-pad" style="margin-bottom:16px;" id="chazzan-grant-card">' +
     '<div class="section-title">Grant Chazzan coins</div>' +
-    '<p class="help-text" style="margin:2px 0 10px;">You\'ve been given permission to record who led davening and award their bonus coins. Pick any past date to fix a mistake — choosing "— none —" clears it.</p>' +
-    '<div class="field-row" style="align-items:flex-end;">' +
-    '<div class="field" style="min-width:150px;"><label for="cg-date">Date</label><input type="date" id="cg-date" value="' + escapeHtml(cgDate) + '"></div>' +
-    '<div class="field" style="min-width:150px;"><label for="cg-period">Tefilah</label><select id="cg-period">' +
-    CHAZZAN_PERIODS.map((p) => '<option value="' + p + '"' + (p === cgPeriod ? " selected" : "") + '>' + p + "</option>").join("") +
-    "</select></div>" +
-    '<div class="field" style="min-width:190px;"><label for="cg-student">Chazzan</label><select id="cg-student">' +
-    '<option value="">— none —</option>' +
-    roster.map((s) => '<option value="' + s.id + '"' + (current && current.studentId === s.id ? " selected" : "") + '>' + escapeHtml(s.first + " " + s.last) + "</option>").join("") +
-    "</select></div>" +
-    (cgPeriod === "Shacharis" ? '<div class="field" style="min-width:140px;"><label for="cg-portion">Led</label><select id="cg-portion">' +
-      '<option value="full"' + (portion === "full" ? " selected" : "") + '>Full Shacharis</option>' +
-      '<option value="half"' + (portion === "half" ? " selected" : "") + '>Half Shacharis</option>' +
-      "</select></div>" : "") +
-    (current && current.studentId ? '<span class="pill pill-gold">+' + num2(amount) + " coin" + (amount === 1 ? "" : "s") + "</span>" : "") +
-    "</div></div>";
+    '<p class="help-text" style="margin:2px 0 10px;">You\'ve been given permission to record who led davening and award their bonus coins. Pick any past date to fix a mistake. Tap a second name if two students split a tefilah.</p>' +
+    '<div class="field" style="max-width:220px;"><label for="cg-date">Date</label><input type="date" id="cg-date" value="' + escapeHtml(cgDate) + '"></div>' +
+    '<p class="help-text" style="margin:-6px 0 14px;">' + escapeHtml(hebrewDateFor(cgDate)) + (info.label ? " — <strong>" + escapeHtml(info.label) + "</strong>" : "") + "</p>" +
+
+    '<label>Tefilah</label><div class="bubble-group" style="margin-bottom:14px;">' +
+    availablePeriods.map((p) => '<button type="button" class="bubble-btn' + (p === cgPeriod ? " active" : "") + '" data-cg-period="' + p + '">' + p + "</button>").join("") +
+    "</div>" +
+
+    (cgPeriod === "Shacharis" ? '<label>Led</label><div class="bubble-group" style="margin-bottom:14px;">' +
+      '<button type="button" class="bubble-btn' + (portion === "full" ? " active" : "") + '" data-cg-portion="full">Full Shacharis</button>' +
+      '<button type="button" class="bubble-btn' + (portion === "half" ? " active" : "") + '" data-cg-portion="half">Half Shacharis</button>' +
+      "</div>" : "") +
+
+    '<label>Chazzan' + (currentIds.length === 2 ? " (split)" : "") + '</label>' +
+    '<div class="bubble-group">' +
+    roster.map((s) => {
+      const sel = currentIds.includes(s.id);
+      return '<button type="button" class="bubble-btn' + (sel ? " active" : "") + '" data-cg-student="' + s.id + '">' +
+        escapeHtml(s.first + " " + s.last) + (sel ? " +" + num2(share) : "") + "</button>";
+    }).join("") +
+    "</div>" +
+    (!currentIds.length ? '<p class="help-text" style="margin-top:10px;">No one picked yet for ' + escapeHtml(cgPeriod) + ".</p>" : "") +
+    "</div>";
   return html;
 }
 function wireChazzanGrantCard(root, student) {
   const dateInp = document.getElementById("cg-date");
   if (!dateInp) return;
   dateInp.addEventListener("change", () => { cgDate = dateInp.value || cgDate; renderAll(); });
-  const periodSel = document.getElementById("cg-period");
-  if (periodSel) periodSel.addEventListener("change", () => { cgPeriod = periodSel.value; renderAll(); });
-  const studentSel = document.getElementById("cg-student");
-  const portionSel = document.getElementById("cg-portion");
-  if (!studentSel) return;
-  async function apply() {
-    const date = cgDate, period = cgPeriod;
-    const studentId = studentSel.value;
-    const portion = portionSel ? portionSel.value : "full";
-    const res = await applyChazzanChoice(date, period, studentId, portion, student.first + " " + student.last);
+  root.querySelectorAll("[data-cg-period]").forEach((btn) => btn.addEventListener("click", () => {
+    cgPeriod = btn.getAttribute("data-cg-period");
+    renderAll();
+  }));
+  async function apply(studentIds, portion, period) {
+    const res = await applyChazzanChoice(cgDate, period, studentIds, portion, student.first + " " + student.last);
     if (res.ok || res.local) {
-      const picked = studentId ? studentById(studentId) : null;
-      toast(picked ? "Set " + picked.first + " " + picked.last + " as chazzan for " + period + "." : "Cleared chazzan for " + period + ".", "good");
+      if (!studentIds.length) toast("Cleared chazzan for " + period + ".", "good");
+      else {
+        const names = studentIds.map((id) => { const s = studentById(id); return s ? s.first + " " + s.last : "?"; });
+        toast((names.length === 2 ? names.join(" and ") + " are splitting " : "Set " + names[0] + " as chazzan for ") + period + ".", "good");
+      }
       renderAll();
     }
   }
-  studentSel.addEventListener("change", apply);
-  if (portionSel) portionSel.addEventListener("change", apply);
+  root.querySelectorAll("[data-cg-portion]").forEach((btn) => btn.addEventListener("click", () => {
+    const current = chazzanFor(cgDate, cgPeriod);
+    const ids = (current && current.studentIds) || [];
+    apply(ids, btn.getAttribute("data-cg-portion"), cgPeriod);
+  }));
+  root.querySelectorAll("[data-cg-student]").forEach((btn) => btn.addEventListener("click", () => {
+    const studentId = btn.getAttribute("data-cg-student");
+    const current = chazzanFor(cgDate, cgPeriod);
+    const ids = (current && current.studentIds) || [];
+    const portion = (current && current.portion) || "full";
+    let newIds;
+    if (ids.includes(studentId)) newIds = ids.filter((id) => id !== studentId); // tap again to remove
+    else if (ids.length >= 2) { toast("Only two chazzanim can split one tefilah — tap one to remove them first.", "warn"); return; }
+    else newIds = ids.concat([studentId]);
+    apply(newIds, portion, cgPeriod);
+  }));
 }
 /* The "Chazzan" tab -- only ever reachable by a student admin has granted isTA permission to
    (see the ROUTES entry's `visible` check). Its own dedicated page rather than a card bolted
    onto My Balance, so it reads as a real responsibility of theirs, not a side effect of looking
    up their own balance. */
-// Chazzan Bonus ledger entries carry a deterministic id ("chazzan_<date>_<period>", see
-// chazzanLedgerId) but no separate period field of their own -- this pulls the period back out
-// of that id so "Recent grants" can offer an Edit/Delete action without re-deriving it from the
-// note text (which also carries a "(half)" suffix that isn't part of the period name).
-function periodFromChazzanLedgerId(id) {
-  const parts = String(id || "").split("_");
-  return parts.length >= 3 ? parts[2] : null;
-}
 function renderChazzanTab(root, session) {
   const student = session.record;
   let html = '<div class="page-head"><div><span class="eyebrow">Teacher\'s helper</span><h1>Chazzan</h1>' +
@@ -6005,7 +6118,7 @@ function renderChazzanTab(root, session) {
   root.querySelectorAll("[data-chazzan-edit]").forEach((btn) => btn.addEventListener("click", () => {
     const tx = recent.find((t) => t.id === btn.getAttribute("data-chazzan-edit"));
     if (!tx) return;
-    const period = periodFromChazzanLedgerId(tx.id);
+    const period = tx.period || periodFromChazzanLedgerId(tx.id);
     if (!period) return;
     cgDate = tx.date;
     cgPeriod = period;
@@ -6025,9 +6138,18 @@ function renderChazzanTab(root, session) {
   root.querySelectorAll("[data-chazzan-confirm-delete]").forEach((btn) => btn.addEventListener("click", async () => {
     const id = btn.getAttribute("data-chazzan-confirm-delete");
     const tx = recent.find((t) => t.id === id);
-    const period = tx && periodFromChazzanLedgerId(tx.id);
+    const period = tx && (tx.period || periodFromChazzanLedgerId(tx.id));
     if (!tx || !period) { confirmDeleteChazzanId = null; renderAll(); return; }
-    const res = await applyChazzanChoice(tx.date, period, null, "full", student.first + " " + student.last);
+    const portion = tx.portion || ((tx.note || "").includes("(half)") ? "half" : "full");
+    // If this grant was split between two students, deleting one of them should leave the
+    // other in place as the sole chazzan (recomputed to the full, un-split amount) rather than
+    // wiping out the whole date+period slot -- so gather any OTHER ledger entry sharing this
+    // exact date+period prefix before reapplying with just the remaining student(s).
+    const prefix = chazzanLedgerPrefix(tx.date, period);
+    const remainingIds = (state.ledger || [])
+      .filter((t) => t.type === "Chazzan Bonus" && String(t.id).startsWith(prefix) && t.id !== tx.id)
+      .map((t) => t.studentId);
+    const res = await applyChazzanChoice(tx.date, period, remainingIds, portion, student.first + " " + student.last);
     confirmDeleteChazzanId = null;
     if (res.ok || res.local) {
       toast("Deleted the chazzan grant for " + period + " on " + fmtDateShort(tx.date) + ".", "good");
