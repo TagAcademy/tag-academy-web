@@ -2009,6 +2009,7 @@ function seedState() {
       ],
       extraPeriods: {}, // { "YYYY-MM-DD": ["Class name", ...] } — one-off classes added for a single day
       bonusPeriods: {}, // { "YYYY-MM-DD": ["Class name", ...] } — that day's class only ever helps a student's average, never hurts it (see isBonusPeriod)
+      alwaysBonusPeriods: [], // ["Class name", ...] — this class is ALWAYS bonus, every day, set once in Admin > Schedule (see isBonusPeriod)
       chazzan: {}, // { "YYYY-MM-DD": { "Shacharis": { studentIds: [id] or [id1,id2] (split; either slot may be CHAZZAN_OTHER) }, "Mincha": {...}, ... } } — see chazzanFor/CHAZZAN_PERIODS
     },
     staff: [
@@ -2111,10 +2112,15 @@ function periodsForDate(dateStr) {
 function extraPeriodsFor(dateStr) {
   return (state.settings.extraPeriods && state.settings.extraPeriods[dateStr]) || [];
 }
-/* A bonus class (admin-toggled per date+period from the Today page) only ever helps a
-   student's attendance/participation average, never hurts it -- see the bonus handling in
-   computeStats for exactly what that means numerically. */
+/* A bonus class only ever helps a student's attendance/participation average, never hurts it --
+   see the bonus handling in computeStats for exactly what that means numerically. A class can be
+   bonus two ways, and either one is enough: permanently, via the "Always bonus" checkbox on its
+   row in Admin > Schedule (state.settings.alwaysBonusPeriods, a plain list of period names -- for
+   a class like a short Tehillim that should just always count as pure upside), or admin-toggled
+   for one specific day from the Today page (state.settings.bonusPeriods, keyed by date -- for a
+   one-off day some other class should get the same treatment). */
 function isBonusPeriod(dateStr, period) {
+  if (state.settings.alwaysBonusPeriods && state.settings.alwaysBonusPeriods.includes(period)) return true;
   return !!(state.settings.bonusPeriods && state.settings.bonusPeriods[dateStr] && state.settings.bonusPeriods[dateStr].includes(period));
 }
 /* ---------- Chazzan bonus coins (see CHAZZAN_PERIODS/CHAZZAN_COIN_TABLE) ---------- */
@@ -3079,11 +3085,15 @@ function renderToday(root, session) {
   }
 
   // Bonus: admin-only toggle, but the "this class is bonus today" pill is visible to whoever's
-  // marking it too, so a teacher isn't left guessing why a student's average moved.
+  // marking it too, so a teacher isn't left guessing why a student's average moved. A class set
+  // permanently bonus in Admin > Schedule (see alwaysBonusPeriods) has nothing to toggle here --
+  // the per-day button only ever applies to a class that ISN'T already always-bonus.
+  const alwaysBonus = !!(selectedPeriod && (state.settings.alwaysBonusPeriods || []).includes(selectedPeriod));
   const periodIsBonus = selectedPeriod && isBonusPeriod(todayDate, selectedPeriod);
-  const canToggleBonus = canWrite && isAdmin(session);
-  const bonusPieceHtml = (periodIsBonus ? '<span class="pill pill-gold" title="Marked scores help this average; a missed or low mark leaves it unchanged.">★ Bonus today — only helps, never hurts</span>' : "") +
-    (canToggleBonus ? '<button class="btn btn-ghost btn-sm" id="toggle-bonus" type="button" title="' + (periodIsBonus ? "Unmark " + escapeHtml(selectedPeriod) + " as bonus" : "Mark " + escapeHtml(selectedPeriod) + " as bonus today") + '">' + (periodIsBonus ? "Unmark bonus" : "Mark bonus") + "</button>" : "");
+  const canToggleBonus = canWrite && isAdmin(session) && !alwaysBonus;
+  const bonusPieceHtml = (periodIsBonus ? '<span class="pill pill-gold" title="Marked scores help this average; a missed or low mark leaves it unchanged.">★ ' + (alwaysBonus ? "Always bonus" : "Bonus today") + " — only helps, never hurts</span>" : "") +
+    (canToggleBonus ? '<button class="btn btn-ghost btn-sm" id="toggle-bonus" type="button" title="' + (periodIsBonus ? "Unmark " + escapeHtml(selectedPeriod) + " as bonus" : "Mark " + escapeHtml(selectedPeriod) + " as bonus today") + '">' + (periodIsBonus ? "Unmark bonus" : "Mark bonus") + "</button>" :
+      (alwaysBonus && isAdmin(session) ? '<span class="help-text" style="margin:0;">Set to always-bonus in Admin &gt; Schedule</span>' : ""));
 
   // A class with a lower max (see periodMaxFor, set in Admin > Schedule) still marks as a full
   // dial/bar when someone's fully present -- that's what makes marking it feel the same as any
@@ -3113,11 +3123,12 @@ function renderToday(root, session) {
   // stays a plain single-select dropdown (picking a name -- or "Other" -- here always sets that
   // ONE slot as the sole chazzan, collapsing away any split); the TA's own dedicated Chazzan tab
   // (see renderChazzanGrantCard) is the only place two slots can split a tefilah (e.g. a student
-  // plus a non-student "Other" for half each). Any signed-in staff who can write can set it here,
-  // same as marking the class itself -- a student with isTA permission can do the exact same
-  // thing themselves from their own Chazzan tab.
+  // plus a non-student "Other" for half each). Only an admin can grant chazzan coins from here --
+  // a regular teacher account no longer can (this used to be open to any signed-in staff who
+  // could write, which was too broad) -- a student with isTA permission can still do the exact
+  // same thing from their own Chazzan tab.
   let chazzanHtml = "";
-  if (canWrite && selectedPeriod && CHAZZAN_PERIODS.includes(selectedPeriod)) {
+  if (canWrite && isAdmin(session) && selectedPeriod && CHAZZAN_PERIODS.includes(selectedPeriod)) {
     const current = chazzanFor(todayDate, selectedPeriod);
     const currentIds = (current && current.studentIds) || [];
     const share = currentIds.length ? chazzanShareFor(selectedPeriod, todayDate, currentIds.length) : chazzanCoinsFor(selectedPeriod, todayDate);
@@ -5409,8 +5420,8 @@ function renderAdminSchedule(root) {
   html += '<div class="field-row" style="align-items:flex-end;max-width:480px;">' +
     '<div class="field" style="flex:1;"><label for="np-name">New class name</label><input type="text" id="np-name" placeholder="e.g. Chavrusa"></div>' +
     '<div class="field" style="flex-shrink:0;"><button class="btn btn-ghost btn-sm" id="np-add" type="button">Add class</button></div></div>';
-  html += '<p class="help-text" style="margin-top:-6px;">The order below is the order classes appear in every dropdown (Today’s Class/period picker, reports, etc.) — drag the handle to reorder. Category controls which Leaderboard(s) a class counts toward — Torah, Avoda, or Gemilas Chassidim classes are combined into one score there; “Other” classes still count toward the overall Attendance/Participation boards. Max score is what a full mark in that class is worth — most classes are a normal 1, but a shorter or supplementary class can be set lower (e.g. 0.3 or 0.1) so it counts for proportionally less of a student’s blended average.</p>';
-  html += '<div class="table-wrap"><table><thead><tr><th style="width:36px;">Order</th><th class="sticky-col-l" style="min-width:150px;">Period</th><th style="min-width:212px;">Category</th><th style="min-width:100px;">Max score</th>' + DAY_NAMES.map((d) => "<th>" + d.slice(0, 3) + "</th>").join("") + "<th></th></tr></thead><tbody>";
+  html += '<p class="help-text" style="margin-top:-6px;">The order below is the order classes appear in every dropdown (Today’s Class/period picker, reports, etc.) — drag the handle to reorder. Category controls which Leaderboard(s) a class counts toward — Torah, Avoda, or Gemilas Chassidim classes are combined into one score there; “Other” classes still count toward the overall Attendance/Participation boards. Max score is what a full mark in that class is worth — most classes are a normal 1, but a shorter or supplementary class can be set lower (e.g. 0.3 or 0.1) so it counts for proportionally less of a student’s blended average. Always bonus means marks in that class only ever help a student’s average, never hurt it — every day, automatically, without needing to toggle it each morning from Today’s page (which is still there for a one-off bonus day on some other class).</p>';
+  html += '<div class="table-wrap"><table><thead><tr><th style="width:36px;">Order</th><th class="sticky-col-l" style="min-width:150px;">Period</th><th style="min-width:212px;">Category</th><th style="min-width:100px;">Max score</th><th style="min-width:100px;">Always bonus</th>' + DAY_NAMES.map((d) => "<th>" + d.slice(0, 3) + "</th>").join("") + "<th></th></tr></thead><tbody>";
   state.settings.periods.forEach((p, i) => {
     html += '<tr data-period-row="' + escapeHtml(p) + '"><td style="white-space:nowrap;">' +
       '<button class="btn btn-ghost btn-sm drag-handle" type="button" data-drag-handle title="Drag to reorder">⠿</button>' +
@@ -5421,6 +5432,8 @@ function renderAdminSchedule(root) {
       PERIOD_CATEGORIES.map((c) => '<option value="' + c.id + '"' + (c.id === currentCat ? " selected" : "") + '>' + escapeHtml(c.label) + "</option>").join("") +
       "</select></td>";
     html += '<td><input type="number" class="period-max-input" data-original="' + escapeHtml(p) + '" value="' + periodMaxFor(p) + '" min="0.05" max="1" step="0.05" title="A full mark in this class is worth this many points toward the blended average"></td>';
+    const alwaysBonus = (state.settings.alwaysBonusPeriods || []).includes(p);
+    html += '<td style="text-align:center;"><input type="checkbox" class="period-always-bonus-input" data-original="' + escapeHtml(p) + '"' + (alwaysBonus ? " checked" : "") + ' title="Marks in this class only ever help the average, never hurt it -- every day"></td>';
     DAY_NAMES.forEach((d) => {
       const checked = (state.settings.schedule[p] || []).includes(d);
       html += '<td style="text-align:center;"><input type="checkbox" data-period="' + escapeHtml(p) + '" data-day="' + d + '" ' + (checked ? "checked" : "") + "></td>";
@@ -5456,20 +5469,25 @@ function renderAdminSchedule(root) {
       const n = Number(inp.value);
       maxByOriginal[inp.getAttribute("data-original")] = (inp.value !== "" && !isNaN(n) && n > 0 && n <= 1) ? n : 1;
     });
+    const alwaysBonusByOriginal = {};
+    root.querySelectorAll(".period-always-bonus-input").forEach((cb) => { alwaysBonusByOriginal[cb.getAttribute("data-original")] = cb.checked; });
 
     const newState = JSON.parse(JSON.stringify(state));
     newState.settings.periods = finalNames;
     const newSched = {};
     const newCategories = {};
     const newMax = {};
+    const newAlwaysBonus = [];
     state.settings.periods.forEach((p) => {
       newSched[renameOf[p]] = schedByOriginal[p];
       newCategories[renameOf[p]] = categoryByOriginal[p] || categoryFor(p);
       newMax[renameOf[p]] = maxByOriginal[p] || periodMaxFor(p);
+      if (alwaysBonusByOriginal[p]) newAlwaysBonus.push(renameOf[p]);
     });
     newState.settings.schedule = newSched;
     newState.settings.periodCategories = newCategories;
     newState.settings.periodMax = newMax;
+    newState.settings.alwaysBonusPeriods = newAlwaysBonus;
     // Carry past attendance over to the new name for anything actually renamed.
     state.settings.periods.forEach((p) => {
       const next = renameOf[p];
