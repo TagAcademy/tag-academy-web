@@ -2011,6 +2011,7 @@ function seedState() {
       bonusPeriods: {}, // { "YYYY-MM-DD": ["Class name", ...] } — that day's class only ever helps a student's average, never hurts it (see isBonusPeriod)
       alwaysBonusPeriods: [], // ["Class name", ...] — this class is ALWAYS bonus, every day, set once in Admin > Schedule (see isBonusPeriod)
       chazzan: {}, // { "YYYY-MM-DD": { "Shacharis": { studentIds: [id] or [id1,id2] (split; either slot may be CHAZZAN_OTHER) }, "Mincha": {...}, ... } } — see chazzanFor/CHAZZAN_PERIODS
+      googleCalendar: { enabled: false, calendarId: "", apiKey: "" }, // Live-schedule auto-default on Today's page (see liveScheduleConfig/fetchLiveCalendarPeriod) — apiKey MUST be a Google Cloud API key restricted to the Calendar API + this site's HTTP referrer, since (like FIREBASE_CONFIG below) it ships to every browser that loads this page.
     },
     staff: [
       { id: stAdmin, username: "admin", name: "Example Admin", password: "admin1234", role: "admin" },
@@ -2908,6 +2909,114 @@ function renderLogin(root) {
 let todayDate = (localStorage.getItem(LAST_DATE_KEY) || todayISO());
 let selectedPeriod = "";
 let showAddExtraPeriod = false;
+
+/* ----------------------------------------------------------------
+   LIVE SCHEDULE (Google Calendar auto-default) -- while viewing the
+   real, actual today (not a past/future date) with a full (non-limited)
+   staff account, poll a public Google Calendar every LIVE_SCHEDULE_POLL_MS
+   and auto-switch Today's selected class/period to whatever event title
+   exactly matches one of today's scheduled periods and is happening right
+   now. See Admin > Schedule's "Live schedule" card for setup, and
+   fetchLiveCalendarPeriod for the actual Calendar API v3 call.
+   ---------------------------------------------------------------- */
+const LIVE_SCHEDULE_POLL_MS = 45000;
+let liveScheduleTimer = null;
+let liveScheduleStatus = null; // last poll result: { ok, matched, rawTitle, reason, detail, checkedAt }
+function liveScheduleConfig() {
+  return (state && state.settings && state.settings.googleCalendar) || { enabled: false, calendarId: "", apiKey: "" };
+}
+// Talks to Google Calendar API v3's events.list directly from the browser with a plain API key
+// -- this works (no OAuth, no backend) ONLY because the calendar itself must be shared publicly
+// with "See all event details" and the key is restricted (Calendar API + this site's referrer
+// only). We ask for a +/-60min window around now rather than just "now" so a slightly slow
+// response or clock skew can't make an in-progress class look like a gap.
+async function fetchLiveCalendarPeriod(overrideCfg) {
+  const cfg = overrideCfg || liveScheduleConfig();
+  if (!cfg.calendarId || !cfg.apiKey) return { ok: false, reason: "not-configured" };
+  const now = new Date();
+  const timeMin = new Date(now.getTime() - 60 * 60000).toISOString();
+  const timeMax = new Date(now.getTime() + 60 * 60000).toISOString();
+  const url = "https://www.googleapis.com/calendar/v3/calendars/" + encodeURIComponent(cfg.calendarId) + "/events" +
+    "?key=" + encodeURIComponent(cfg.apiKey) +
+    "&timeMin=" + encodeURIComponent(timeMin) + "&timeMax=" + encodeURIComponent(timeMax) +
+    "&singleEvents=true&orderBy=startTime";
+  let res;
+  try {
+    res = await fetch(url);
+  } catch (e) {
+    return { ok: false, reason: "network", detail: String((e && e.message) || e) };
+  }
+  if (!res.ok) {
+    let detail = "";
+    try { detail = (await res.text()).slice(0, 200); } catch (e) {}
+    return { ok: false, reason: "http-" + res.status, detail };
+  }
+  let data;
+  try { data = await res.json(); } catch (e) { return { ok: false, reason: "bad-json" }; }
+  const items = data.items || [];
+  const nowMs = now.getTime();
+  // Only timed events (dateTime, not date) count -- an all-day event isn't "a class happening
+  // right now" in any meaningful sense for this feature.
+  const active = items.find((ev) => {
+    const startStr = ev.start && ev.start.dateTime;
+    const endStr = ev.end && ev.end.dateTime;
+    if (!startStr || !endStr) return false;
+    const start = new Date(startStr).getTime();
+    const end = new Date(endStr).getTime();
+    return start <= nowMs && nowMs < end;
+  });
+  if (!active) return { ok: true, matched: null, rawTitle: null };
+  const rawTitle = (active.summary || "").trim();
+  // Exact match only, and only against a period actually scheduled today -- matching against
+  // the full master period list could select a period not in today's dropdown at all, which
+  // the Today page's own guard would silently reset right back out from under us.
+  const matched = periodsForDate(todayDate).find((p) => p === rawTitle) || null;
+  return { ok: true, matched, rawTitle };
+}
+function stopLiveSchedule() { if (liveScheduleTimer) { clearInterval(liveScheduleTimer); liveScheduleTimer = null; } }
+function ensureLiveSchedule(route, session) {
+  const cfg = liveScheduleConfig();
+  const isLimitedStaff = !!(session && session.type === "staff" && session.record.role === "limited");
+  const shouldRun = route === "today" && todayDate === todayISO() && !isLimitedStaff && !!cfg.enabled && !!cfg.calendarId && !!cfg.apiKey;
+  if (shouldRun && !liveScheduleTimer) {
+    pollLiveSchedule();
+    liveScheduleTimer = setInterval(pollLiveSchedule, LIVE_SCHEDULE_POLL_MS);
+  } else if (!shouldRun) {
+    stopLiveSchedule();
+  }
+}
+async function pollLiveSchedule() {
+  const result = await fetchLiveCalendarPeriod();
+  liveScheduleStatus = Object.assign({}, result, { checkedAt: Date.now() });
+  if (result.ok && result.matched && result.matched !== selectedPeriod) {
+    // An actual class change -- worth a full re-render (same as picking it from the dropdown).
+    selectedPeriod = result.matched;
+    renderAll();
+  } else {
+    updateLiveScheduleBadge(); // nothing to switch to -- just refresh the status pill in place
+  }
+}
+// Patches the badge's text/title directly instead of a full renderAll(), so a routine "nothing
+// changed" poll tick can't interrupt someone mid-tap on the marking grid.
+function updateLiveScheduleBadge() {
+  const badge = document.getElementById("live-schedule-badge");
+  if (!badge) return;
+  const s = liveScheduleStatus;
+  if (!s) return;
+  if (s.ok && s.matched) {
+    badge.className = "pill pill-good";
+    badge.textContent = "🔴 Live — following the calendar";
+    badge.title = "Currently matches \"" + s.matched + "\" on the shared Google Calendar.";
+  } else if (s.ok && !s.matched) {
+    badge.className = "pill";
+    badge.textContent = "🔴 Live — no class right now";
+    badge.title = s.rawTitle ? "The calendar shows \"" + s.rawTitle + "\" now, which doesn't exactly match any of today's class names, so the selection was left as-is." : "Nothing on the calendar matches a class name right now, so the selection was left as-is.";
+  } else {
+    badge.className = "pill pill-warn";
+    badge.textContent = "🔴 Live — connection issue";
+    badge.title = "Couldn't read the calendar (" + (s.reason || "unknown") + "). Manual selection still works normally.";
+  }
+}
 let showHebrewCal = false;
 let todayView = (function () { try { return localStorage.getItem(TODAY_VIEW_KEY) || "compact"; } catch (e) { return "compact"; } })();
 // "Today at a glance" (the roster-wide summary below the marking grid, see renderTodaySummary)
@@ -3030,6 +3139,11 @@ function renderToday(root, session) {
       html += '<option value="' + escapeHtml(p) + '"' + (p === selectedPeriod ? " selected" : "") + '>' + escapeHtml(p) + " — " + n + "/" + roster.length + " marked</option>";
     });
     html += "</select></div>";
+    if (liveScheduleConfig().enabled && todayDate === todayGregISO && !(isLimitedStaff)) {
+      html += '<div class="field" style="flex-shrink:0;display:flex;align-items:center;">' +
+        '<span class="pill" id="live-schedule-badge" title="Auto-follows the shared Google Calendar (Admin &gt; Schedule) and switches this class as it changes.">🔴 Live</span>' +
+        "</div>";
+    }
     if (isExtraToday) {
       html += '<div class="field" style="flex-shrink:0;display:flex;align-items:center;gap:8px;">' +
         '<span class="pill pill-gold">Added just for today</span>' +
@@ -5441,6 +5555,23 @@ function renderAdminSchedule(root) {
     html += '<td><button class="btn btn-ghost btn-sm" data-remove-period="' + escapeHtml(p) + '" type="button">Remove</button></td></tr>';
   });
   html += "</tbody></table></div><button class=\"btn btn-primary btn-sm\" id=\"s-schedule-save\" style=\"margin-top:12px;\">Save schedule</button></div>";
+
+  const liveCfg = liveScheduleConfig();
+  html += '<div class="card card-pad" style="margin-top:16px;"><div class="section-title">Live schedule (Google Calendar)</div>';
+  html += '<p class="help-text">While someone is on Today\'s page for the actual current date, this can auto-switch the Class/period picker to whatever class is happening right now, by reading a shared Google Calendar. It only ever helps pick the class faster — manual selection always still works. Two things have to be true for it to work: the calendar\'s sharing setting must be "See all event details" (not just "See only free/busy"), and each calendar event\'s title must exactly match one of the class names above (e.g. an event literally titled "Shacharis").</p>';
+  html += '<p class="help-text">The API key below is a Google Cloud API key restricted to the Calendar API and to this site\'s address — like the app\'s own Firebase key, it ships to every browser that loads this page, so never use an unrestricted key here. In Google Cloud Console: create an API key, restrict its API to "Google Calendar API", and restrict its HTTP referrers to this site\'s address.</p>';
+  html += '<div class="field-row" style="align-items:flex-end;">' +
+    '<div class="field" style="flex-shrink:0;"><label for="live-cal-enabled" style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="live-cal-enabled"' + (liveCfg.enabled ? " checked" : "") + '> Enabled</label></div>' +
+    '<div class="field" style="flex:1;min-width:240px;"><label for="live-cal-id">Calendar ID</label><input type="text" id="live-cal-id" value="' + escapeHtml(liveCfg.calendarId || "") + '" placeholder="e.g. c_xxxxx@group.calendar.google.com"></div>' +
+    '<div class="field" style="flex:1;min-width:240px;"><label for="live-cal-key">API key</label><input type="text" id="live-cal-key" value="' + escapeHtml(liveCfg.apiKey || "") + '" placeholder="Restricted Google Cloud API key"></div>' +
+    "</div>";
+  html += '<div class="field-row" style="margin-top:8px;">' +
+    '<button class="btn btn-primary btn-sm" id="live-cal-save" type="button">Save live schedule settings</button>' +
+    '<button class="btn btn-ghost btn-sm" id="live-cal-test" type="button">Test connection</button>' +
+    "</div>";
+  html += '<div id="live-cal-test-result" style="margin-top:8px;"></div>';
+  html += "</div>";
+
   root.innerHTML = html;
   document.getElementById("s-schedule-save").addEventListener("click", async () => {
     // Read renames (keyed by each row's original name) and the day checkboxes (also keyed by
@@ -5521,6 +5652,35 @@ function renderAdminSchedule(root) {
     const res = await saveState(newState);
     if (res.ok || res.local) { toast("Removed " + name + " from the schedule.", "good"); renderAll(); }
   }));
+
+  document.getElementById("live-cal-save").addEventListener("click", async () => {
+    const enabled = document.getElementById("live-cal-enabled").checked;
+    const calendarId = document.getElementById("live-cal-id").value.trim();
+    const apiKey = document.getElementById("live-cal-key").value.trim();
+    if (enabled && (!calendarId || !apiKey)) { toast("Add a Calendar ID and API key before enabling, or leave it unchecked.", "warn"); return; }
+    const newState = JSON.parse(JSON.stringify(state));
+    newState.settings.googleCalendar = { enabled, calendarId, apiKey };
+    const res = await saveState(newState);
+    if (res.ok || res.local) { toast("Live schedule settings saved.", "good"); renderAll(); }
+  });
+  document.getElementById("live-cal-test").addEventListener("click", async () => {
+    const calendarId = document.getElementById("live-cal-id").value.trim();
+    const apiKey = document.getElementById("live-cal-key").value.trim();
+    const resultEl = document.getElementById("live-cal-test-result");
+    resultEl.innerHTML = '<span class="help-text">Checking…</span>';
+    const result = await fetchLiveCalendarPeriod({ calendarId, apiKey });
+    if (result.ok && result.matched) {
+      resultEl.innerHTML = '<span class="pill pill-good">✓ Right now: "' + escapeHtml(result.matched) + '" — matched and would auto-select on Today\'s page.</span>';
+    } else if (result.ok && result.rawTitle) {
+      resultEl.innerHTML = '<span class="pill pill-warn">Connected, but the current event is titled "' + escapeHtml(result.rawTitle) + '", which doesn\'t exactly match any class name above.</span>';
+    } else if (result.ok) {
+      resultEl.innerHTML = '<span class="pill">Connected — nothing is on the calendar right now.</span>';
+    } else if (result.reason === "not-configured") {
+      resultEl.innerHTML = '<span class="pill pill-warn">Enter a Calendar ID and API key first.</span>';
+    } else {
+      resultEl.innerHTML = '<span class="pill pill-warn">Couldn\'t connect (' + escapeHtml(result.reason || "unknown error") + (result.detail ? ": " + escapeHtml(result.detail) : "") + '). Double-check the calendar is public with "See all event details," and that the API key is valid and allows this site.</span>';
+    }
+  });
   wireScheduleDrag(root);
 }
 /* Drag-to-reorder for the schedule table -- pointer events (not the HTML5 drag-and-drop API,
@@ -6807,6 +6967,7 @@ function renderAll() {
   const loginEl = document.getElementById("login-root");
   if (!state) {
     stopLbRotation();
+    stopLiveSchedule();
     if (shellEl) shellEl.style.display = "none";
     if (loginEl) { loginEl.style.display = ""; loginEl.innerHTML = '<div class="login-wrap"><p class="sub" style="text-align:center;">Loading TAG Academy…</p></div>'; }
     return;
@@ -6814,6 +6975,7 @@ function renderAll() {
   const realSession = currentSession();
   if (!realSession) {
     stopLbRotation();
+    stopLiveSchedule();
     if (shellEl) shellEl.style.display = "none";
     if (loginEl) { loginEl.style.display = ""; renderLogin(loginEl); }
     return;
@@ -6843,6 +7005,7 @@ function renderAll() {
   }
   const route = currentRoute(session);
   ensureLbRotation(route);
+  ensureLiveSchedule(route, session);
   // View-as is a preview, not a way to act as someone else -- force every write path off for
   // the duration of this one render (every renderer reads canWrite synchronously while
   // building its HTML/wiring, so restoring it right after is safe).
@@ -6850,6 +7013,7 @@ function renderAll() {
   if (previewing) canWrite = false;
   ({ today: renderToday, ledger: renderLedger, overview: renderOverview, leaderboard: renderLeaderboard, admin: renderAdmin, balance: renderMyBalance, chazzan: renderChazzanTab })[route](root, session);
   canWrite = savedCanWrite;
+  updateLiveScheduleBadge(); // reflect the last known poll result immediately, don't wait for the next tick
   wireStudentLinks(root);
   wireCollapsibleSections(root);
 }
