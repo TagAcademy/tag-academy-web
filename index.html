@@ -1,3 +1,4 @@
+
 <!doctype html>
 <html lang="en">
 <head>
@@ -889,6 +890,20 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
 .avatar-picker-opt:hover { transform: scale(1.06); }
 .avatar-picker-opt.selected { border-color: var(--brand); }
 
+.avatar-mode-tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+.avatar-mode-tab { padding: 6px 14px; border-radius: 99px; border: 1px solid var(--line); background: var(--surface-2); cursor: pointer; font-size: 0.82rem; font-weight: 600; color: var(--muted); }
+.avatar-mode-tab.active { background: var(--brand); color: #fff; border-color: var(--brand); }
+.avatar-builder-wrap { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 14px; }
+.avatar-builder-preview { width: 120px; height: 120px; flex-shrink: 0; border-radius: 50%; overflow: hidden; background: var(--surface-2); }
+.avatar-builder-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.avatar-builder-controls { flex: 1; min-width: 220px; display: flex; flex-direction: column; gap: 12px; max-height: 46vh; overflow-y: auto; padding-right: 4px; }
+.avatar-builder-group label { display: block; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin-bottom: 6px; }
+.avatar-swatch-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.avatar-swatch { width: 30px; height: 30px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; flex-shrink: 0; padding: 0; }
+.avatar-swatch.selected { border-color: var(--brand); box-shadow: 0 0 0 2px var(--paper) inset; }
+.avatar-option-btn { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); cursor: pointer; font-size: 0.8rem; }
+.avatar-option-btn.selected { background: var(--brand); color: #fff; border-color: var(--brand); }
+
 /* ===================== toast ===================== */
 .toast-wrap { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 80; display: flex; flex-direction: column; gap: 8px; align-items: center; }
 .toast {
@@ -1365,6 +1380,72 @@ const AVATAR_GALLERY = ["data:image/webp;base64,UklGRjhGAABXRUJQVlA4WAoAAAAQAAAA
 // faces, in the same order AVATAR_GALLERY was built in -- see defaultAvatarFor above.
 const DEFAULT_STUDENT_AVATAR = AVATAR_GALLERY[0];
 const DEFAULT_STAFF_AVATAR = AVATAR_GALLERY[14];
+
+/* ---------- avatar BUILDER: a build-your-own alternative to the curated AVATAR_GALLERY above,
+   composited as a small SVG (skin tone, hair style/color, eyes, glasses, kippah, background) and
+   stored as a data:image/svg+xml;base64 URI in the exact same rec.photoUrl field a gallery pick
+   uses -- avatarHtml and every other render call site need zero changes either way. A separate
+   rec.avatarBuild descriptor is stored purely so reopening the builder restores prior choices
+   instead of starting over; it is never read by anything that renders an avatar. ---------- */
+const AVATAR_BUILDER_SKIN_TONES = ["#ffe0bd", "#f1c27d", "#e0ac69", "#c68642", "#8d5524", "#5c3a21"];
+const AVATAR_BUILDER_HAIR_COLORS = ["#2b2118", "#4a2e19", "#8a5a2b", "#c99a3d", "#b7472a", "#e8e8e8"];
+const AVATAR_BUILDER_HAIR_STYLES = ["Bald", "Short", "Curly", "Long", "Ponytail"];
+const AVATAR_BUILDER_EYE_STYLES = ["Round", "Happy", "Sleepy"];
+const AVATAR_BUILDER_KIPPAH_COLORS = ["#1a2233", "#2057ff", "#b7472a", "#1f7a4d", "#6b3fa0"];
+const AVATAR_BUILDER_BACKGROUNDS = ["#dce6ff", "#ffe4d6", "#e0f7e9", "#fff3c4", "#f3e0ff", "#d6f0ff", "#ffe0ec", "#eef0f2"];
+function defaultAvatarBuild() {
+  return {
+    skinTone: AVATAR_BUILDER_SKIN_TONES[0],
+    hairStyle: "Short",
+    hairColor: AVATAR_BUILDER_HAIR_COLORS[0],
+    eyes: "Round",
+    glasses: false,
+    kippah: false,
+    kippahColor: AVATAR_BUILDER_KIPPAH_COLORS[0],
+    background: AVATAR_BUILDER_BACKGROUNDS[0],
+  };
+}
+function avatarBuilderSvg(build) {
+  const c = Object.assign(defaultAvatarBuild(), build || {});
+  let hair = "";
+  if (c.hairStyle === "Short") {
+    hair = '<path d="M20 38 Q20 12 50 12 Q80 12 80 38 L80 28 Q50 16 20 28 Z" fill="' + c.hairColor + '"/>';
+  } else if (c.hairStyle === "Curly") {
+    hair = '<g fill="' + c.hairColor + '"><circle cx="26" cy="30" r="10"/><circle cx="38" cy="19" r="11"/>' +
+      '<circle cx="52" cy="15" r="11"/><circle cx="66" cy="19" r="11"/><circle cx="76" cy="30" r="10"/></g>';
+  } else if (c.hairStyle === "Long") {
+    hair = '<path d="M18 40 Q16 10 50 10 Q84 10 82 40 L82 78 Q74 58 74 40 Q74 22 50 20 Q26 22 26 40 Q26 58 18 78 Z" fill="' + c.hairColor + '"/>';
+  } else if (c.hairStyle === "Ponytail") {
+    hair = '<path d="M20 38 Q20 12 50 12 Q80 12 80 38 L80 28 Q50 16 20 28 Z" fill="' + c.hairColor + '"/>' +
+      '<path d="M78 34 Q94 40 88 64 Q83 56 75 51 Z" fill="' + c.hairColor + '"/>';
+  } // "Bald" -> no hair markup at all.
+
+  let eyes;
+  if (c.eyes === "Happy") {
+    eyes = '<path d="M36 54 Q40 48 44 54" stroke="#1a2233" stroke-width="2.5" fill="none" stroke-linecap="round"/>' +
+      '<path d="M56 54 Q60 48 64 54" stroke="#1a2233" stroke-width="2.5" fill="none" stroke-linecap="round"/>';
+  } else if (c.eyes === "Sleepy") {
+    eyes = '<line x1="35" y1="53" x2="45" y2="53" stroke="#1a2233" stroke-width="2.5" stroke-linecap="round"/>' +
+      '<line x1="55" y1="53" x2="65" y2="53" stroke="#1a2233" stroke-width="2.5" stroke-linecap="round"/>';
+  } else {
+    eyes = '<circle cx="40" cy="53" r="3.2" fill="#1a2233"/><circle cx="60" cy="53" r="3.2" fill="#1a2233"/>';
+  }
+
+  const glasses = c.glasses ?
+    '<g fill="none" stroke="#1a2233" stroke-width="2.2"><circle cx="40" cy="53" r="8"/><circle cx="60" cy="53" r="8"/>' +
+    '<line x1="48" y1="53" x2="52" y2="53"/><line x1="32" y1="50" x2="26" y2="47"/><line x1="68" y1="50" x2="74" y2="47"/></g>' : "";
+
+  const kippah = c.kippah ? '<path d="M32 20 Q50 4 68 20 Q50 14 32 20 Z" fill="' + c.kippahColor + '"/>' : "";
+
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">' +
+    '<rect width="100" height="100" fill="' + c.background + '"/>' +
+    '<circle cx="50" cy="58" r="32" fill="' + c.skinTone + '"/>' +
+    hair + eyes +
+    '<path d="M42 68 Q50 74 58 68" stroke="#7a4a33" stroke-width="2.2" fill="none" stroke-linecap="round"/>' +
+    glasses + kippah +
+    "</svg>";
+}
+function avatarBuilderDataUri(build) { return "data:image/svg+xml;base64," + btoa(avatarBuilderSvg(build)); }
 const FIREBASE_CONFIG = {"apiKey": "AIzaSyCIdZHVdpRrgg-1eaGFL2LZ_1gX5Da5f9o", "authDomain": "tag-academy-presence.firebaseapp.com", "projectId": "tag-academy-presence", "storageBucket": "tag-academy-presence.firebasestorage.app", "messagingSenderId": "957172925842", "appId": "1:957172925842:web:b2eaada94bb69c29336d4b"};
 /* A single technical account the app signs in as, purely so Firestore's security
    rules can require "someone is signed in" -- unrelated to, and never seen by, any
@@ -2009,7 +2090,9 @@ function seedState() {
       ],
       extraPeriods: {}, // { "YYYY-MM-DD": ["Class name", ...] } — one-off classes added for a single day
       bonusPeriods: {}, // { "YYYY-MM-DD": ["Class name", ...] } — that day's class only ever helps a student's average, never hurts it (see isBonusPeriod)
+      alwaysBonusPeriods: [], // ["Class name", ...] — this class is ALWAYS bonus, every day, set once in Admin > Schedule (see isBonusPeriod)
       chazzan: {}, // { "YYYY-MM-DD": { "Shacharis": { studentIds: [id] or [id1,id2] (split; either slot may be CHAZZAN_OTHER) }, "Mincha": {...}, ... } } — see chazzanFor/CHAZZAN_PERIODS
+      googleCalendar: { enabled: false, calendarId: "", apiKey: "" }, // Live-schedule auto-default on Today's page (see liveScheduleConfig/fetchLiveCalendarPeriod) — apiKey MUST be a Google Cloud API key restricted to the Calendar API + this site's HTTP referrer, since (like FIREBASE_CONFIG below) it ships to every browser that loads this page.
     },
     staff: [
       { id: stAdmin, username: "admin", name: "Example Admin", password: "admin1234", role: "admin" },
@@ -2111,10 +2194,15 @@ function periodsForDate(dateStr) {
 function extraPeriodsFor(dateStr) {
   return (state.settings.extraPeriods && state.settings.extraPeriods[dateStr]) || [];
 }
-/* A bonus class (admin-toggled per date+period from the Today page) only ever helps a
-   student's attendance/participation average, never hurts it -- see the bonus handling in
-   computeStats for exactly what that means numerically. */
+/* A bonus class only ever helps a student's attendance/participation average, never hurts it --
+   see the bonus handling in computeStats for exactly what that means numerically. A class can be
+   bonus two ways, and either one is enough: permanently, via the "Always bonus" checkbox on its
+   row in Admin > Schedule (state.settings.alwaysBonusPeriods, a plain list of period names -- for
+   a class like a short Tehillim that should just always count as pure upside), or admin-toggled
+   for one specific day from the Today page (state.settings.bonusPeriods, keyed by date -- for a
+   one-off day some other class should get the same treatment). */
 function isBonusPeriod(dateStr, period) {
+  if (state.settings.alwaysBonusPeriods && state.settings.alwaysBonusPeriods.includes(period)) return true;
   return !!(state.settings.bonusPeriods && state.settings.bonusPeriods[dateStr] && state.settings.bonusPeriods[dateStr].includes(period));
 }
 /* ---------- Chazzan bonus coins (see CHAZZAN_PERIODS/CHAZZAN_COIN_TABLE) ---------- */
@@ -2803,32 +2891,100 @@ function renderShell(session, previewing) {
    no "set someone else's avatar" path, and it's not offered at all while previewing (see the
    `disabled`/missing data-open-avatar-picker above). ---------- */
 let avatarPickerOpen = false;
+let avatarPickerMode = "gallery"; // "gallery" | "build"
+let avatarBuilderDraft = null; // in-progress choices while mode === "build" -- see defaultAvatarBuild
 function renderAvatarPickerModal(session) {
   const root = document.getElementById("avatar-picker-root");
   if (!root) return;
   if (!avatarPickerOpen) { root.innerHTML = ""; return; }
   const current = session.record.photoUrl || defaultAvatarFor(session.record);
+  if (avatarPickerMode === "build" && !avatarBuilderDraft) {
+    avatarBuilderDraft = Object.assign(defaultAvatarBuild(), session.record.avatarBuild || {});
+  }
+  const body = avatarPickerMode === "gallery"
+    ? '<div class="avatar-picker-grid">' +
+      AVATAR_GALLERY.map((uri, i) =>
+        '<button type="button" class="avatar-picker-opt' + (current === uri ? " selected" : "") + '" data-avatar-choice="' + i + '" aria-label="Avatar option ' + (i + 1) + '"><img src="' + uri + '" alt="" /></button>'
+      ).join("") +
+      "</div>"
+    : renderAvatarBuilderBody(avatarBuilderDraft);
   root.innerHTML = '<div class="modal-backdrop" id="avatar-picker-backdrop">' +
     '<div class="modal modal-wide">' +
     "<h2>Choose your avatar</h2>" +
-    '<p class="sub">Pick a face to represent you around the app.</p>' +
-    '<div class="avatar-picker-grid">' +
-    AVATAR_GALLERY.map((uri, i) =>
-      '<button type="button" class="avatar-picker-opt' + (current === uri ? " selected" : "") + '" data-avatar-choice="' + i + '" aria-label="Avatar option ' + (i + 1) + '"><img src="' + uri + '" alt="" /></button>'
-    ).join("") +
+    '<p class="sub">Pick a face from the gallery, or build one from scratch.</p>' +
+    '<div class="avatar-mode-tabs">' +
+    '<button type="button" class="avatar-mode-tab' + (avatarPickerMode === "gallery" ? " active" : "") + '" data-avatar-mode="gallery">Gallery</button>' +
+    '<button type="button" class="avatar-mode-tab' + (avatarPickerMode === "build" ? " active" : "") + '" data-avatar-mode="build">Build your own</button>' +
     "</div>" +
+    body +
     '<div style="display:flex;justify-content:space-between;gap:10px;">' +
     '<button type="button" class="btn btn-ghost btn-sm" id="avatar-clear-btn"' + (session.record.photoUrl ? "" : " disabled") + ">Reset to default</button>" +
+    '<div style="display:flex;gap:10px;">' +
+    (avatarPickerMode === "build" ? '<button type="button" class="btn btn-primary btn-sm" id="avatar-build-save-btn">Save avatar</button>' : "") +
     '<button type="button" class="btn btn-ghost btn-sm" id="avatar-cancel-btn">Cancel</button>' +
-    "</div></div></div>";
+    "</div></div></div></div>";
   document.getElementById("avatar-picker-backdrop").addEventListener("click", (evt) => {
-    if (evt.target.id === "avatar-picker-backdrop") { avatarPickerOpen = false; renderAvatarPickerModal(session); }
+    if (evt.target.id === "avatar-picker-backdrop") { closeAvatarPicker(session); }
   });
-  document.getElementById("avatar-cancel-btn").addEventListener("click", () => { avatarPickerOpen = false; renderAvatarPickerModal(session); });
+  document.getElementById("avatar-cancel-btn").addEventListener("click", () => closeAvatarPicker(session));
   const clearBtn = document.getElementById("avatar-clear-btn");
   if (clearBtn) clearBtn.addEventListener("click", () => setMyAvatar(session, null));
-  root.querySelectorAll("[data-avatar-choice]").forEach((btn) => btn.addEventListener("click", () => {
-    setMyAvatar(session, AVATAR_GALLERY[Number(btn.getAttribute("data-avatar-choice"))]);
+  root.querySelectorAll("[data-avatar-mode]").forEach((btn) => btn.addEventListener("click", () => {
+    avatarPickerMode = btn.getAttribute("data-avatar-mode");
+    renderAvatarPickerModal(session);
+  }));
+  if (avatarPickerMode === "gallery") {
+    root.querySelectorAll("[data-avatar-choice]").forEach((btn) => btn.addEventListener("click", () => {
+      setMyAvatar(session, AVATAR_GALLERY[Number(btn.getAttribute("data-avatar-choice"))]);
+    }));
+  } else {
+    wireAvatarBuilderControls(root, session);
+    const saveBtn = document.getElementById("avatar-build-save-btn");
+    if (saveBtn) saveBtn.addEventListener("click", () => setMyBuiltAvatar(session, avatarBuilderDraft));
+  }
+}
+function closeAvatarPicker(session) {
+  avatarPickerOpen = false;
+  avatarPickerMode = "gallery";
+  avatarBuilderDraft = null;
+  renderAvatarPickerModal(session);
+}
+function renderAvatarBuilderBody(draft) {
+  const swatchRow = (field, options, labelPrefix) => '<div class="avatar-swatch-row">' +
+    options.map((hex) => '<button type="button" class="avatar-swatch' + (draft[field] === hex ? " selected" : "") +
+      '" style="background:' + hex + '" data-avatar-field="' + field + '" data-avatar-value="' + hex + '" aria-label="' + labelPrefix + " " + hex + '"></button>').join("") + "</div>";
+  const optionRow = (field, options) => '<div class="avatar-swatch-row">' +
+    options.map((opt) => '<button type="button" class="avatar-option-btn' + (draft[field] === opt ? " selected" : "") +
+      '" data-avatar-field="' + field + '" data-avatar-value="' + opt + '">' + escapeHtml(opt) + "</button>").join("") + "</div>";
+  const toggleRow = (field) => '<div class="avatar-swatch-row">' +
+    '<button type="button" class="avatar-option-btn' + (!draft[field] ? " selected" : "") + '" data-avatar-field="' + field + '" data-avatar-value="off">Off</button>' +
+    '<button type="button" class="avatar-option-btn' + (draft[field] ? " selected" : "") + '" data-avatar-field="' + field + '" data-avatar-value="on">On</button>' +
+    "</div>";
+  let html = '<div class="avatar-builder-wrap">' +
+    '<div class="avatar-builder-preview"><img src="' + avatarBuilderDataUri(draft) + '" alt="" /></div>' +
+    '<div class="avatar-builder-controls">';
+  html += '<div class="avatar-builder-group"><label>Skin tone</label>' + swatchRow("skinTone", AVATAR_BUILDER_SKIN_TONES, "Skin tone") + "</div>";
+  html += '<div class="avatar-builder-group"><label>Hair style</label>' + optionRow("hairStyle", AVATAR_BUILDER_HAIR_STYLES) + "</div>";
+  if (draft.hairStyle !== "Bald") {
+    html += '<div class="avatar-builder-group"><label>Hair color</label>' + swatchRow("hairColor", AVATAR_BUILDER_HAIR_COLORS, "Hair color") + "</div>";
+  }
+  html += '<div class="avatar-builder-group"><label>Eyes</label>' + optionRow("eyes", AVATAR_BUILDER_EYE_STYLES) + "</div>";
+  html += '<div class="avatar-builder-group"><label>Glasses</label>' + toggleRow("glasses") + "</div>";
+  html += '<div class="avatar-builder-group"><label>Kippah</label>' + toggleRow("kippah") + "</div>";
+  if (draft.kippah) {
+    html += '<div class="avatar-builder-group"><label>Kippah color</label>' + swatchRow("kippahColor", AVATAR_BUILDER_KIPPAH_COLORS, "Kippah color") + "</div>";
+  }
+  html += '<div class="avatar-builder-group"><label>Background</label>' + swatchRow("background", AVATAR_BUILDER_BACKGROUNDS, "Background") + "</div>";
+  html += "</div></div>";
+  return html;
+}
+function wireAvatarBuilderControls(root, session) {
+  root.querySelectorAll("[data-avatar-field]").forEach((btn) => btn.addEventListener("click", () => {
+    const field = btn.getAttribute("data-avatar-field");
+    let value = btn.getAttribute("data-avatar-value");
+    if (field === "glasses" || field === "kippah") value = value === "on";
+    avatarBuilderDraft = Object.assign({}, avatarBuilderDraft, { [field]: value });
+    renderAvatarPickerModal(session);
   }));
 }
 async function setMyAvatar(session, url) {
@@ -2840,7 +2996,25 @@ async function setMyAvatar(session, url) {
   const res = await saveState(newState);
   if (res.ok || res.local) {
     avatarPickerOpen = false;
+    avatarPickerMode = "gallery";
+    avatarBuilderDraft = null;
     toast(url ? "Avatar updated." : "Avatar reset to the default.", "good");
+    renderAll();
+  }
+}
+async function setMyBuiltAvatar(session, draft) {
+  const newState = JSON.parse(JSON.stringify(state));
+  const list = session.type === "staff" ? newState.staff : newState.roster;
+  const rec = list.find((r) => r.id === session.record.id);
+  if (!rec) return;
+  rec.photoUrl = avatarBuilderDataUri(draft);
+  rec.avatarBuild = JSON.parse(JSON.stringify(draft));
+  const res = await saveState(newState);
+  if (res.ok || res.local) {
+    avatarPickerOpen = false;
+    avatarPickerMode = "gallery";
+    avatarBuilderDraft = null;
+    toast("Avatar updated.", "good");
     renderAll();
   }
 }
@@ -2902,6 +3076,114 @@ function renderLogin(root) {
 let todayDate = (localStorage.getItem(LAST_DATE_KEY) || todayISO());
 let selectedPeriod = "";
 let showAddExtraPeriod = false;
+
+/* ----------------------------------------------------------------
+   LIVE SCHEDULE (Google Calendar auto-default) -- while viewing the
+   real, actual today (not a past/future date) with a full (non-limited)
+   staff account, poll a public Google Calendar every LIVE_SCHEDULE_POLL_MS
+   and auto-switch Today's selected class/period to whatever event title
+   exactly matches one of today's scheduled periods and is happening right
+   now. See Admin > Schedule's "Live schedule" card for setup, and
+   fetchLiveCalendarPeriod for the actual Calendar API v3 call.
+   ---------------------------------------------------------------- */
+const LIVE_SCHEDULE_POLL_MS = 45000;
+let liveScheduleTimer = null;
+let liveScheduleStatus = null; // last poll result: { ok, matched, rawTitle, reason, detail, checkedAt }
+function liveScheduleConfig() {
+  return (state && state.settings && state.settings.googleCalendar) || { enabled: false, calendarId: "", apiKey: "" };
+}
+// Talks to Google Calendar API v3's events.list directly from the browser with a plain API key
+// -- this works (no OAuth, no backend) ONLY because the calendar itself must be shared publicly
+// with "See all event details" and the key is restricted (Calendar API + this site's referrer
+// only). We ask for a +/-60min window around now rather than just "now" so a slightly slow
+// response or clock skew can't make an in-progress class look like a gap.
+async function fetchLiveCalendarPeriod(overrideCfg) {
+  const cfg = overrideCfg || liveScheduleConfig();
+  if (!cfg.calendarId || !cfg.apiKey) return { ok: false, reason: "not-configured" };
+  const now = new Date();
+  const timeMin = new Date(now.getTime() - 60 * 60000).toISOString();
+  const timeMax = new Date(now.getTime() + 60 * 60000).toISOString();
+  const url = "https://www.googleapis.com/calendar/v3/calendars/" + encodeURIComponent(cfg.calendarId) + "/events" +
+    "?key=" + encodeURIComponent(cfg.apiKey) +
+    "&timeMin=" + encodeURIComponent(timeMin) + "&timeMax=" + encodeURIComponent(timeMax) +
+    "&singleEvents=true&orderBy=startTime";
+  let res;
+  try {
+    res = await fetch(url);
+  } catch (e) {
+    return { ok: false, reason: "network", detail: String((e && e.message) || e) };
+  }
+  if (!res.ok) {
+    let detail = "";
+    try { detail = (await res.text()).slice(0, 200); } catch (e) {}
+    return { ok: false, reason: "http-" + res.status, detail };
+  }
+  let data;
+  try { data = await res.json(); } catch (e) { return { ok: false, reason: "bad-json" }; }
+  const items = data.items || [];
+  const nowMs = now.getTime();
+  // Only timed events (dateTime, not date) count -- an all-day event isn't "a class happening
+  // right now" in any meaningful sense for this feature.
+  const active = items.find((ev) => {
+    const startStr = ev.start && ev.start.dateTime;
+    const endStr = ev.end && ev.end.dateTime;
+    if (!startStr || !endStr) return false;
+    const start = new Date(startStr).getTime();
+    const end = new Date(endStr).getTime();
+    return start <= nowMs && nowMs < end;
+  });
+  if (!active) return { ok: true, matched: null, rawTitle: null };
+  const rawTitle = (active.summary || "").trim();
+  // Exact match only, and only against a period actually scheduled today -- matching against
+  // the full master period list could select a period not in today's dropdown at all, which
+  // the Today page's own guard would silently reset right back out from under us.
+  const matched = periodsForDate(todayDate).find((p) => p === rawTitle) || null;
+  return { ok: true, matched, rawTitle };
+}
+function stopLiveSchedule() { if (liveScheduleTimer) { clearInterval(liveScheduleTimer); liveScheduleTimer = null; } }
+function ensureLiveSchedule(route, session) {
+  const cfg = liveScheduleConfig();
+  const isLimitedStaff = !!(session && session.type === "staff" && session.record.role === "limited");
+  const shouldRun = route === "today" && todayDate === todayISO() && !isLimitedStaff && !!cfg.enabled && !!cfg.calendarId && !!cfg.apiKey;
+  if (shouldRun && !liveScheduleTimer) {
+    pollLiveSchedule();
+    liveScheduleTimer = setInterval(pollLiveSchedule, LIVE_SCHEDULE_POLL_MS);
+  } else if (!shouldRun) {
+    stopLiveSchedule();
+  }
+}
+async function pollLiveSchedule() {
+  const result = await fetchLiveCalendarPeriod();
+  liveScheduleStatus = Object.assign({}, result, { checkedAt: Date.now() });
+  if (result.ok && result.matched && result.matched !== selectedPeriod) {
+    // An actual class change -- worth a full re-render (same as picking it from the dropdown).
+    selectedPeriod = result.matched;
+    renderAll();
+  } else {
+    updateLiveScheduleBadge(); // nothing to switch to -- just refresh the status pill in place
+  }
+}
+// Patches the badge's text/title directly instead of a full renderAll(), so a routine "nothing
+// changed" poll tick can't interrupt someone mid-tap on the marking grid.
+function updateLiveScheduleBadge() {
+  const badge = document.getElementById("live-schedule-badge");
+  if (!badge) return;
+  const s = liveScheduleStatus;
+  if (!s) return;
+  if (s.ok && s.matched) {
+    badge.className = "pill pill-good";
+    badge.textContent = "🔴 Live — following the calendar";
+    badge.title = "Currently matches \"" + s.matched + "\" on the shared Google Calendar.";
+  } else if (s.ok && !s.matched) {
+    badge.className = "pill";
+    badge.textContent = "🔴 Live — no class right now";
+    badge.title = s.rawTitle ? "The calendar shows \"" + s.rawTitle + "\" now, which doesn't exactly match any of today's class names, so the selection was left as-is." : "Nothing on the calendar matches a class name right now, so the selection was left as-is.";
+  } else {
+    badge.className = "pill pill-warn";
+    badge.textContent = "🔴 Live — connection issue";
+    badge.title = "Couldn't read the calendar (" + (s.reason || "unknown") + "). Manual selection still works normally.";
+  }
+}
 let showHebrewCal = false;
 let todayView = (function () { try { return localStorage.getItem(TODAY_VIEW_KEY) || "compact"; } catch (e) { return "compact"; } })();
 // "Today at a glance" (the roster-wide summary below the marking grid, see renderTodaySummary)
@@ -3024,6 +3306,11 @@ function renderToday(root, session) {
       html += '<option value="' + escapeHtml(p) + '"' + (p === selectedPeriod ? " selected" : "") + '>' + escapeHtml(p) + " — " + n + "/" + roster.length + " marked</option>";
     });
     html += "</select></div>";
+    if (liveScheduleConfig().enabled && todayDate === todayGregISO && !(isLimitedStaff)) {
+      html += '<div class="field" style="flex-shrink:0;display:flex;align-items:center;">' +
+        '<span class="pill" id="live-schedule-badge" title="Auto-follows the shared Google Calendar (Admin &gt; Schedule) and switches this class as it changes.">🔴 Live</span>' +
+        "</div>";
+    }
     if (isExtraToday) {
       html += '<div class="field" style="flex-shrink:0;display:flex;align-items:center;gap:8px;">' +
         '<span class="pill pill-gold">Added just for today</span>' +
@@ -3079,11 +3366,15 @@ function renderToday(root, session) {
   }
 
   // Bonus: admin-only toggle, but the "this class is bonus today" pill is visible to whoever's
-  // marking it too, so a teacher isn't left guessing why a student's average moved.
+  // marking it too, so a teacher isn't left guessing why a student's average moved. A class set
+  // permanently bonus in Admin > Schedule (see alwaysBonusPeriods) has nothing to toggle here --
+  // the per-day button only ever applies to a class that ISN'T already always-bonus.
+  const alwaysBonus = !!(selectedPeriod && (state.settings.alwaysBonusPeriods || []).includes(selectedPeriod));
   const periodIsBonus = selectedPeriod && isBonusPeriod(todayDate, selectedPeriod);
-  const canToggleBonus = canWrite && isAdmin(session);
-  const bonusPieceHtml = (periodIsBonus ? '<span class="pill pill-gold" title="Marked scores help this average; a missed or low mark leaves it unchanged.">★ Bonus today — only helps, never hurts</span>' : "") +
-    (canToggleBonus ? '<button class="btn btn-ghost btn-sm" id="toggle-bonus" type="button" title="' + (periodIsBonus ? "Unmark " + escapeHtml(selectedPeriod) + " as bonus" : "Mark " + escapeHtml(selectedPeriod) + " as bonus today") + '">' + (periodIsBonus ? "Unmark bonus" : "Mark bonus") + "</button>" : "");
+  const canToggleBonus = canWrite && isAdmin(session) && !alwaysBonus;
+  const bonusPieceHtml = (periodIsBonus ? '<span class="pill pill-gold" title="Marked scores help this average; a missed or low mark leaves it unchanged.">★ ' + (alwaysBonus ? "Always bonus" : "Bonus today") + " — only helps, never hurts</span>" : "") +
+    (canToggleBonus ? '<button class="btn btn-ghost btn-sm" id="toggle-bonus" type="button" title="' + (periodIsBonus ? "Unmark " + escapeHtml(selectedPeriod) + " as bonus" : "Mark " + escapeHtml(selectedPeriod) + " as bonus today") + '">' + (periodIsBonus ? "Unmark bonus" : "Mark bonus") + "</button>" :
+      (alwaysBonus && isAdmin(session) ? '<span class="help-text" style="margin:0;">Set to always-bonus in Admin &gt; Schedule</span>' : ""));
 
   // A class with a lower max (see periodMaxFor, set in Admin > Schedule) still marks as a full
   // dial/bar when someone's fully present -- that's what makes marking it feel the same as any
@@ -3113,11 +3404,12 @@ function renderToday(root, session) {
   // stays a plain single-select dropdown (picking a name -- or "Other" -- here always sets that
   // ONE slot as the sole chazzan, collapsing away any split); the TA's own dedicated Chazzan tab
   // (see renderChazzanGrantCard) is the only place two slots can split a tefilah (e.g. a student
-  // plus a non-student "Other" for half each). Any signed-in staff who can write can set it here,
-  // same as marking the class itself -- a student with isTA permission can do the exact same
-  // thing themselves from their own Chazzan tab.
+  // plus a non-student "Other" for half each). Only an admin can grant chazzan coins from here --
+  // a regular teacher account no longer can (this used to be open to any signed-in staff who
+  // could write, which was too broad) -- a student with isTA permission can still do the exact
+  // same thing from their own Chazzan tab.
   let chazzanHtml = "";
-  if (canWrite && selectedPeriod && CHAZZAN_PERIODS.includes(selectedPeriod)) {
+  if (canWrite && isAdmin(session) && selectedPeriod && CHAZZAN_PERIODS.includes(selectedPeriod)) {
     const current = chazzanFor(todayDate, selectedPeriod);
     const currentIds = (current && current.studentIds) || [];
     const share = currentIds.length ? chazzanShareFor(selectedPeriod, todayDate, currentIds.length) : chazzanCoinsFor(selectedPeriod, todayDate);
@@ -5409,8 +5701,8 @@ function renderAdminSchedule(root) {
   html += '<div class="field-row" style="align-items:flex-end;max-width:480px;">' +
     '<div class="field" style="flex:1;"><label for="np-name">New class name</label><input type="text" id="np-name" placeholder="e.g. Chavrusa"></div>' +
     '<div class="field" style="flex-shrink:0;"><button class="btn btn-ghost btn-sm" id="np-add" type="button">Add class</button></div></div>';
-  html += '<p class="help-text" style="margin-top:-6px;">The order below is the order classes appear in every dropdown (Today’s Class/period picker, reports, etc.) — drag the handle to reorder. Category controls which Leaderboard(s) a class counts toward — Torah, Avoda, or Gemilas Chassidim classes are combined into one score there; “Other” classes still count toward the overall Attendance/Participation boards. Max score is what a full mark in that class is worth — most classes are a normal 1, but a shorter or supplementary class can be set lower (e.g. 0.3 or 0.1) so it counts for proportionally less of a student’s blended average.</p>';
-  html += '<div class="table-wrap"><table><thead><tr><th style="width:36px;">Order</th><th class="sticky-col-l" style="min-width:150px;">Period</th><th style="min-width:212px;">Category</th><th style="min-width:100px;">Max score</th>' + DAY_NAMES.map((d) => "<th>" + d.slice(0, 3) + "</th>").join("") + "<th></th></tr></thead><tbody>";
+  html += '<p class="help-text" style="margin-top:-6px;">The order below is the order classes appear in every dropdown (Today’s Class/period picker, reports, etc.) — drag the handle to reorder. Category controls which Leaderboard(s) a class counts toward — Torah, Avoda, or Gemilas Chassidim classes are combined into one score there; “Other” classes still count toward the overall Attendance/Participation boards. Max score is what a full mark in that class is worth — most classes are a normal 1, but a shorter or supplementary class can be set lower (e.g. 0.3 or 0.1) so it counts for proportionally less of a student’s blended average. Always bonus means marks in that class only ever help a student’s average, never hurt it — every day, automatically, without needing to toggle it each morning from Today’s page (which is still there for a one-off bonus day on some other class).</p>';
+  html += '<div class="table-wrap"><table><thead><tr><th style="width:36px;">Order</th><th class="sticky-col-l" style="min-width:150px;">Period</th><th style="min-width:212px;">Category</th><th style="min-width:100px;">Max score</th><th style="min-width:100px;">Always bonus</th>' + DAY_NAMES.map((d) => "<th>" + d.slice(0, 3) + "</th>").join("") + "<th></th></tr></thead><tbody>";
   state.settings.periods.forEach((p, i) => {
     html += '<tr data-period-row="' + escapeHtml(p) + '"><td style="white-space:nowrap;">' +
       '<button class="btn btn-ghost btn-sm drag-handle" type="button" data-drag-handle title="Drag to reorder">⠿</button>' +
@@ -5421,6 +5713,8 @@ function renderAdminSchedule(root) {
       PERIOD_CATEGORIES.map((c) => '<option value="' + c.id + '"' + (c.id === currentCat ? " selected" : "") + '>' + escapeHtml(c.label) + "</option>").join("") +
       "</select></td>";
     html += '<td><input type="number" class="period-max-input" data-original="' + escapeHtml(p) + '" value="' + periodMaxFor(p) + '" min="0.05" max="1" step="0.05" title="A full mark in this class is worth this many points toward the blended average"></td>';
+    const alwaysBonus = (state.settings.alwaysBonusPeriods || []).includes(p);
+    html += '<td style="text-align:center;"><input type="checkbox" class="period-always-bonus-input" data-original="' + escapeHtml(p) + '"' + (alwaysBonus ? " checked" : "") + ' title="Marks in this class only ever help the average, never hurt it -- every day"></td>';
     DAY_NAMES.forEach((d) => {
       const checked = (state.settings.schedule[p] || []).includes(d);
       html += '<td style="text-align:center;"><input type="checkbox" data-period="' + escapeHtml(p) + '" data-day="' + d + '" ' + (checked ? "checked" : "") + "></td>";
@@ -5428,6 +5722,23 @@ function renderAdminSchedule(root) {
     html += '<td><button class="btn btn-ghost btn-sm" data-remove-period="' + escapeHtml(p) + '" type="button">Remove</button></td></tr>';
   });
   html += "</tbody></table></div><button class=\"btn btn-primary btn-sm\" id=\"s-schedule-save\" style=\"margin-top:12px;\">Save schedule</button></div>";
+
+  const liveCfg = liveScheduleConfig();
+  html += '<div class="card card-pad" style="margin-top:16px;"><div class="section-title">Live schedule (Google Calendar)</div>';
+  html += '<p class="help-text">While someone is on Today\'s page for the actual current date, this can auto-switch the Class/period picker to whatever class is happening right now, by reading a shared Google Calendar. It only ever helps pick the class faster — manual selection always still works. Two things have to be true for it to work: the calendar\'s sharing setting must be "See all event details" (not just "See only free/busy"), and each calendar event\'s title must exactly match one of the class names above (e.g. an event literally titled "Shacharis").</p>';
+  html += '<p class="help-text">The API key below is a Google Cloud API key restricted to the Calendar API and to this site\'s address — like the app\'s own Firebase key, it ships to every browser that loads this page, so never use an unrestricted key here. In Google Cloud Console: create an API key, restrict its API to "Google Calendar API", and restrict its HTTP referrers to this site\'s address.</p>';
+  html += '<div class="field-row" style="align-items:flex-end;">' +
+    '<div class="field" style="flex-shrink:0;"><label for="live-cal-enabled" style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="live-cal-enabled"' + (liveCfg.enabled ? " checked" : "") + '> Enabled</label></div>' +
+    '<div class="field" style="flex:1;min-width:240px;"><label for="live-cal-id">Calendar ID</label><input type="text" id="live-cal-id" value="' + escapeHtml(liveCfg.calendarId || "") + '" placeholder="e.g. c_xxxxx@group.calendar.google.com"></div>' +
+    '<div class="field" style="flex:1;min-width:240px;"><label for="live-cal-key">API key</label><input type="text" id="live-cal-key" value="' + escapeHtml(liveCfg.apiKey || "") + '" placeholder="Restricted Google Cloud API key"></div>' +
+    "</div>";
+  html += '<div class="field-row" style="margin-top:8px;">' +
+    '<button class="btn btn-primary btn-sm" id="live-cal-save" type="button">Save live schedule settings</button>' +
+    '<button class="btn btn-ghost btn-sm" id="live-cal-test" type="button">Test connection</button>' +
+    "</div>";
+  html += '<div id="live-cal-test-result" style="margin-top:8px;"></div>';
+  html += "</div>";
+
   root.innerHTML = html;
   document.getElementById("s-schedule-save").addEventListener("click", async () => {
     // Read renames (keyed by each row's original name) and the day checkboxes (also keyed by
@@ -5456,20 +5767,25 @@ function renderAdminSchedule(root) {
       const n = Number(inp.value);
       maxByOriginal[inp.getAttribute("data-original")] = (inp.value !== "" && !isNaN(n) && n > 0 && n <= 1) ? n : 1;
     });
+    const alwaysBonusByOriginal = {};
+    root.querySelectorAll(".period-always-bonus-input").forEach((cb) => { alwaysBonusByOriginal[cb.getAttribute("data-original")] = cb.checked; });
 
     const newState = JSON.parse(JSON.stringify(state));
     newState.settings.periods = finalNames;
     const newSched = {};
     const newCategories = {};
     const newMax = {};
+    const newAlwaysBonus = [];
     state.settings.periods.forEach((p) => {
       newSched[renameOf[p]] = schedByOriginal[p];
       newCategories[renameOf[p]] = categoryByOriginal[p] || categoryFor(p);
       newMax[renameOf[p]] = maxByOriginal[p] || periodMaxFor(p);
+      if (alwaysBonusByOriginal[p]) newAlwaysBonus.push(renameOf[p]);
     });
     newState.settings.schedule = newSched;
     newState.settings.periodCategories = newCategories;
     newState.settings.periodMax = newMax;
+    newState.settings.alwaysBonusPeriods = newAlwaysBonus;
     // Carry past attendance over to the new name for anything actually renamed.
     state.settings.periods.forEach((p) => {
       const next = renameOf[p];
@@ -5503,6 +5819,35 @@ function renderAdminSchedule(root) {
     const res = await saveState(newState);
     if (res.ok || res.local) { toast("Removed " + name + " from the schedule.", "good"); renderAll(); }
   }));
+
+  document.getElementById("live-cal-save").addEventListener("click", async () => {
+    const enabled = document.getElementById("live-cal-enabled").checked;
+    const calendarId = document.getElementById("live-cal-id").value.trim();
+    const apiKey = document.getElementById("live-cal-key").value.trim();
+    if (enabled && (!calendarId || !apiKey)) { toast("Add a Calendar ID and API key before enabling, or leave it unchecked.", "warn"); return; }
+    const newState = JSON.parse(JSON.stringify(state));
+    newState.settings.googleCalendar = { enabled, calendarId, apiKey };
+    const res = await saveState(newState);
+    if (res.ok || res.local) { toast("Live schedule settings saved.", "good"); renderAll(); }
+  });
+  document.getElementById("live-cal-test").addEventListener("click", async () => {
+    const calendarId = document.getElementById("live-cal-id").value.trim();
+    const apiKey = document.getElementById("live-cal-key").value.trim();
+    const resultEl = document.getElementById("live-cal-test-result");
+    resultEl.innerHTML = '<span class="help-text">Checking…</span>';
+    const result = await fetchLiveCalendarPeriod({ calendarId, apiKey });
+    if (result.ok && result.matched) {
+      resultEl.innerHTML = '<span class="pill pill-good">✓ Right now: "' + escapeHtml(result.matched) + '" — matched and would auto-select on Today\'s page.</span>';
+    } else if (result.ok && result.rawTitle) {
+      resultEl.innerHTML = '<span class="pill pill-warn">Connected, but the current event is titled "' + escapeHtml(result.rawTitle) + '", which doesn\'t exactly match any class name above.</span>';
+    } else if (result.ok) {
+      resultEl.innerHTML = '<span class="pill">Connected — nothing is on the calendar right now.</span>';
+    } else if (result.reason === "not-configured") {
+      resultEl.innerHTML = '<span class="pill pill-warn">Enter a Calendar ID and API key first.</span>';
+    } else {
+      resultEl.innerHTML = '<span class="pill pill-warn">Couldn\'t connect (' + escapeHtml(result.reason || "unknown error") + (result.detail ? ": " + escapeHtml(result.detail) : "") + '). Double-check the calendar is public with "See all event details," and that the API key is valid and allows this site.</span>';
+    }
+  });
   wireScheduleDrag(root);
 }
 /* Drag-to-reorder for the schedule table -- pointer events (not the HTML5 drag-and-drop API,
@@ -6789,6 +7134,7 @@ function renderAll() {
   const loginEl = document.getElementById("login-root");
   if (!state) {
     stopLbRotation();
+    stopLiveSchedule();
     if (shellEl) shellEl.style.display = "none";
     if (loginEl) { loginEl.style.display = ""; loginEl.innerHTML = '<div class="login-wrap"><p class="sub" style="text-align:center;">Loading TAG Academy…</p></div>'; }
     return;
@@ -6796,6 +7142,7 @@ function renderAll() {
   const realSession = currentSession();
   if (!realSession) {
     stopLbRotation();
+    stopLiveSchedule();
     if (shellEl) shellEl.style.display = "none";
     if (loginEl) { loginEl.style.display = ""; renderLogin(loginEl); }
     return;
@@ -6825,6 +7172,7 @@ function renderAll() {
   }
   const route = currentRoute(session);
   ensureLbRotation(route);
+  ensureLiveSchedule(route, session);
   // View-as is a preview, not a way to act as someone else -- force every write path off for
   // the duration of this one render (every renderer reads canWrite synchronously while
   // building its HTML/wiring, so restoring it right after is safe).
@@ -6832,6 +7180,7 @@ function renderAll() {
   if (previewing) canWrite = false;
   ({ today: renderToday, ledger: renderLedger, overview: renderOverview, leaderboard: renderLeaderboard, admin: renderAdmin, balance: renderMyBalance, chazzan: renderChazzanTab })[route](root, session);
   canWrite = savedCanWrite;
+  updateLiveScheduleBadge(); // reflect the last known poll result immediately, don't wait for the next tick
   wireStudentLinks(root);
   wireCollapsibleSections(root);
 }
