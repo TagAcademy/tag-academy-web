@@ -1348,6 +1348,16 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
      rather than marking a live on-page card visible like .report-card-print above does. */
   #print-report-root, #print-report-root * { visibility: visible; }
   #print-report-root { position: absolute; left: 0; top: 0; width: 100%; }
+  /* Both rules above independently make their own card visible+absolutely-positioned at the
+     same top-left corner -- harmless on their own (only one is ever the thing you meant to
+     print), but the student detail page always has a live, unconditionally-rendered
+     .report-card-print sitting in the DOM too, so printing the newer "Generate report" output
+     without this would stack BOTH cards directly on top of each other, producing exactly the
+     overlapping/jumbled text a parent reported seeing on their printed PDF. printHtmlReport
+     toggles this class on <body> for the moment it's actually printing, so only one card is
+     ever visible per print job. */
+  body.printing-generated-report .report-card-print,
+  body.printing-generated-report .report-card-print * { visibility: hidden; }
 }
 
 </style>
@@ -2425,6 +2435,33 @@ function computeStaffStats(staffId, opts) {
   };
 }
 function staffStats(staffId) { return computeStaffStats(staffId, {}); }
+/* How many times a student actually attended a class versus how many recorded sessions they
+   did not -- e.g. "Attended 10 of 15" rather than a bare percentage or a "times marked" count
+   that lumps a marked-absent day in with a marked-present one. The denominator (`scheduled`)
+   is deliberately just attended+missed, not every day the class ever ran on the calendar --
+   that keeps it consistent with the attendance percentage shown right alongside it (computeStats'
+   attPct/attPoss), which excludes both excused and bonus sessions from its own denominator the
+   same way. A day that was never marked at all isn't counted as a miss (no way to tell "no one
+   recorded it" from "he wasn't there" from data entry alone) -- only excused and blank days are
+   left out of both sides here. */
+function periodSessionCounts(studentId, period, range) {
+  const from = range.from, to = range.to;
+  let attended = 0, missed = 0, excused = 0;
+  for (const rec of state.attendance) {
+    if (rec.studentId !== studentId) continue;
+    if (from && rec.date < from) continue;
+    if (to && rec.date > to) continue;
+    if (!periodsForDate(rec.date).includes(period)) continue;
+    const pair = rec.scores && rec.scores[period];
+    if (!pair) continue;
+    if (pair[4]) { excused++; continue; }
+    const a = pair[0];
+    if (a === null || a === undefined || a === "") continue;
+    if (isBonusPeriod(rec.date, period)) continue; // bonus days never count for or against the fraction, matching attPoss/attCount
+    if (Number(a) > 0) attended++; else missed++;
+  }
+  return { scheduled: attended + missed, attended, missed, excused };
+}
 /* Per-class aggregate across a roster, for the same optional date window. */
 function classStats(period, roster, opts) {
   let attPts = 0, attPoss = 0, partPts = 0, partPoss = 0, attCount = 0, partCount = 0;
@@ -2643,12 +2680,32 @@ function printHtmlReport(bodyHtml) {
   let root = document.getElementById("print-report-root");
   if (!root) { root = document.createElement("div"); root.id = "print-report-root"; document.body.appendChild(root); }
   root.innerHTML = bodyHtml;
+  // See the @media print rule for body.printing-generated-report -- without this, the student
+  // detail page's own always-in-the-DOM .report-card-print prints stacked directly on top of
+  // this report at the same position.
+  document.body.classList.add("printing-generated-report");
   window.print();
 }
 window.addEventListener("afterprint", () => {
   const r = document.getElementById("print-report-root");
   if (r) r.innerHTML = "";
+  document.body.classList.remove("printing-generated-report");
 });
+// One row of a class's by-class bar chart (see buildStudentReportHtml) -- a single 0-100% track
+// so Attendance and Participation always share one axis and are never compared at different
+// scales, a direct text label + numeric value on every bar so identity/magnitude are never
+// color-alone, and thin, rounded, print-safe bars built from plain nested divs (no canvas/SVG
+// needed) so they render identically on screen and in an exported PDF.
+function reportBarRow(label, pctNum, color) {
+  const pctText = pctNum === null || pctNum === undefined ? "—" : pctNum + "%";
+  const width = pctNum === null || pctNum === undefined ? 0 : Math.max(0, Math.min(100, pctNum));
+  return '<div style="display:flex;align-items:center;gap:8px;margin:3px 0;">' +
+    '<span style="width:92px;flex-shrink:0;font-size:0.72rem;color:#666;">' + escapeHtml(label) + "</span>" +
+    '<div style="flex:1;background:#eee;border-radius:6px;height:10px;overflow:hidden;">' +
+    '<div style="width:' + width + '%;height:100%;background:' + color + ';border-radius:6px;"></div></div>' +
+    '<span style="width:36px;text-align:right;flex-shrink:0;font-size:0.78rem;font-weight:700;">' + pctText + "</span></div>";
+}
+const REPORT_ATT_COLOR = "#2f6fed", REPORT_PART_COLOR = "#0f9d78"; // validated for CVD/normal-vision separation -- see dataviz skill
 function buildStudentReportHtml(student, range, rangeSt, opts) {
   const showAtt = !!opts.attendance, showPart = !!opts.participation, showNotes = !!opts.notes, showCoin = !!opts.coinActivity, showNarrative = !!opts.narrative;
   const rangeLabel = range.title === "All time" ? "All time" : range.title + (range.sub ? " — " + range.sub : "");
@@ -2671,31 +2728,50 @@ function buildStudentReportHtml(student, range, rangeSt, opts) {
 
   if (showAtt || showPart) {
     const classRows = state.settings.periods
-      .map((p) => ({ p, cs: computeStats(student.id, { period: p, from: range.from, to: range.to }) }))
-      .filter((r) => r.cs.attCount > 0 || r.cs.partCount > 0);
+      .map((p) => ({ p, cs: computeStats(student.id, { period: p, from: range.from, to: range.to }), sess: periodSessionCounts(student.id, p, range) }))
+      .filter((r) => r.cs.attCount > 0 || r.cs.partCount > 0); // only classes this student actually has a record in -- periodsForDate covers every class the school runs, most of which this student may never be part of
     if (classRows.length) {
-      html += '<h3 style="margin-bottom:6px;">By class</h3><table style="width:100%;border-collapse:collapse;margin-bottom:24px;font-size:0.9rem;">' +
-        '<thead><tr style="border-bottom:2px solid #333;text-align:left;"><th style="padding:5px 8px 5px 0;">Class</th>' +
-        (showAtt ? '<th style="padding:5px 8px;">Attendance</th>' : "") + (showPart ? '<th style="padding:5px 8px;">Participation</th>' : "") +
-        '<th style="padding:5px 8px;">Times marked</th></tr></thead><tbody>';
+      html += '<h3 style="margin:0 0 4px;">By class</h3>' +
+        '<p style="font-size:0.78rem;color:#888;margin:0 0 14px;">"Attended" counts sessions marked present, out of every time that class actually met.</p>';
       classRows.forEach((r) => {
-        html += '<tr style="border-bottom:1px solid #ddd;"><td style="padding:5px 8px 5px 0;">' + escapeHtml(r.p) + "</td>" +
-          (showAtt ? '<td style="padding:5px 8px;">' + pct(r.cs.attPct) + "</td>" : "") +
-          (showPart ? '<td style="padding:5px 8px;">' + pct(r.cs.partPct) + "</td>" : "") +
-          '<td style="padding:5px 8px;">' + r.cs.attCount + "</td></tr>";
+        const attPctNum = r.cs.attPct === null ? null : Math.round(r.cs.attPct * 100);
+        const partPctNum = r.cs.partPct === null ? null : Math.round(r.cs.partPct * 100);
+        html += '<div style="margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid #eee;">' +
+          '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:5px;">' +
+          '<span style="font-weight:700;">' + escapeHtml(r.p) + "</span>" +
+          '<span style="font-size:0.78rem;color:#666;">Attended ' + r.sess.attended + " of " + r.sess.scheduled +
+          (r.sess.missed ? " · missed " + r.sess.missed : "") + (r.sess.excused ? " · excused " + r.sess.excused : "") + "</span></div>";
+        if (showAtt) html += reportBarRow("Attendance", attPctNum, REPORT_ATT_COLOR);
+        if (showPart) html += reportBarRow("Participation", partPctNum, REPORT_PART_COLOR);
+        html += "</div>";
       });
-      html += "</tbody></table>";
     }
   }
 
   if (showAtt || showPart || showNotes) {
+    // A full day-by-day log reads as noise in a report meant for a parent to skim -- what
+    // actually matters here is what was missed or flagged, not another row confirming a normal
+    // day. So this lists only sessions that weren't a clean full mark (missed, partial, or
+    // excused) plus anything with a note, in place of every single entry; the by-class bars
+    // above already give the complete, honest picture including the good days.
     const logRows = studentLogRowsFor(student.id, range, null);
-    if (logRows.length) {
-      html += '<h3 style="margin-bottom:6px;">Attendance &amp; participation log</h3><table style="width:100%;border-collapse:collapse;font-size:0.82rem;margin-bottom:24px;">' +
+    const notable = logRows.filter((r) => {
+      if (showNotes && r.note) return true;
+      if ((showAtt || showPart) && r.excused) return true;
+      const maxVal = periodMaxFor(r.period);
+      if (showAtt && r.att !== null && r.att !== undefined && Number(r.att) < maxVal) return true;
+      if (showPart && r.part !== null && r.part !== undefined && Number(r.part) < maxVal) return true;
+      return false;
+    });
+    html += '<h3 style="margin:18px 0 4px;">Missed or flagged sessions</h3>';
+    if (!notable.length) {
+      html += '<p style="font-size:0.85rem;color:#333;background:#f3f8f4;border-radius:6px;padding:8px 10px;">Nothing to flag — every marked session this period was a full attendance &amp; participation mark.</p>';
+    } else {
+      html += '<table style="width:100%;border-collapse:collapse;font-size:0.82rem;margin-bottom:8px;">' +
         '<thead><tr style="border-bottom:2px solid #333;text-align:left;"><th style="padding:4px 8px 4px 0;">Date</th><th style="padding:4px 8px;">Class</th>' +
         (showAtt ? '<th style="padding:4px 8px;">Attendance</th>' : "") + (showPart ? '<th style="padding:4px 8px;">Participation</th>' : "") +
         (showNotes ? '<th style="padding:4px 8px;">Note</th>' : "") + "</tr></thead><tbody>";
-      logRows.forEach((r) => {
+      notable.slice(0, 150).forEach((r) => {
         html += '<tr style="border-bottom:1px solid #eee;"><td style="padding:4px 8px 4px 0;">' + fmtDateShort(r.date) + "</td><td style=\"padding:4px 8px;\">" + escapeHtml(r.period) + "</td>" +
           (showAtt ? '<td style="padding:4px 8px;">' + (r.excused ? "Excused" : num2(r.att)) + "</td>" : "") +
           (showPart ? '<td style="padding:4px 8px;">' + (r.excused ? "Excused" : (r.part === null || r.part === undefined ? "—" : num2(r.part))) + "</td>" : "") +
@@ -2703,6 +2779,7 @@ function buildStudentReportHtml(student, range, rangeSt, opts) {
           "</tr>";
       });
       html += "</tbody></table>";
+      if (notable.length > 150) html += '<p style="font-size:0.78rem;color:#888;">Showing the most recent 150 of ' + notable.length + " flagged sessions.</p>";
     }
   }
 
