@@ -1488,7 +1488,7 @@ try {
 
 /* ---------- constants ---------- */
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Shabbos"];
-const TX_TYPES = ["Manual Grant", "Spent/Redeemed", "Transfer Out", "Transfer In", "Chazzan Bonus"];
+const TX_TYPES = ["Manual Grant", "Spent/Redeemed", "Transfer Out", "Transfer In", "Chazzan Bonus", "GC Bonus"];
 /* Chazzan (leading davening) bonus coins -- student.isTA is a PERMISSION, not an eligibility
    flag: admin grants it (Admin > Students > "Allow to grant Chazzan coins") to a student who's
    effectively the teacher's helper/gabbai, and that one student can then record who led davening
@@ -1844,7 +1844,11 @@ function pillValueFromEvent(evt, trackEl, max) {
   const p = (evt.touches && evt.touches[0]) || (evt.changedTouches && evt.changedTouches[0]) || evt;
   let frac = rect.width > 0 ? (p.clientX - rect.left) / rect.width : 0;
   frac = Math.max(0, Math.min(1, frac));
-  return Math.round(frac * 20) / 20 * m;
+  // Snap to a flat 0.05 step in real point terms, regardless of this class's max. Rounding the
+  // 0-1 drag fraction to the nearest 1/20th and only THEN scaling by max (the old order) silently
+  // changed the step size for any class whose max isn't exactly 1 -- e.g. a class worth up to 3
+  // points would jump by 0.15 per drag increment instead of 0.05 like every other class.
+  return Math.round(frac * m * 20) / 20;
 }
 // Set while any Cards-view bar is actively being dragged, and checked by isViewBusy() -- the
 // drag targets the track div, not the underlying (often invisible) input, so
@@ -2773,6 +2777,9 @@ function buildStudentReportHtml(student, range, rangeSt, opts) {
     const notable = logRows.filter((r) => {
       if (showNotes && r.note) return true;
       if ((showAtt || showPart) && r.excused) return true;
+      // A bonus-marked session only ever helps -- a low or blank score there is never a "miss",
+      // same principle as periodSessionCounts leaving bonus days out of the by-class count above.
+      if (r.bonus) return false;
       const maxVal = periodMaxFor(r.period);
       if (showAtt && r.att !== null && r.att !== undefined && Number(r.att) < maxVal) return true;
       if (showPart && r.part !== null && r.part !== undefined && Number(r.part) < maxVal) return true;
@@ -3351,6 +3358,11 @@ function renderLogin(root) {
 let todayDate = (localStorage.getItem(LAST_DATE_KEY) || todayISO());
 let selectedPeriod = "";
 let showAddExtraPeriod = false;
+// Quick "GC" bonus-credit grant (see wireGcGrant) -- a one-tap way to award a student Gemilas
+// Chassidim coins the moment it happens, without switching Today's selected class over to GC
+// and marking a whole attendance grid for something that isn't tied to a scheduled period at
+// all. Lives right next to "+ Class" in the quick-actions row.
+let gcGrantOpen = false;
 
 /* ----------------------------------------------------------------
    LIVE SCHEDULE (Google Calendar auto-default) -- while viewing the
@@ -3613,6 +3625,14 @@ function renderToday(root, session) {
   // restricted to.
   const extraPeriodButtonHtml = canWrite && !isLimitedStaff && !showAddExtraPeriod
     ? '<button class="btn btn-ghost btn-sm" id="extra-period-open" type="button" title="Add a class just for today">+ Class</button>' : "";
+  // Quick GC (Gemilas Chassidim) bonus grant -- see wireGcGrant. Sits right beside "+ Class"
+  // since both are one-off, not-really-a-scheduled-period actions, but this one skips the
+  // attendance grid entirely: an act of kindness happens whenever it happens, not on a fixed
+  // schedule, so this doesn't touch GC's own attendance/participation marks or its by-class
+  // stats at all -- it's a straight coin grant to the ledger, the same mechanism the Chazzan
+  // bonus already uses.
+  const gcGrantButtonHtml = canWrite && !isLimitedStaff && roster.length > 0
+    ? '<button class="btn btn-ghost btn-sm" id="gc-grant-open" type="button" title="Give a student bonus Gemilas Chassidim credit, any time">GC</button>' : "";
   const extraPeriodFormHtml = canWrite && !isLimitedStaff && showAddExtraPeriod ? (() => {
     const otherPeriods = state.settings.periods.filter((p) => !periods.includes(p));
     return '<div class="field-row" style="margin-top:10px;align-items:flex-end;">' +
@@ -3631,9 +3651,9 @@ function renderToday(root, session) {
 
   if (periods.length === 0) {
     html += '<div class="empty-state">No periods are scheduled on ' + dayNameFor(todayDate) + '.</div>' +
-      (extraPeriodButtonHtml ? '<div style="margin-top:10px;">' + extraPeriodButtonHtml + "</div>" : "") +
-      extraPeriodFormHtml + "</div>";
-    root.innerHTML = html; wireTodayHeader(root); wireExtraPeriod(root); return;
+      (extraPeriodButtonHtml || gcGrantButtonHtml ? '<div class="today-quick-actions" style="margin-top:10px;">' + extraPeriodButtonHtml + gcGrantButtonHtml + "</div>" : "") +
+      extraPeriodFormHtml + gcGrantModalHtml() + "</div>";
+    root.innerHTML = html; wireTodayHeader(root); wireExtraPeriod(root); wireGcGrant(root, session); return;
   }
   if (roster.length === 0) {
     html += '<div class="empty-state">No active students on the roster yet — ask an admin to add them.</div></div>';
@@ -3665,10 +3685,10 @@ function renderToday(root, session) {
   // on narrow screens) so they read as a single group of quick actions instead of a scroll of
   // separate buttons. The "+ Add a class" form itself, when open, still gets its own full-width
   // line right below -- there's no reasonable way to fit a select + text input inline with these.
-  if (bonusPieceHtml || periodMaxPieceHtml || extraPeriodButtonHtml || fillAllHtml) {
-    html += '<div class="today-quick-actions">' + periodMaxPieceHtml + bonusPieceHtml + extraPeriodButtonHtml + fillAllHtml + "</div>";
+  if (bonusPieceHtml || periodMaxPieceHtml || extraPeriodButtonHtml || gcGrantButtonHtml || fillAllHtml) {
+    html += '<div class="today-quick-actions">' + periodMaxPieceHtml + bonusPieceHtml + extraPeriodButtonHtml + gcGrantButtonHtml + fillAllHtml + "</div>";
   }
-  html += extraPeriodFormHtml;
+  html += extraPeriodFormHtml + gcGrantModalHtml();
 
   // Chazzan: only shows up for the four tefillos (see CHAZZAN_PERIODS) -- any active student is
   // a valid pick (isTA is a PERMISSION to grant this, not an eligibility restriction on who can
@@ -3845,6 +3865,7 @@ function renderToday(root, session) {
   wireSelfMark(root, session);
   wireGlanceCircles(root);
   wireTodaySummary(root);
+  wireGcGrant(root, session);
 }
 
 /* A read-only circle for the "Today at a glance" table: same fill+color language as
@@ -4287,6 +4308,61 @@ function wireExtraPeriod(root) {
     if (res.ok || res.local) { selectedPeriod = ""; toast("Removed " + name + " from today.", "good"); renderAll(); }
   });
 }
+// Quick "GC" bonus-credit grant -- only non-empty while gcGrantOpen is true (see the "GC" button
+// beside "+ Class" on Today). A straight ledger grant (type "GC Bonus"), the same mechanism the
+// Chazzan bonus already uses -- it never touches GC's own attendance/participation marks, since
+// an act of kindness happens whenever it happens, not on a fixed schedule, so there's no "GC
+// session" for this to be attached to.
+function gcGrantModalHtml() {
+  if (!gcGrantOpen) return "";
+  const roster = activeRoster();
+  if (!roster.length) return "";
+  return '<div class="modal-backdrop" id="gc-grant-backdrop"><div class="modal">' +
+    "<h2>Give bonus GC credit</h2>" +
+    '<p class="sub">Award TAG coins for an act of Gemilas Chassidim on the spot — this doesn\'t touch GC\'s own attendance record.</p>' +
+    '<div class="field" style="margin-top:14px;"><label for="gc-grant-student">Student</label><select id="gc-grant-student">' +
+    roster.map((s) => '<option value="' + s.id + '">' + fullName(s) + "</option>").join("") +
+    "</select></div>" +
+    '<div class="field-row" style="margin-top:10px;">' +
+    '<div class="field"><label for="gc-grant-date">Date</label><input type="date" id="gc-grant-date" value="' + escapeHtml(todayDate) + '"></div>' +
+    '<div class="field"><label for="gc-grant-amount">Amount</label><input type="number" min="0.5" step="0.5" id="gc-grant-amount" placeholder="1"></div>' +
+    "</div>" +
+    '<div class="field" style="margin-top:10px;"><label for="gc-grant-note">Note</label><input type="text" id="gc-grant-note" placeholder="e.g. helped a classmate study"></div>' +
+    '<div style="display:flex;justify-content:space-between;gap:10px;margin-top:16px;flex-wrap:wrap;">' +
+    '<button type="button" class="btn btn-ghost btn-sm" id="gc-grant-cancel">Cancel</button>' +
+    '<button type="button" class="btn btn-primary btn-sm" id="gc-grant-submit">Grant</button>' +
+    "</div></div></div>";
+}
+function wireGcGrant(root, session) {
+  const openBtn = document.getElementById("gc-grant-open");
+  if (openBtn) openBtn.addEventListener("click", () => { gcGrantOpen = true; renderAll(); });
+  const backdrop = document.getElementById("gc-grant-backdrop");
+  if (backdrop) backdrop.addEventListener("click", (evt) => { if (evt.target.id === "gc-grant-backdrop") { gcGrantOpen = false; renderAll(); } });
+  const cancelBtn = document.getElementById("gc-grant-cancel");
+  if (cancelBtn) cancelBtn.addEventListener("click", () => { gcGrantOpen = false; renderAll(); });
+  const submitBtn = document.getElementById("gc-grant-submit");
+  if (!submitBtn) return;
+  submitBtn.addEventListener("click", async () => {
+    const studentId = document.getElementById("gc-grant-student").value;
+    const date = document.getElementById("gc-grant-date").value;
+    const amount = Number(document.getElementById("gc-grant-amount").value);
+    const note = document.getElementById("gc-grant-note").value.trim();
+    if (!studentId) { toast("Pick a student.", "warn"); return; }
+    if (!date || !amount || amount <= 0) { toast("Pick a date and a positive amount.", "warn"); return; }
+    submitBtn.disabled = true;
+    const newState = JSON.parse(JSON.stringify(state));
+    newState.ledger.push({ id: uid("l"), date, studentId, type: "GC Bonus", amount, note, enteredBy: session.record.name, enteredAt: Date.now() });
+    const res = await saveState(newState);
+    if (res.ok || res.local) {
+      const s = studentById(studentId);
+      gcGrantOpen = false;
+      toast("Granted " + num2(amount) + " GC coin" + (amount === 1 ? "" : "s") + (s ? " to " + s.first : "") + ".", "good");
+      renderAll();
+    } else {
+      submitBtn.disabled = false;
+    }
+  });
+}
 function wireTodayGrid(root, teacherName) {
   const body = document.getElementById("period-entry-body");
   if (!body) return;
@@ -4632,7 +4708,7 @@ function statTile(label, value, tone) {
   return '<div class="stat-tile"><div class="label">' + escapeHtml(label) + '</div><div class="value' + (tone ? " " + tone : "") + '">' + value + "</div></div>";
 }
 function txPill(type) {
-  const cls = (type === "Spent/Redeemed" || type === "Transfer Out") ? "pill-warn" : ((type === "Manual Grant" || type === "Chazzan Bonus") ? "pill-gold" : "pill-good");
+  const cls = (type === "Spent/Redeemed" || type === "Transfer Out") ? "pill-warn" : ((type === "Manual Grant" || type === "Chazzan Bonus" || type === "GC Bonus") ? "pill-gold" : "pill-good");
   return '<span class="pill ' + cls + '">' + escapeHtml(type) + "</span>";
 }
 
