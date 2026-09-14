@@ -2435,32 +2435,43 @@ function computeStaffStats(staffId, opts) {
   };
 }
 function staffStats(staffId) { return computeStaffStats(staffId, {}); }
-/* How many times a student actually attended a class versus how many recorded sessions they
-   did not -- e.g. "Attended 10 of 15" rather than a bare percentage or a "times marked" count
-   that lumps a marked-absent day in with a marked-present one. The denominator (`scheduled`)
-   is deliberately just attended+missed, not every day the class ever ran on the calendar --
-   that keeps it consistent with the attendance percentage shown right alongside it (computeStats'
-   attPct/attPoss), which excludes both excused and bonus sessions from its own denominator the
-   same way. A day that was never marked at all isn't counted as a miss (no way to tell "no one
-   recorded it" from "he wasn't there" from data entry alone) -- only excused and blank days are
-   left out of both sides here. */
+/* How many times a class actually MET during a range versus how many of those sessions the
+   student is recorded as having attended -- e.g. "Attended 10 of 27" -- deliberately an
+   ALL-INCLUSIVE count: the denominator is every real occurrence of the class per the actual
+   weekly schedule (periodsForDate), not just the days someone happened to mark, and "missed"
+   folds together every reason he wasn't credited as present -- explicitly absent, excused, AND
+   never marked at all. That last one matters: a day nobody got around to marking is not the
+   same as a day he was there, and silently dropping it from the denominator (the way the
+   attendance percentage elsewhere does, to keep that percentage from being unfairly dragged
+   down by data-entry gaps) would hide real missed instruction from a parent reading this report
+   -- the whole point here is the complete picture, not a number that flatters the record. A
+   bonus-marked day is the one exception kept out of both sides, same as everywhere else in the
+   app: a bonus class only ever helps, so it's not "a class that occurred" in the sense this
+   count means. For "All time" (range.from/to both null) there's no fixed calendar boundary to
+   walk, so this falls back to the span of the student's own attendance history (earliest to
+   latest date on record for them). */
 function periodSessionCounts(studentId, period, range) {
-  const from = range.from, to = range.to;
-  let attended = 0, missed = 0, excused = 0;
-  for (const rec of state.attendance) {
-    if (rec.studentId !== studentId) continue;
-    if (from && rec.date < from) continue;
-    if (to && rec.date > to) continue;
-    if (!periodsForDate(rec.date).includes(period)) continue;
-    const pair = rec.scores && rec.scores[period];
-    if (!pair) continue;
+  let from = range.from, to = range.to;
+  if (!from || !to) {
+    const dates = state.attendance.filter((r) => r.studentId === studentId).map((r) => r.date);
+    if (!dates.length) return { scheduled: 0, attended: 0, missed: 0, absent: 0, excused: 0, unmarked: 0 };
+    if (!from) from = dates.reduce((a, b) => (b < a ? b : a));
+    if (!to) to = dates.reduce((a, b) => (b > a ? b : a));
+  }
+  let scheduled = 0, attended = 0, absent = 0, excused = 0, unmarked = 0;
+  for (let d = from; d <= to; d = shiftDate(d, 1)) {
+    if (!periodsForDate(d).includes(period)) continue;
+    if (isBonusPeriod(d, period)) continue;
+    scheduled++;
+    const rec = state.attendance.find((r) => r.studentId === studentId && r.date === d);
+    const pair = rec && rec.scores && rec.scores[period];
+    if (!pair) { unmarked++; continue; }
     if (pair[4]) { excused++; continue; }
     const a = pair[0];
-    if (a === null || a === undefined || a === "") continue;
-    if (isBonusPeriod(rec.date, period)) continue; // bonus days never count for or against the fraction, matching attPoss/attCount
-    if (Number(a) > 0) attended++; else missed++;
+    if (a === null || a === undefined || a === "") { unmarked++; continue; }
+    if (Number(a) > 0) attended++; else absent++;
   }
-  return { scheduled: attended + missed, attended, missed, excused };
+  return { scheduled, attended, missed: absent + excused + unmarked, absent, excused, unmarked };
 }
 /* Per-class aggregate across a roster, for the same optional date window. */
 function classStats(period, roster, opts) {
@@ -2732,15 +2743,19 @@ function buildStudentReportHtml(student, range, rangeSt, opts) {
       .filter((r) => r.cs.attCount > 0 || r.cs.partCount > 0); // only classes this student actually has a record in -- periodsForDate covers every class the school runs, most of which this student may never be part of
     if (classRows.length) {
       html += '<h3 style="margin:0 0 4px;">By class</h3>' +
-        '<p style="font-size:0.78rem;color:#888;margin:0 0 14px;">"Attended" counts sessions marked present, out of every time that class actually met.</p>';
+        '<p style="font-size:0.78rem;color:#888;margin:0 0 14px;">Out of every time each class actually met -- "missed" includes days marked absent, excused, or never marked at all.</p>';
       classRows.forEach((r) => {
         const attPctNum = r.cs.attPct === null ? null : Math.round(r.cs.attPct * 100);
         const partPctNum = r.cs.partPct === null ? null : Math.round(r.cs.partPct * 100);
+        const missReasons = [];
+        if (r.sess.absent) missReasons.push(r.sess.absent + " absent");
+        if (r.sess.excused) missReasons.push(r.sess.excused + " excused");
+        if (r.sess.unmarked) missReasons.push(r.sess.unmarked + " not marked");
         html += '<div style="margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid #eee;">' +
           '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:5px;">' +
           '<span style="font-weight:700;">' + escapeHtml(r.p) + "</span>" +
           '<span style="font-size:0.78rem;color:#666;">Attended ' + r.sess.attended + " of " + r.sess.scheduled +
-          (r.sess.missed ? " · missed " + r.sess.missed : "") + (r.sess.excused ? " · excused " + r.sess.excused : "") + "</span></div>";
+          (r.sess.missed ? " · missed " + r.sess.missed + (missReasons.length ? " (" + missReasons.join(", ") + ")" : "") : "") + "</span></div>";
         if (showAtt) html += reportBarRow("Attendance", attPctNum, REPORT_ATT_COLOR);
         if (showPart) html += reportBarRow("Participation", partPctNum, REPORT_PART_COLOR);
         html += "</div>";
