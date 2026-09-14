@@ -645,6 +645,10 @@ td.num, th.num { font-family: var(--font-mono); text-align: right; }
 .pill-caution { background: var(--caution-soft); color: var(--caution); }
 .pill-warn { background: var(--warn-soft); color: var(--warn); }
 .pill-gold { background: var(--gold-soft); color: var(--gold); }
+/* Same gold look as .pill-gold, but its own class -- used for the staff "your TAG coins" badge
+   (see wireSelfMark's card) so it can never collide with a ".pill.pill-gold" selector aimed at
+   the unrelated Chazzan coin-share pill elsewhere on the same Today page. */
+.pill-coin { background: var(--gold-soft); color: var(--gold); }
 .stat-tile .value.good { color: var(--good); }
 .stat-tile .value.caution { color: var(--caution); }
 .stat-tile .value.warn { color: var(--warn); }
@@ -2382,6 +2386,45 @@ function computeStats(studentId, opts) {
   };
 }
 function studentStats(studentId) { return computeStats(studentId, {}); }
+// Staff/teacher TAG coins -- earned the exact same way a student's are (Attendance +
+// Participation points, divided by the shared "points per coin" setting -- see
+// Admin > Privileges), just computed from a staff member's own private self-mark records
+// (state.staffAttendance) instead of the roster's state.attendance. Deliberately not visible
+// anywhere a student could see it: shown only in Admin > Staff (every staff member's balance)
+// and to the staff member themselves on their own Today page (see the "Mark yourself" card) --
+// never on a leaderboard or any other student-facing screen. There's no ledger dimension here
+// (no grant/charge/spend for staff), so balance is simply whatever's been earned.
+function computeStaffStats(staffId, opts) {
+  opts = opts || {};
+  const from = opts.from, to = opts.to;
+  let attPts = 0, attPoss = 0, partPts = 0, partPoss = 0, attCount = 0, partCount = 0;
+  for (const rec of (state.staffAttendance || [])) {
+    if (rec.staffId !== staffId) continue;
+    if (from && rec.date < from) continue;
+    if (to && rec.date > to) continue;
+    for (const p of Object.keys(rec.scores || {})) {
+      const pair = rec.scores[p];
+      if (!pair) continue;
+      const [a, pt] = pair;
+      const bonus = isBonusPeriod(rec.date, p);
+      const maxVal = periodMaxFor(p);
+      if (a !== null && a !== undefined && a !== "") { attPts += Math.min(Number(a), maxVal); if (!bonus) { attPoss += maxVal; attCount += 1; } }
+      if (pt !== null && pt !== undefined && pt !== "") { partPts += Math.min(Number(pt), maxVal); if (!bonus) { partPoss += maxVal; partCount += 1; } }
+    }
+  }
+  const pointsPerCoin = state.settings.pointsPerCoin || 10;
+  const coinsEarned = Math.floor((attPts + partPts) / pointsPerCoin);
+  const blendedPoss = attPoss + partPoss;
+  return {
+    attPts, attPoss, attPct: attPoss ? attPts / attPoss : null,
+    partPts, partPoss, partPct: partPoss ? partPts / partPoss : null,
+    attCount, partCount,
+    points: attPts + partPts,
+    blendedPct: blendedPoss ? (attPts + partPts) / blendedPoss : null,
+    coinsEarned, balance: coinsEarned,
+  };
+}
+function staffStats(staffId) { return computeStaffStats(staffId, {}); }
 /* Per-class aggregate across a roster, for the same optional date window. */
 function classStats(period, roster, opts) {
   let attPts = 0, attPoss = 0, partPts = 0, partPoss = 0, attCount = 0, partCount = 0;
@@ -3593,8 +3636,10 @@ function renderToday(root, session) {
     const staffRec = staffSelfRecord(todayDate, staffId);
     const staffPair = (staffRec && staffRec.scores && staffRec.scores[selectedPeriod]) || [null, null];
     const selfLinked = !(staffPair[0] !== null && staffPair[0] !== undefined && staffPair[1] !== null && staffPair[1] !== undefined && staffPair[0] !== staffPair[1]);
+    const staffCoins = staffStats(staffId).balance;
     selfMarkHtml = '<div class="card card-pad" style="margin-top:14px;border-style:dashed;">' +
       '<div class="section-title" style="font-size:0.95rem;">Mark yourself — ' + escapeHtml(selectedPeriod) + "</div>" +
+      '<div style="margin:2px 0 4px;"><span class="pill pill-coin" title="Earned from your own marked attendance &amp; participation — not visible to students">' + coinBadge("sm") + " " + num2(staffCoins) + " TAG coin" + (staffCoins === 1 ? "" : "s") + "</span></div>" +
       '<p class="help-text" style="margin:2px 0 10px;">Private to your account — no one else marking ' + escapeHtml(selectedPeriod) + " sees or changes this.</p>" +
       '<div class="student-rows">' +
       '<div class="student-card student-row-compact" id="self-mark-row">' +
@@ -6078,13 +6123,14 @@ function renderAdminStaff(root) {
       '<button class="btn btn-ghost btn-sm" id="st-bulk-dismiss" style="margin-top:10px;">Dismiss</button></div>';
   }
 
-  html += '<div class="card card-pad"><div class="table-wrap"><table><thead><tr><th>Name</th><th>Username</th><th>Password</th><th>Role</th><th class="sticky-col-r"></th></tr></thead><tbody>';
+  html += '<div class="card card-pad"><div class="table-wrap"><table><thead><tr><th>Name</th><th>Username</th><th>Password</th><th>Role</th><th class="num" title="Earned from their own self-marked attendance &amp; participation -- never shown to students">TAG coins</th><th class="sticky-col-r"></th></tr></thead><tbody>';
   state.staff.forEach((s) => {
     html += "<tr><td>" + escapeHtml(s.name) + '</td><td class="num">' + escapeHtml(s.username) + '</td><td class="num">' + passwordCellHtml(s.password, "staff:" + s.id) +
       '</td><td>' + (s.role === "admin" ? '<span class="pill pill-gold">Admin</span>'
         : s.role === "limited" ? '<span class="pill pill-muted">Limited: ' + escapeHtml(s.restrictedPeriod || "?") + "</span>"
         : '<span class="pill pill-muted">Teacher</span>') +
-      '</td><td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;"><button class="btn btn-ghost btn-sm" data-view-as-staff="' + s.id + '">View as</button>' +
+      '</td><td class="num">' + num2(staffStats(s.id).balance) + "</td>" +
+      '<td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;"><button class="btn btn-ghost btn-sm" data-view-as-staff="' + s.id + '">View as</button>' +
       '<button class="btn btn-ghost btn-sm" data-reset-staff="' + s.id + '">Reset password</button></td></tr>';
   });
   html += "</tbody></table></div></div>";
