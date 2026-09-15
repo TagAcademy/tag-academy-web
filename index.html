@@ -1509,6 +1509,20 @@ const TX_TYPES = ["Manual Grant", "Spent/Redeemed", "Transfer Out", "Transfer In
    chazzanPeriodsForDate/hebrewDayInfoFor), not a fixed list -- Musaf only shows up on a day that
    actually has one. */
 const CHAZZAN_PERIODS = ["Shacharis", "Musaf", "Mincha", "Maariv"];
+// Periods where staff/teachers get marked right alongside the students, in the exact same grid
+// -- one save covers everybody instead of each staff member separately self-marking via "Mark
+// yourself" (see wireSelfMark). Eagle is a whole-group activity staff run together with the
+// students, so it's the one period this applies to; admins/teachers appear as extra rows in
+// renderToday's roster (see buildTodayPatch, which routes a row tagged data-staff="1" to
+// state.staffAttendance/staffId instead of state.attendance/studentId). Limited-staff accounts
+// are deliberately left out here -- they're restricted to one specific class already, and if
+// that class happens to BE Eagle they still get their own private "Mark yourself" row, same as
+// any other period.
+const STAFF_ROSTER_PERIODS = ["Eagle"];
+function staffRosterForPeriod(period) {
+  if (!STAFF_ROSTER_PERIODS.includes(period)) return [];
+  return (state.staff || []).filter((s) => s.role === "admin" || s.role === "teacher").sort((a, b) => a.name.localeCompare(b.name));
+}
 const CHAZZAN_COIN_TABLE = { Shacharis: 1, Mincha: 0.5, Maariv: 0.25, Musaf: 1 };
 // Sentinel "student id" for the second Chazzan slot meaning "a non-student (guest, staff,
 // rabbi, etc.) took the other half" -- selectable right alongside real roster members, but
@@ -3523,6 +3537,18 @@ let lastSaveUndo = null;
 // earlier, instead of losing track of it.
 const todayAutosaveInFlight = new Map(); // studentId -> in-flight save promise
 const todayAutosavePending = new Map(); // studentId -> latest .student-card element to re-save once current save finishes
+// Which rows on the CURRENT date+period have actually been edited in this browser tab -- keyed
+// "<id>:student" or "<id>:staff" so a student id and a staff id can never collide. The bulk Save
+// button (and the note-popover "Done" button, and Fill All) only ever write rows in this set;
+// see buildTodayPatch's own comment for why re-saving every visible card regardless of whether
+// this tab touched it is exactly what let one person's stale screen silently revert or blank out
+// a different student someone else had just marked. Reset whenever the viewed date or period
+// changes (see the today-header/period-select handlers) since "touched" only ever means "touched
+// for what's currently on screen."
+let todayTouchedCards = new Set();
+function markTouched(card) {
+  todayTouchedCards.add(card.getAttribute("data-student") + ":" + (card.dataset.staff === "1" ? "staff" : "student"));
+}
 function updateTodaySaveStatus() {
   const el = document.getElementById("today-save-status");
   if (!el) return;
@@ -3772,8 +3798,13 @@ function renderToday(root, session) {
   // plain number fields, so it reads as "one more row of the same UI" instead of a bolted-on
   // form -- see wireSelfMark for how it drives those shared pieces against staffAttendance
   // instead of the roster's buildTodayPatch/attendance.
+  // Eagle (see STAFF_ROSTER_PERIODS) puts every admin/teacher in the roster grid below instead
+  // of behind their own private row -- when that's true for the person currently signed in,
+  // showing "Mark yourself" too would just be the same record editable from two places at once.
+  const eagleStaff = staffRosterForPeriod(selectedPeriod);
+  const hideSelfMarkForRoster = eagleStaff.some((s) => s.id === session.record.id);
   let selfMarkHtml = "";
-  if (canWrite && selectedPeriod) {
+  if (canWrite && selectedPeriod && !hideSelfMarkForRoster) {
     const staffId = session.record.id;
     const staffRec = staffSelfRecord(todayDate, staffId);
     const staffPair = (staffRec && staffRec.scores && staffRec.scores[selectedPeriod]) || [null, null];
@@ -3803,9 +3834,16 @@ function renderToday(root, session) {
     Object.keys(VIEW_LABELS).map((v) => '<button type="button" class="today-view-btn' + (todayView === v ? " active" : "") + '" data-view="' + v + '">' + VIEW_LABELS[v] + "</button>").join("") +
     "</div></div>";
 
-  function pairFor(student) {
-    const existing = attendanceRecord(todayDate, student.id);
-    const draftPair = restored && restored[student.id];
+  // The roster grid can now mix real students with staff/teacher rows (Eagle -- see
+  // STAFF_ROSTER_PERIODS/eagleStaff above); one combined list keeps both view branches below
+  // identical instead of duplicating the whole card-rendering block per entity type.
+  const rosterEntities = roster.map((s) => ({ id: s.id, isStaff: false, nameHtml: studentLink(s) }))
+    .concat(eagleStaff.map((st) => ({ id: st.id, isStaff: true,
+      nameHtml: escapeHtml(st.name) + ' <span class="pill pill-muted" style="font-size:0.62rem;font-weight:700;vertical-align:middle;">Staff</span>' })));
+  function pairForEntity(entity) {
+    const existing = entity.isStaff ? staffSelfRecord(todayDate, entity.id) : attendanceRecord(todayDate, entity.id);
+    const draftKey = (entity.isStaff ? "staff:" : "") + entity.id;
+    const draftPair = restored && restored[draftKey];
     return draftPair || (existing && existing.scores && existing.scores[selectedPeriod]) || [null, null];
   }
   function markedByBadge(pair) {
@@ -3816,14 +3854,14 @@ function renderToday(root, session) {
 
   if (todayView === "compact") {
     html += '<div class="student-rows" id="period-entry-body">';
-    roster.forEach((student) => {
-      const pair = pairFor(student);
+    rosterEntities.forEach((entity) => {
+      const pair = pairForEntity(entity);
       const linked = !(pair[0] !== null && pair[0] !== undefined && pair[1] !== null && pair[1] !== undefined && pair[0] !== pair[1]);
       const note = pair[2] || "";
       const excused = !!pair[4];
       const triState = compactTriState(pair, periodMax);
-      html += '<div class="student-card student-row-compact' + (excused ? " is-excused" : "") + '" data-student="' + student.id + '" data-excused="' + (excused ? "1" : "0") + '">';
-      html += '<span class="src-name">' + studentLink(student) + markedByBadge(pair) + "</span>";
+      html += '<div class="student-card student-row-compact' + (excused ? " is-excused" : "") + '" data-student="' + entity.id + '" data-staff="' + (entity.isStaff ? "1" : "0") + '" data-excused="' + (excused ? "1" : "0") + '">';
+      html += '<span class="src-name">' + entity.nameHtml + markedByBadge(pair) + "</span>";
       // Both the dials and the "Excused" text stay in the DOM always (CSS shows/hides by
       // .is-excused) so the Excused toggle can flip live without rebuilding this row.
       html += '<span class="src-vals">' +
@@ -3847,13 +3885,13 @@ function renderToday(root, session) {
     html += '<div class="legend-note"><span><span class="sw" style="background:var(--good)"></span>&#10003; present &nbsp; <span class="sw" style="background:var(--warn)"></span>&#10007; absent &nbsp; Tap a dial to fine-tune · blank = didn’t run</span></div>';
   } else {
     html += '<div class="student-grid" id="period-entry-body">';
-    roster.forEach((student) => {
-      const pair = pairFor(student);
+    rosterEntities.forEach((entity) => {
+      const pair = pairForEntity(entity);
       const linked = !(pair[0] !== null && pair[0] !== undefined && pair[1] !== null && pair[1] !== undefined && pair[0] !== pair[1]);
       const note = pair[2] || "";
       const excused = !!pair[4];
-      html += '<div class="student-card' + (excused ? " is-excused" : "") + '" data-student="' + student.id + '" data-excused="' + (excused ? "1" : "0") + '">';
-      html += '<div class="sc-head">' + studentLink(student) + markedByBadge(pair) + '<div class="sc-head-actions">' + notePopoverHtml(note, !canWrite) +
+      html += '<div class="student-card' + (excused ? " is-excused" : "") + '" data-student="' + entity.id + '" data-staff="' + (entity.isStaff ? "1" : "0") + '" data-excused="' + (excused ? "1" : "0") + '">';
+      html += '<div class="sc-head">' + entity.nameHtml + markedByBadge(pair) + '<div class="sc-head-actions">' + notePopoverHtml(note, !canWrite) +
         (canWrite ? '<button class="btn btn-ghost btn-sm row-present" type="button">Present</button>' : "") +
         (canWrite ? '<button class="btn btn-ghost btn-sm row-excuse' + (excused ? " active" : "") + '" type="button">Excused</button>' : "") +
         "</div></div>";
@@ -4127,22 +4165,22 @@ window.addEventListener("resize", syncStickyBarOffset);
 function wireTodayHeader(root) {
   syncStickyBarOffset();
   const dateInput = document.getElementById("today-date");
-  if (dateInput) dateInput.addEventListener("change", () => { todayDate = dateInput.value; showAddExtraPeriod = false; showHebrewCal = false; localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
+  if (dateInput) dateInput.addEventListener("change", () => { todayDate = dateInput.value; showAddExtraPeriod = false; showHebrewCal = false; todayTouchedCards = new Set(); localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
   const todayJumpBtn = document.getElementById("today-jump");
-  if (todayJumpBtn) todayJumpBtn.addEventListener("click", () => { todayDate = todayISO(); showAddExtraPeriod = false; showHebrewCal = false; liveScheduleAutoArmed = true; localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
+  if (todayJumpBtn) todayJumpBtn.addEventListener("click", () => { todayDate = todayISO(); showAddExtraPeriod = false; showHebrewCal = false; liveScheduleAutoArmed = true; todayTouchedCards = new Set(); localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
   const hcalTrigger = document.getElementById("hcal-trigger");
   if (hcalTrigger) hcalTrigger.addEventListener("click", () => { showHebrewCal = !showHebrewCal; renderAll(); });
   root.querySelectorAll(".hcal-day").forEach((btn) => {
     btn.addEventListener("click", () => {
       todayDate = btn.getAttribute("data-hcal-date");
-      showAddExtraPeriod = false; showHebrewCal = false;
+      showAddExtraPeriod = false; showHebrewCal = false; todayTouchedCards = new Set();
       localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll();
     });
   });
   const hmonthPrev = document.getElementById("hmonth-prev");
-  if (hmonthPrev) hmonthPrev.addEventListener("click", () => { todayDate = shiftHebrewMonth(todayDate, -1); showAddExtraPeriod = false; localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
+  if (hmonthPrev) hmonthPrev.addEventListener("click", () => { todayDate = shiftHebrewMonth(todayDate, -1); showAddExtraPeriod = false; todayTouchedCards = new Set(); localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
   const hmonthNext = document.getElementById("hmonth-next");
-  if (hmonthNext) hmonthNext.addEventListener("click", () => { todayDate = shiftHebrewMonth(todayDate, 1); showAddExtraPeriod = false; localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
+  if (hmonthNext) hmonthNext.addEventListener("click", () => { todayDate = shiftHebrewMonth(todayDate, 1); showAddExtraPeriod = false; todayTouchedCards = new Set(); localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
   root.querySelectorAll(".today-view-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       todayView = btn.getAttribute("data-view");
@@ -4155,9 +4193,9 @@ function wirePeriodSelect(root) {
   const sel = document.getElementById("period-select");
   // A deliberate manual pick always wins -- disarm the calendar auto-select immediately so a
   // still-in-flight poll from the fresh-visit trigger can't land a moment later and override it.
-  if (sel) sel.addEventListener("change", () => { selectedPeriod = sel.value; liveScheduleAutoArmed = false; renderAll(); });
+  if (sel) sel.addEventListener("change", () => { selectedPeriod = sel.value; liveScheduleAutoArmed = false; todayTouchedCards = new Set(); renderAll(); });
   root.querySelectorAll(".summary-period-btn").forEach((btn) => {
-    btn.addEventListener("click", () => { selectedPeriod = btn.getAttribute("data-period"); liveScheduleAutoArmed = false; renderAll(); });
+    btn.addEventListener("click", () => { selectedPeriod = btn.getAttribute("data-period"); liveScheduleAutoArmed = false; todayTouchedCards = new Set(); renderAll(); });
   });
 }
 function wireTodaySummary(root) {
@@ -4327,7 +4365,7 @@ function wireExtraPeriod(root) {
     if (!newState.settings.extraPeriods[todayDate]) newState.settings.extraPeriods[todayDate] = [];
     if (!newState.settings.extraPeriods[todayDate].includes(name)) newState.settings.extraPeriods[todayDate].push(name);
     const res = await saveState(newState);
-    if (res.ok || res.local) { selectedPeriod = name; showAddExtraPeriod = false; toast("Added " + name + " for today.", "good"); renderAll(); }
+    if (res.ok || res.local) { selectedPeriod = name; showAddExtraPeriod = false; todayTouchedCards = new Set(); toast("Added " + name + " for today.", "good"); renderAll(); }
   });
   const removeBtn = document.getElementById("remove-extra-period");
   if (removeBtn) removeBtn.addEventListener("click", async () => {
@@ -4337,7 +4375,7 @@ function wireExtraPeriod(root) {
       newState.settings.extraPeriods[todayDate] = newState.settings.extraPeriods[todayDate].filter((p) => p !== name);
     }
     const res = await saveState(newState);
-    if (res.ok || res.local) { selectedPeriod = ""; toast("Removed " + name + " from today.", "good"); renderAll(); }
+    if (res.ok || res.local) { selectedPeriod = ""; todayTouchedCards = new Set(); toast("Removed " + name + " from today.", "good"); renderAll(); }
   });
 }
 // Quick "GC" bonus-credit grant -- only non-empty while gcGrantOpen is true (see the "GC" button
@@ -4413,12 +4451,17 @@ function wireTodayGrid(root, teacherName) {
   });
   wireNotePopovers(body);
   // Closing a note (tapping "Done") is the one interaction on this page that reads as
-  // "finished entering that" -- so it saves the whole class immediately, the same as pressing
-  // the main Save button, instead of silently leaving the note unsaved until some later click.
-  // performTodaySave is declared further down (function declarations hoist), and this only
-  // wires the notes that actually have a "Done" button (read-only cards don't render one).
+  // "finished entering that" -- so it saves immediately, the same as any other per-cell edit,
+  // instead of silently leaving the note unsaved until some later click. Scoped to just this one
+  // card (scheduleAutosave), not the whole grid -- resaving every visible card here would risk
+  // reverting whatever anyone else marking the same class had just saved for a student this tab
+  // hasn't touched (see buildTodayPatch's comment). Only wires notes that actually have a "Done"
+  // button (read-only cards don't render one).
   body.querySelectorAll(".note-popover-close").forEach((btn) => {
-    btn.addEventListener("click", () => performTodaySave());
+    btn.addEventListener("click", () => {
+      const card = btn.closest(".student-card");
+      if (card) scheduleAutosave(card);
+    });
   });
   // Compact view shows small dials (.src-circle) instead of the full draggable bar, so
   // whatever changes the real inputs needs to keep a dial's fill -- and its score-based tone
@@ -4542,26 +4585,44 @@ function wireTodayGrid(root, teacherName) {
     body.querySelectorAll(".student-card").forEach((card) => {
       const attInp = card.querySelector('.score-input[data-slot="att"]');
       const partInp = card.querySelector('.score-input[data-slot="part"]');
-      if (attInp && attInp.value === "") { attInp.value = String(periodMax); refreshPillForInput(attInp); }
-      if (partInp && partInp.value === "") { partInp.value = String(periodMax); if (!partInp.dataset.linked) partInp.dataset.linked = "1"; refreshPillForInput(partInp); }
+      let filled = false;
+      if (attInp && attInp.value === "") { attInp.value = String(periodMax); refreshPillForInput(attInp); filled = true; }
+      if (partInp && partInp.value === "") { partInp.value = String(periodMax); if (!partInp.dataset.linked) partInp.dataset.linked = "1"; refreshPillForInput(partInp); filled = true; }
       updateSrcCircles(card);
       syncCheckButtons(card);
+      // Fill All doesn't autosave each row on the spot (the toast below says "then save"), but
+      // the eventual Save click only picks up cards markTouched() has recorded -- so a row this
+      // just filled in has to count as touched now, or the bulk save would skip right past it.
+      if (filled) markTouched(card);
     });
     toast("Filled every blank score with " + num2(periodMax) + " — adjust any exceptions, then save.", "good");
   });
 
-  // Builds the Firestore patch for either every visible card (bulk Save / note "Done") or
-  // just one student (per-tap autosave), reading `base` (whatever state it's handed -- the
+  // Builds the Firestore patch for either just one card (per-tap autosave) or the bulk Save
+  // button / note "Done" (onlyCard omitted) -- reading `base` (whatever state it's handed -- the
   // in-memory `state`, or fresher data handed back on a conflict) rather than the module-level
   // `state` directly, so the exact same function can be re-run against fresh server data on
   // retry without duplicating this logic.
+  //
+  // The bulk path only processes cards in todayTouchedCards (see scheduleAutosave) -- NOT every
+  // card currently in the DOM. With several people marking the same class, this page's own view
+  // of a student neither this browser tab nor anyone using it has touched can be stale (a render
+  // deferred mid-interaction, or simply never refreshed since another save came in) -- looping
+  // over every visible card and writing its current on-screen value back would silently revert
+  // or even blank out whatever someone else just saved for a student this tab never touched.
+  // Restricting the bulk save to cards actually edited here makes it behave exactly like the
+  // per-cell autosave it's a fallback for: it only ever commits what THIS device changed.
   function buildTodayPatch(base, onlyCard) {
     const newState = JSON.parse(JSON.stringify(base));
     const draftForStash = {};
     const undoSnapshot = {};
-    const cards = onlyCard ? [onlyCard] : body.querySelectorAll(".student-card");
+    const cards = onlyCard ? [onlyCard] : Array.from(body.querySelectorAll(".student-card")).filter((c) => todayTouchedCards.has(c.getAttribute("data-student") + ":" + (c.dataset.staff === "1" ? "staff" : "student")));
     cards.forEach((card) => {
-      const studentId = card.getAttribute("data-student");
+      const entityId = card.getAttribute("data-student"); // attribute name kept as-is for staff rows too, see renderToday's rosterEntities
+      const isStaff = card.dataset.staff === "1";
+      const arrName = isStaff ? "staffAttendance" : "attendance";
+      const idField = isStaff ? "staffId" : "studentId";
+      const draftKey = (isStaff ? "staff:" : "") + entityId;
       const attInp = card.querySelector('.score-input[data-slot="att"]');
       const partInp = card.querySelector('.score-input[data-slot="part"]');
       const noteInp = card.querySelector('.note-input');
@@ -4569,34 +4630,35 @@ function wireTodayGrid(root, teacherName) {
       const excused = card.dataset.excused === "1";
       const pair = [clampScore(attInp ? attInp.value : "", periodMax), clampScore(partInp ? partInp.value : "", periodMax), note];
       if (excused) pair[4] = true;
-      draftForStash[studentId] = pair;
-      // What this student's pair looked like right before this save -- captured from `base`
-      // (the last-known server data at the time of this attempt), not `newState`, so Undo
-      // can put it back exactly and "unchanged" (below) compares against the real prior value.
-      const priorRec = base.attendance.find((r) => r.date === todayDate && r.studentId === studentId);
+      draftForStash[draftKey] = pair;
+      // What this row's pair looked like right before this save -- captured from `base` (the
+      // last-known server data at the time of this attempt), not `newState`, so Undo can put it
+      // back exactly and "unchanged" (below) compares against the real prior value.
+      newState[arrName] = newState[arrName] || [];
+      const priorRec = (base[arrName] || []).find((r) => r.date === todayDate && r[idField] === entityId);
       const priorPair = priorRec && priorRec.scores && priorRec.scores[selectedPeriod];
-      undoSnapshot[studentId] = priorPair ? JSON.parse(JSON.stringify(priorPair)) : undefined;
-      let rec = newState.attendance.find((r) => r.date === todayDate && r.studentId === studentId);
-      if (!rec) { rec = { id: uid("a"), date: todayDate, studentId, scores: {}, notes: "" }; newState.attendance.push(rec); }
+      undoSnapshot[draftKey] = priorPair ? JSON.parse(JSON.stringify(priorPair)) : undefined;
+      let rec = newState[arrName].find((r) => r.date === todayDate && r[idField] === entityId);
+      if (!rec) { rec = { id: uid(isStaff ? "sa" : "a"), date: todayDate, [idField]: entityId, scores: {}, notes: "" }; newState[arrName].push(rec); }
       // Excused-with-no-score still needs to be *saved* (not treated as "nothing entered"),
       // otherwise it would get silently dropped from rec.scores right back to unmarked.
       if (pair[0] === null && pair[1] === null && !note && !excused) {
         delete rec.scores[selectedPeriod];
       } else {
         // Multiple staff can mark the same class (one opens after another has already marked
-        // some students) -- only claim credit for students THIS save actually changed. A
-        // student whose att/part/note/excused come out identical to what they already were
-        // keeps whoever's initials were on them before, instead of getting overwritten just
-        // because the same class got saved again.
+        // some students) -- only claim credit for rows THIS save actually changed. A row whose
+        // att/part/note/excused come out identical to what it already was keeps whoever's
+        // initials were on it before, instead of getting overwritten just because the same class
+        // got saved again.
         const priorExcused = !!(priorPair && priorPair[4]);
         const unchanged = priorPair && priorPair[0] === pair[0] && priorPair[1] === pair[1] &&
           (priorPair[2] || "") === (pair[2] || "") && priorExcused === excused;
         pair[3] = unchanged ? (priorPair[3] || teacherName) : teacherName;
         rec.scores[selectedPeriod] = pair;
       }
-      // Record-level enteredBy/enteredAt stay as "who last touched this student's record"
-      // (used in CSV exports); pair[3] above is the per-period marker shown in the UI, since
-      // different staff can mark different classes for the same student on the same day.
+      // Record-level enteredBy/enteredAt stay as "who last touched this record" (used in CSV
+      // exports for student rows); pair[3] above is the per-period marker shown in the UI, since
+      // different staff can mark different classes for the same student/staff on the same day.
       rec.enteredBy = teacherName; rec.enteredAt = Date.now();
     });
     return { newState, draftForStash, undoSnapshot };
@@ -4630,6 +4692,7 @@ function wireTodayGrid(root, teacherName) {
     }
   }
   function scheduleAutosave(card) {
+    markTouched(card);
     const studentId = card.getAttribute("data-student");
     if (todayAutosaveInFlight.has(studentId)) { todayAutosavePending.set(studentId, card); updateTodaySaveStatus(); return; }
     const run = (c) => {
@@ -4655,6 +4718,12 @@ function wireTodayGrid(root, teacherName) {
   // autosaves itself the moment it changes (see scheduleAutosave above), so this button and
   // its "Saving…" state are a safety net, not the only way a mark gets saved.
   async function performTodaySave() {
+    // Nothing in todayTouchedCards means nothing on this device has actually changed since the
+    // page loaded (or since the date/period was last switched) -- everything visible is already
+    // saved, so there's nothing this button needs to do. Skipping the write entirely (rather
+    // than sending an unchanged copy of the whole document just to bump _rev) is what keeps this
+    // button safe to click as a "just in case" habit.
+    if (!todayTouchedCards.size) { toast("Nothing to save — every mark here is already saved.", "good"); return; }
     saveBtn.disabled = true;
     const statusElNow = document.getElementById("today-save-status");
     if (statusElNow) statusElNow.textContent = "Saving…";
@@ -4685,13 +4754,21 @@ function wireTodayGrid(root, teacherName) {
     undoBtn.disabled = true;
     const { date, period, snapshot } = lastSaveUndo;
     const newState = JSON.parse(JSON.stringify(state));
-    Object.keys(snapshot).forEach((studentId) => {
-      let rec = newState.attendance.find((r) => r.date === date && r.studentId === studentId);
-      const prior = snapshot[studentId];
+    newState.staffAttendance = newState.staffAttendance || [];
+    // Keys are "<id>" for a student or "staff:<id>" for a staff/teacher row (see buildTodayPatch's
+    // draftKey) -- Eagle can mix both in one save, so Undo has to route each one back to the
+    // array it actually came from.
+    Object.keys(snapshot).forEach((key) => {
+      const isStaff = key.startsWith("staff:");
+      const entityId = isStaff ? key.slice("staff:".length) : key;
+      const arrName = isStaff ? "staffAttendance" : "attendance";
+      const idField = isStaff ? "staffId" : "studentId";
+      let rec = newState[arrName].find((r) => r.date === date && r[idField] === entityId);
+      const prior = snapshot[key];
       if (prior === undefined) {
         if (rec && rec.scores) delete rec.scores[period];
       } else {
-        if (!rec) { rec = { id: uid("a"), date, studentId, scores: {}, notes: "" }; newState.attendance.push(rec); }
+        if (!rec) { rec = { id: uid(isStaff ? "sa" : "a"), date, [idField]: entityId, scores: {}, notes: "" }; newState[arrName].push(rec); }
         rec.scores[period] = prior;
       }
     });
