@@ -1564,7 +1564,17 @@ function categoryLabel(catId) { const c = PERIOD_CATEGORIES.find((x) => x.id ===
    computeStats) -- a lower max means the class simply counts for less, exactly like a
    lower-weight assignment would in a gradebook. Unset/invalid/out-of-range falls back to a
    normal full-weight 1. */
-function periodMaxFor(period) {
+// dateStr is optional: pass it whenever one's on hand so a per-day-of-week override (e.g. Kriah
+// is worth its normal 0.3 Monday/Thursday but a full 1 on Shabbos -- see periodMaxByDay, set via
+// the "Edit" link on Today's own "Worth up to" pill) is picked up; omit it (e.g. Admin > Schedule,
+// which isn't looking at any one date) to get just that class's own plain default.
+function periodMaxFor(period, dateStr) {
+  if (dateStr) {
+    const byDay = state.settings.periodMaxByDay && state.settings.periodMaxByDay[period];
+    const dayRaw = byDay && byDay[dayNameFor(dateStr)];
+    const dayN = Number(dayRaw);
+    if (dayRaw !== null && dayRaw !== undefined && dayRaw !== "" && !isNaN(dayN) && dayN > 0 && dayN <= 1) return dayN;
+  }
   const raw = state.settings.periodMax && state.settings.periodMax[period];
   const n = Number(raw);
   if (raw === null || raw === undefined || raw === "" || isNaN(n) || n <= 0 || n > 1) return 1;
@@ -2233,10 +2243,19 @@ function periodsForDate(dateStr) {
   // just for today") count as scheduled for this date only — this is the single place stats,
   // exports, and the Today grid all agree on which classes ran on a given day.
   const extra = extraPeriodsFor(dateStr).filter((p) => !scheduled.includes(p));
-  return scheduled.concat(extra);
+  // A class explicitly marked "didn't happen" for this one date (see canceledPeriodsFor /
+  // renderToday's "Didn't happen today" button) drops out here too -- since this is the single
+  // shared source every stat/report/grid reads from, that one change is all it takes for the
+  // canceled occurrence to disappear from Today's picker, Today/Week at a glance, and every
+  // report, without touching its past attendance or its regular weekly schedule.
+  const canceled = canceledPeriodsFor(dateStr);
+  return scheduled.concat(extra).filter((p) => !canceled.includes(p));
 }
 function extraPeriodsFor(dateStr) {
   return (state.settings.extraPeriods && state.settings.extraPeriods[dateStr]) || [];
+}
+function canceledPeriodsFor(dateStr) {
+  return (state.settings.canceledPeriods && state.settings.canceledPeriods[dateStr]) || [];
 }
 /* A bonus class only ever helps a student's attendance/participation average, never hurts it --
    see the bonus handling in computeStats for exactly what that means numerically. A class can be
@@ -2377,7 +2396,7 @@ function computeStats(studentId, opts) {
       // already scaled to that max, less to the numerator too), so a short/supplementary class
       // counts for proportionally less of the blended average instead of weighing the same as
       // every other class.
-      const maxVal = periodMaxFor(p);
+      const maxVal = periodMaxFor(p, rec.date);
       // Percentages count only what was actually marked — a blank attendance or participation
       // score is left out of both the numerator and the denominator, rather than counting
       // against the student as a 0. A bonus class (admin-toggled per date+period) goes one
@@ -2443,7 +2462,7 @@ function computeStaffStats(staffId, opts) {
       if (!pair) continue;
       const [a, pt] = pair;
       const bonus = isBonusPeriod(rec.date, p);
-      const maxVal = periodMaxFor(p);
+      const maxVal = periodMaxFor(p, rec.date);
       if (a !== null && a !== undefined && a !== "") { attPts += Math.min(Number(a), maxVal); if (!bonus) { attPoss += maxVal; attCount += 1; } }
       if (pt !== null && pt !== undefined && pt !== "") { partPts += Math.min(Number(pt), maxVal); if (!bonus) { partPoss += maxVal; partCount += 1; } }
     }
@@ -2461,21 +2480,38 @@ function computeStaffStats(staffId, opts) {
   };
 }
 function staffStats(staffId) { return computeStaffStats(staffId, {}); }
+// Whether ANYONE on the roster has an actual mark (or an explicit excused) recorded for this
+// class on this date -- the difference between "the class was genuinely held and this one
+// student's mark is just missing" (still counts as a real missed session below) and "not a
+// single person has anything recorded for it" (almost always means the class simply didn't run
+// that day -- a snow day, a trip, a schedule change nobody remembered to update -- rather than
+// every teacher forgetting the entire roster at once). See periodSessionCounts.
+function periodWasHeldOn(dateStr, period) {
+  return state.attendance.some((r) => {
+    if (r.date !== dateStr) return false;
+    const pair = r.scores && r.scores[period];
+    if (!pair) return false;
+    return (pair[0] !== null && pair[0] !== undefined && pair[0] !== "") || !!pair[4];
+  });
+}
 /* How many times a class actually MET during a range versus how many of those sessions the
    student is recorded as having attended -- e.g. "Attended 10 of 27" -- deliberately an
    ALL-INCLUSIVE count: the denominator is every real occurrence of the class per the actual
-   weekly schedule (periodsForDate), not just the days someone happened to mark, and "missed"
-   folds together every reason he wasn't credited as present -- explicitly absent, excused, AND
-   never marked at all. That last one matters: a day nobody got around to marking is not the
-   same as a day he was there, and silently dropping it from the denominator (the way the
+   weekly schedule (periodsForDate) that someone actually took attendance for (see
+   periodWasHeldOn), not just the days someone happened to mark THIS student, and "missed" folds
+   together every reason this student specifically wasn't credited as present -- explicitly
+   absent, excused, AND never marked at all while everyone else's was. That last one matters: a
+   day the class was held and everyone else got marked but this one student's row was skipped is
+   not the same as a day he was there, and silently dropping it from the denominator (the way the
    attendance percentage elsewhere does, to keep that percentage from being unfairly dragged
    down by data-entry gaps) would hide real missed instruction from a parent reading this report
-   -- the whole point here is the complete picture, not a number that flatters the record. A
-   bonus-marked day is the one exception kept out of both sides, same as everywhere else in the
-   app: a bonus class only ever helps, so it's not "a class that occurred" in the sense this
-   count means. For "All time" (range.from/to both null) there's no fixed calendar boundary to
-   walk, so this falls back to the span of the student's own attendance history (earliest to
-   latest date on record for them). */
+   -- the whole point here is the complete picture, not a number that flatters the record. A day
+   nobody at all was marked for the class, though, isn't "a class that occurred" in this count's
+   sense either -- same treatment as a bonus-marked day (the other exception kept out of both
+   sides): a class only ever helps to have not-happened days dropped, not held against every
+   student as a missed session because nobody logged it. For "All time" (range.from/to both null)
+   there's no fixed calendar boundary to walk, so this falls back to the span of the student's own
+   attendance history (earliest to latest date on record for them). */
 function periodSessionCounts(studentId, period, range) {
   let from = range.from, to = range.to;
   if (!from || !to) {
@@ -2488,6 +2524,7 @@ function periodSessionCounts(studentId, period, range) {
   for (let d = from; d <= to; d = shiftDate(d, 1)) {
     if (!periodsForDate(d).includes(period)) continue;
     if (isBonusPeriod(d, period)) continue;
+    if (!periodWasHeldOn(d, period)) continue;
     scheduled++;
     const rec = state.attendance.find((r) => r.studentId === studentId && r.date === d);
     const pair = rec && rec.scores && rec.scores[period];
@@ -2802,7 +2839,7 @@ function buildStudentReportHtml(student, range, rangeSt, opts) {
       // A bonus-marked session only ever helps -- a low or blank score there is never a "miss",
       // same principle as periodSessionCounts leaving bonus days out of the by-class count above.
       if (r.bonus) return false;
-      const maxVal = periodMaxFor(r.period);
+      const maxVal = periodMaxFor(r.period, r.date);
       if (showAtt && r.att !== null && r.att !== undefined && Number(r.att) < maxVal) return true;
       if (showPart && r.part !== null && r.part !== undefined && Number(r.part) < maxVal) return true;
       return false;
@@ -3380,6 +3417,12 @@ function renderLogin(root) {
 let todayDate = (localStorage.getItem(LAST_DATE_KEY) || todayISO());
 let selectedPeriod = "";
 let showAddExtraPeriod = false;
+// Inline "Edit" on the "Worth up to" pill (see periodMaxPieceHtml/wirePeriodMaxEdit) -- lets an
+// admin change how much a full mark in the CURRENT class is worth on THIS day of the week (e.g.
+// Kriah on Shabbos vs. Kriah on a weekday) right from Today's page, instead of having to go set
+// up a whole new class in Admin > Schedule. Reset whenever the selected class or date changes so
+// a stale form never ends up editing the wrong class.
+let showEditPeriodMax = false;
 // Quick "GC" bonus-credit grant (see wireGcGrant) -- a one-tap way to award a student Gemilas
 // Chassidim coins the moment it happens, without switching Today's selected class over to GC
 // and marking a whole attendance grid for something that isn't tied to a scheduled period at
@@ -3659,8 +3702,26 @@ function renderToday(root, session) {
         '<span class="pill pill-gold">Added just for today</span>' +
         (canWrite ? '<button class="btn btn-ghost btn-sm" id="remove-extra-period" type="button">Remove from today</button>' : "") +
         "</div>";
+    } else if (canWrite && isAdmin(session) && !isLimitedStaff && selectedPeriod) {
+      // The symmetric opposite of "+ Class"/"Added just for today": a class that's normally
+      // scheduled but just didn't actually run this one time (a trip, a schedule change, snow
+      // day...) -- see canceledPeriodsFor/periodsForDate. Once canceled it drops off this very
+      // dropdown for this date, so the button only ever needs to exist for the currently-selected
+      // (still-present) class.
+      html += '<div class="field" style="flex-shrink:0;display:flex;align-items:center;">' +
+        '<button class="btn btn-ghost btn-sm" id="cancel-period-today" type="button" title="Mark ' + escapeHtml(selectedPeriod) + ' as not held on ' + escapeHtml(fmtDateShort(todayDate)) + '">Didn’t happen today</button>' +
+        "</div>";
     }
     html += "</div>";
+  }
+  // Classes canceled for this specific date (see canceledPeriodsFor) -- shown so a "Didn't happen
+  // today" click is easy to undo, and so it doesn't look like the class just silently vanished.
+  const canceledToday = canWrite && isAdmin(session) && !isLimitedStaff ? canceledPeriodsFor(todayDate) : [];
+  if (canceledToday.length) {
+    html += '<div class="field-row" style="margin-top:6px;">' + canceledToday.map((p) =>
+      '<span class="pill pill-muted">' + escapeHtml(p) + ' — didn’t happen today ' +
+      '<button class="btn btn-ghost btn-sm" data-restore-period="' + escapeHtml(p) + '" type="button" style="margin-left:6px;">Restore</button></span>'
+    ).join("") + "</div>";
   }
   html += "</div>"; // .today-sticky-bar
 
@@ -3727,13 +3788,38 @@ function renderToday(root, session) {
     (canToggleBonus ? '<button class="btn btn-ghost btn-sm" id="toggle-bonus" type="button" title="' + (periodIsBonus ? "Unmark " + escapeHtml(selectedPeriod) + " as bonus" : "Mark " + escapeHtml(selectedPeriod) + " as bonus today") + '">' + (periodIsBonus ? "Unmark bonus" : "Mark bonus") + "</button>" :
       (alwaysBonus && isAdmin(session) ? '<span class="help-text" style="margin:0;">Set to always-bonus in Admin &gt; Schedule</span>' : ""));
 
-  // A class with a lower max (see periodMaxFor, set in Admin > Schedule) still marks as a full
-  // dial/bar when someone's fully present -- that's what makes marking it feel the same as any
-  // other class -- but it's worth calling out here, right where the marking happens, that a
-  // full mark here is worth less toward the blended average than a normal class.
-  const periodMax = selectedPeriod ? periodMaxFor(selectedPeriod) : 1;
+  // A class with a lower max (see periodMaxFor, set in Admin > Schedule, optionally overridden
+  // for just one day of the week -- see periodMaxByDay) still marks as a full dial/bar when
+  // someone's fully present -- that's what makes marking it feel the same as any other class --
+  // but it's worth calling out here, right where the marking happens, that a full mark here is
+  // worth less toward the blended average than a normal class. An admin can also fix it right
+  // here (see showEditPeriodMax/wirePeriodMaxEdit) -- e.g. Kriah's usual 0.3 doesn't apply on a
+  // Shabbos where the class is the real thing, not the shortened weekday version.
+  const periodMax = selectedPeriod ? periodMaxFor(selectedPeriod, todayDate) : 1;
+  const canEditPeriodMax = canWrite && isAdmin(session) && !!selectedPeriod;
   const periodMaxPieceHtml = (selectedPeriod && periodMax !== 1)
-    ? '<span class="pill pill-muted" title="A full mark in ' + escapeHtml(selectedPeriod) + ' counts as ' + num2(periodMax) + ' toward the blended average, not a full 1.">Worth up to ' + num2(periodMax) + " pt" + (periodMax === 1 ? "" : "s") + "</span>" : "";
+    ? '<span class="pill pill-muted" title="A full mark in ' + escapeHtml(selectedPeriod) + ' counts as ' + num2(periodMax) + ' toward the blended average, not a full 1.">Worth up to ' + num2(periodMax) + " pt" + (periodMax === 1 ? "" : "s") + "</span>" +
+      (canEditPeriodMax && !showEditPeriodMax ? '<button class="btn btn-ghost btn-sm" id="edit-period-max-open" type="button" title="Change what a full mark in ' + escapeHtml(selectedPeriod) + ' is worth on ' + escapeHtml(dayNameFor(todayDate)) + '">Edit</button>' : "")
+    : "";
+  // Whether THIS day of the week already has its own override (as opposed to just inheriting
+  // the class's plain default) -- if so, offer a quick way back out of it instead of only ever
+  // being able to type in a replacement number.
+  const periodMaxDayOverridden = selectedPeriod && !!(state.settings.periodMaxByDay && state.settings.periodMaxByDay[selectedPeriod] &&
+    state.settings.periodMaxByDay[selectedPeriod][dayNameFor(todayDate)] !== undefined && state.settings.periodMaxByDay[selectedPeriod][dayNameFor(todayDate)] !== null);
+  const periodMaxPlainDefault = selectedPeriod ? periodMaxFor(selectedPeriod) : 1;
+  const editPeriodMaxFormHtml = canEditPeriodMax && showEditPeriodMax ? (
+    '<div class="field-row" style="margin-top:10px;align-items:flex-end;">' +
+    '<div class="field" style="max-width:160px;"><label for="edit-period-max-input">' + escapeHtml(selectedPeriod) + " on " + escapeHtml(dayNameFor(todayDate)) + ' is worth</label>' +
+    '<input type="number" id="edit-period-max-input" value="' + periodMax + '" min="0.05" max="1" step="0.05"></div>' +
+    '<div class="field" style="flex-shrink:0;display:flex;gap:6px;">' +
+    '<button class="btn btn-ghost btn-sm" id="edit-period-max-save" type="button">Save</button>' +
+    '<button class="btn btn-ghost btn-sm" id="edit-period-max-cancel" type="button">Cancel</button></div>' +
+    "</div>" +
+    (periodMaxDayOverridden ? '<p class="help-text" style="margin-top:4px;"><button class="btn btn-ghost btn-sm" id="edit-period-max-reset" type="button" style="padding:2px 8px;">Use the normal ' +
+      num2(periodMaxPlainDefault) + "</button> instead of a " + escapeHtml(dayNameFor(todayDate)) + "-only override.</p>" : "") +
+    '<p class="help-text" style="margin-top:4px;">This changes every ' + escapeHtml(dayNameFor(todayDate)) + "’s " + escapeHtml(selectedPeriod) +
+    ' from now on (not just today) — other days ' + escapeHtml(selectedPeriod) + ' runs are unaffected. Set to 1 for a normal, full-weight class.</p>'
+  ) : "";
 
   const fillAllHtml = canWrite ? '<button class="btn btn-ghost btn-sm" id="fill-all" title="Mark whole class present">Mark all present</button>' : "";
 
@@ -3744,7 +3830,7 @@ function renderToday(root, session) {
   if (bonusPieceHtml || periodMaxPieceHtml || extraPeriodButtonHtml || gcGrantButtonHtml || fillAllHtml) {
     html += '<div class="today-quick-actions">' + periodMaxPieceHtml + bonusPieceHtml + extraPeriodButtonHtml + gcGrantButtonHtml + fillAllHtml + "</div>";
   }
-  html += extraPeriodFormHtml + gcGrantModalHtml();
+  html += editPeriodMaxFormHtml + extraPeriodFormHtml + gcGrantModalHtml();
 
   // Chazzan: only shows up for the four tefillos (see CHAZZAN_PERIODS) -- any active student is
   // a valid pick (isTA is a PERMISSION to grant this, not an eligibility restriction on who can
@@ -3934,6 +4020,8 @@ function renderToday(root, session) {
   wireGlanceCircles(root);
   wireTodaySummary(root);
   wireGcGrant(root, session);
+  wirePeriodMaxEdit(root);
+  wireCancelPeriod(root);
 }
 
 /* A read-only circle for the "Today at a glance" table: same fill+color language as
@@ -3998,7 +4086,7 @@ function attendanceCellHtml(dateStr, period, studentId, opts) {
   const note = pair && pair[2];
   const by = showMarkedBy && pair && pair[3];
   const excused = pair && !!pair[4];
-  const pMax = periodMaxFor(period);
+  const pMax = periodMaxFor(period, dateStr);
   const meta = (by || note)
     ? '<span class="glance-meta">' +
       (by ? '<span class="marked-by marked-by-sm" title="Marked by ' + escapeHtml(by) + '">' + escapeHtml(initialsFor(by)) + "</span>" : "") +
@@ -4165,22 +4253,22 @@ window.addEventListener("resize", syncStickyBarOffset);
 function wireTodayHeader(root) {
   syncStickyBarOffset();
   const dateInput = document.getElementById("today-date");
-  if (dateInput) dateInput.addEventListener("change", () => { todayDate = dateInput.value; showAddExtraPeriod = false; showHebrewCal = false; todayTouchedCards = new Set(); localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
+  if (dateInput) dateInput.addEventListener("change", () => { todayDate = dateInput.value; showAddExtraPeriod = false; showHebrewCal = false; showEditPeriodMax = false; todayTouchedCards = new Set(); localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
   const todayJumpBtn = document.getElementById("today-jump");
-  if (todayJumpBtn) todayJumpBtn.addEventListener("click", () => { todayDate = todayISO(); showAddExtraPeriod = false; showHebrewCal = false; liveScheduleAutoArmed = true; todayTouchedCards = new Set(); localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
+  if (todayJumpBtn) todayJumpBtn.addEventListener("click", () => { todayDate = todayISO(); showAddExtraPeriod = false; showHebrewCal = false; showEditPeriodMax = false; liveScheduleAutoArmed = true; todayTouchedCards = new Set(); localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
   const hcalTrigger = document.getElementById("hcal-trigger");
   if (hcalTrigger) hcalTrigger.addEventListener("click", () => { showHebrewCal = !showHebrewCal; renderAll(); });
   root.querySelectorAll(".hcal-day").forEach((btn) => {
     btn.addEventListener("click", () => {
       todayDate = btn.getAttribute("data-hcal-date");
-      showAddExtraPeriod = false; showHebrewCal = false; todayTouchedCards = new Set();
+      showAddExtraPeriod = false; showHebrewCal = false; showEditPeriodMax = false; todayTouchedCards = new Set();
       localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll();
     });
   });
   const hmonthPrev = document.getElementById("hmonth-prev");
-  if (hmonthPrev) hmonthPrev.addEventListener("click", () => { todayDate = shiftHebrewMonth(todayDate, -1); showAddExtraPeriod = false; todayTouchedCards = new Set(); localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
+  if (hmonthPrev) hmonthPrev.addEventListener("click", () => { todayDate = shiftHebrewMonth(todayDate, -1); showAddExtraPeriod = false; showEditPeriodMax = false; todayTouchedCards = new Set(); localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
   const hmonthNext = document.getElementById("hmonth-next");
-  if (hmonthNext) hmonthNext.addEventListener("click", () => { todayDate = shiftHebrewMonth(todayDate, 1); showAddExtraPeriod = false; todayTouchedCards = new Set(); localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
+  if (hmonthNext) hmonthNext.addEventListener("click", () => { todayDate = shiftHebrewMonth(todayDate, 1); showAddExtraPeriod = false; showEditPeriodMax = false; todayTouchedCards = new Set(); localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
   root.querySelectorAll(".today-view-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       todayView = btn.getAttribute("data-view");
@@ -4193,9 +4281,9 @@ function wirePeriodSelect(root) {
   const sel = document.getElementById("period-select");
   // A deliberate manual pick always wins -- disarm the calendar auto-select immediately so a
   // still-in-flight poll from the fresh-visit trigger can't land a moment later and override it.
-  if (sel) sel.addEventListener("change", () => { selectedPeriod = sel.value; liveScheduleAutoArmed = false; todayTouchedCards = new Set(); renderAll(); });
+  if (sel) sel.addEventListener("change", () => { selectedPeriod = sel.value; liveScheduleAutoArmed = false; showEditPeriodMax = false; todayTouchedCards = new Set(); renderAll(); });
   root.querySelectorAll(".summary-period-btn").forEach((btn) => {
-    btn.addEventListener("click", () => { selectedPeriod = btn.getAttribute("data-period"); liveScheduleAutoArmed = false; todayTouchedCards = new Set(); renderAll(); });
+    btn.addEventListener("click", () => { selectedPeriod = btn.getAttribute("data-period"); liveScheduleAutoArmed = false; showEditPeriodMax = false; todayTouchedCards = new Set(); renderAll(); });
   });
 }
 function wireTodaySummary(root) {
@@ -4252,7 +4340,7 @@ function wireChazzanControl(root, session) {
 function wireSelfMark(root, session) {
   const cardEl = document.getElementById("self-mark-row");
   if (!cardEl) return;
-  const periodMax = periodMaxFor(selectedPeriod);
+  const periodMax = periodMaxFor(selectedPeriod, todayDate);
   const attInp = cardEl.querySelector('.score-input[data-slot="att"]');
   const partInp = cardEl.querySelector('.score-input[data-slot="part"]');
   const presentBtn = cardEl.querySelector(".src-check-present");
@@ -4365,7 +4453,7 @@ function wireExtraPeriod(root) {
     if (!newState.settings.extraPeriods[todayDate]) newState.settings.extraPeriods[todayDate] = [];
     if (!newState.settings.extraPeriods[todayDate].includes(name)) newState.settings.extraPeriods[todayDate].push(name);
     const res = await saveState(newState);
-    if (res.ok || res.local) { selectedPeriod = name; showAddExtraPeriod = false; todayTouchedCards = new Set(); toast("Added " + name + " for today.", "good"); renderAll(); }
+    if (res.ok || res.local) { selectedPeriod = name; showAddExtraPeriod = false; showEditPeriodMax = false; todayTouchedCards = new Set(); toast("Added " + name + " for today.", "good"); renderAll(); }
   });
   const removeBtn = document.getElementById("remove-extra-period");
   if (removeBtn) removeBtn.addEventListener("click", async () => {
@@ -4375,8 +4463,64 @@ function wireExtraPeriod(root) {
       newState.settings.extraPeriods[todayDate] = newState.settings.extraPeriods[todayDate].filter((p) => p !== name);
     }
     const res = await saveState(newState);
-    if (res.ok || res.local) { selectedPeriod = ""; todayTouchedCards = new Set(); toast("Removed " + name + " from today.", "good"); renderAll(); }
+    if (res.ok || res.local) { selectedPeriod = ""; showEditPeriodMax = false; todayTouchedCards = new Set(); toast("Removed " + name + " from today.", "good"); renderAll(); }
   });
+}
+// Inline "Edit" on the "Worth up to" pill (see periodMaxPieceHtml) -- writes a per-day-of-week
+// override into settings.periodMaxByDay for the currently-selected class, without touching that
+// class's plain default (Admin > Schedule's own "Max score") or its max on any OTHER day.
+function wirePeriodMaxEdit(root) {
+  const openBtn = document.getElementById("edit-period-max-open");
+  if (openBtn) openBtn.addEventListener("click", () => { showEditPeriodMax = true; renderAll(); });
+  const cancelBtn = document.getElementById("edit-period-max-cancel");
+  if (cancelBtn) cancelBtn.addEventListener("click", () => { showEditPeriodMax = false; renderAll(); });
+  const saveBtn = document.getElementById("edit-period-max-save");
+  if (saveBtn) saveBtn.addEventListener("click", async () => {
+    const inp = document.getElementById("edit-period-max-input");
+    const n = Number(inp ? inp.value : "");
+    if (!inp || inp.value === "" || isNaN(n) || n <= 0 || n > 1) { toast("Enter a number greater than 0 and up to 1.", "warn"); return; }
+    const period = selectedPeriod, day = dayNameFor(todayDate);
+    const newState = JSON.parse(JSON.stringify(state));
+    newState.settings.periodMaxByDay = newState.settings.periodMaxByDay || {};
+    newState.settings.periodMaxByDay[period] = Object.assign({}, newState.settings.periodMaxByDay[period], { [day]: n });
+    const res = await saveState(newState);
+    if (res.ok || res.local) { showEditPeriodMax = false; toast(period + " on " + day + " is now worth up to " + num2(n) + ".", "good"); renderAll(); }
+  });
+  const resetBtn = document.getElementById("edit-period-max-reset");
+  if (resetBtn) resetBtn.addEventListener("click", async () => {
+    const period = selectedPeriod, day = dayNameFor(todayDate);
+    const newState = JSON.parse(JSON.stringify(state));
+    if (newState.settings.periodMaxByDay && newState.settings.periodMaxByDay[period]) {
+      delete newState.settings.periodMaxByDay[period][day];
+    }
+    const res = await saveState(newState);
+    if (res.ok || res.local) { showEditPeriodMax = false; toast(period + " on " + day + " now follows the class's normal max again.", "good"); renderAll(); }
+  });
+}
+// "Didn't happen today" / "Restore" (see canceledPeriodsFor/periodsForDate) -- a normally
+// scheduled class that just didn't run on this one date drops out of Today's picker, Today/Week
+// at a glance, and every report the moment it's canceled, exactly the same way an added "extra"
+// class disappears once removed -- both read from the same periodsForDate.
+function wireCancelPeriod(root) {
+  const cancelBtn = document.getElementById("cancel-period-today");
+  if (cancelBtn) cancelBtn.addEventListener("click", async () => {
+    const name = selectedPeriod;
+    const newState = JSON.parse(JSON.stringify(state));
+    newState.settings.canceledPeriods = newState.settings.canceledPeriods || {};
+    const list = newState.settings.canceledPeriods[todayDate] || [];
+    if (!list.includes(name)) newState.settings.canceledPeriods[todayDate] = list.concat([name]);
+    const res = await saveState(newState);
+    if (res.ok || res.local) { selectedPeriod = ""; showEditPeriodMax = false; todayTouchedCards = new Set(); toast(name + " marked as not held on " + fmtDateShort(todayDate) + ".", "good"); renderAll(); }
+  });
+  root.querySelectorAll("[data-restore-period]").forEach((btn) => btn.addEventListener("click", async () => {
+    const name = btn.getAttribute("data-restore-period");
+    const newState = JSON.parse(JSON.stringify(state));
+    if (newState.settings.canceledPeriods && newState.settings.canceledPeriods[todayDate]) {
+      newState.settings.canceledPeriods[todayDate] = newState.settings.canceledPeriods[todayDate].filter((p) => p !== name);
+    }
+    const res = await saveState(newState);
+    if (res.ok || res.local) { toast("Restored " + name + " for " + fmtDateShort(todayDate) + ".", "good"); renderAll(); }
+  }));
 }
 // Quick "GC" bonus-credit grant -- only non-empty while gcGrantOpen is true (see the "GC" button
 // beside "+ Class" on Today). A straight ledger grant (type "GC Bonus"), the same mechanism the
@@ -4439,7 +4583,7 @@ function wireTodayGrid(root, teacherName) {
   // Every card on this page marks the same currently-selected class, so one max (see
   // periodMaxFor) covers every input wired below -- "present" means "at this class's max",
   // whatever that is, not literally 1.
-  const periodMax = periodMaxFor(selectedPeriod);
+  const periodMax = periodMaxFor(selectedPeriod, todayDate);
   // Dragging a dial/bar to a value doesn't "commit" until the pointer lifts -- that's when
   // this fires, so a drag saves itself once at the end instead of on every intermediate
   // pointermove tick. (scheduleAutosave is declared further down but hoisted -- see its
@@ -6159,11 +6303,11 @@ function renderAdmin(root) {
 
 function renderAdminSchedule(root) {
   let html = '<div class="card card-pad"><div class="section-title">Weekly class schedule</div>' +
-    '<p class="help-text">Check every day a period runs, or rename a class right in its row. Add a class below, or remove one that’s no longer used — past attendance for a removed class is kept, not deleted, and comes back if you add a class with the exact same name again. Renaming a class keeps its past attendance under the new name.</p>';
+    '<p class="help-text">Check every day a period runs, or rename a class right in its row. Add a class below, or remove one that’s no longer used — past attendance for a removed class is kept, not deleted, and comes back if you add a class with the exact same name again. Renaming a class keeps its past attendance under the new name. For a class that’s still on the regular schedule but just didn’t happen on one particular day (a trip, a schedule change), don’t remove it here — go to Today’s page for that date, pick the class, and click “Didn’t happen today” instead; that keeps the class in the schedule but leaves that one day out of Today at a glance, reports, and every average.</p>';
   html += '<div class="field-row" style="align-items:flex-end;max-width:480px;">' +
     '<div class="field" style="flex:1;"><label for="np-name">New class name</label><input type="text" id="np-name" placeholder="e.g. Chavrusa"></div>' +
     '<div class="field" style="flex-shrink:0;"><button class="btn btn-ghost btn-sm" id="np-add" type="button">Add class</button></div></div>';
-  html += '<p class="help-text" style="margin-top:-6px;">The order below is the order classes appear in every dropdown (Today’s Class/period picker, reports, etc.) — drag the handle to reorder. Category controls which Leaderboard(s) a class counts toward — Torah, Avoda, or Gemilas Chassidim classes are combined into one score there; “Other” classes still count toward the overall Attendance/Participation boards. Max score is what a full mark in that class is worth — most classes are a normal 1, but a shorter or supplementary class can be set lower (e.g. 0.3 or 0.1) so it counts for proportionally less of a student’s blended average. Always bonus means marks in that class only ever help a student’s average, never hurt it — every day, automatically, without needing to toggle it each morning from Today’s page (which is still there for a one-off bonus day on some other class).</p>';
+  html += '<p class="help-text" style="margin-top:-6px;">The order below is the order classes appear in every dropdown (Today’s Class/period picker, reports, etc.) — drag the handle to reorder. Category controls which Leaderboard(s) a class counts toward — Torah, Avoda, or Gemilas Chassidim classes are combined into one score there; “Other” classes still count toward the overall Attendance/Participation boards. Max score is what a full mark in that class is worth — most classes are a normal 1, but a shorter or supplementary class can be set lower (e.g. 0.3 or 0.1) so it counts for proportionally less of a student’s blended average. This is the default for every day the class runs; to make one specific day of the week worth something different (e.g. Kriah is a quick 0.3 on Monday/Thursday but the real thing, worth a full 1, on Shabbos), go to Today’s page, pick that class on that day, and click “Edit” on its “Worth up to” pill. Always bonus means marks in that class only ever help a student’s average, never hurt it — every day, automatically, without needing to toggle it each morning from Today’s page (which is still there for a one-off bonus day on some other class).</p>';
   html += '<div class="table-wrap"><table><thead><tr><th style="width:36px;">Order</th><th class="sticky-col-l" style="min-width:150px;">Period</th><th style="min-width:212px;">Category</th><th style="min-width:100px;">Max score</th><th style="min-width:100px;">Always bonus</th>' + DAY_NAMES.map((d) => "<th>" + d.slice(0, 3) + "</th>").join("") + "<th></th></tr></thead><tbody>";
   state.settings.periods.forEach((p, i) => {
     html += '<tr data-period-row="' + escapeHtml(p) + '"><td style="white-space:nowrap;">' +
@@ -6237,16 +6381,22 @@ function renderAdminSchedule(root) {
     const newSched = {};
     const newCategories = {};
     const newMax = {};
+    const newMaxByDay = {};
     const newAlwaysBonus = [];
     state.settings.periods.forEach((p) => {
       newSched[renameOf[p]] = schedByOriginal[p];
       newCategories[renameOf[p]] = categoryByOriginal[p] || categoryFor(p);
       newMax[renameOf[p]] = maxByOriginal[p] || periodMaxFor(p);
+      // Per-day-of-week overrides (see periodMaxFor/wirePeriodMaxEdit) follow a rename the same
+      // way the plain default above does -- a class's Shabbos override shouldn't vanish just
+      // because its name changed.
+      if (state.settings.periodMaxByDay && state.settings.periodMaxByDay[p]) newMaxByDay[renameOf[p]] = state.settings.periodMaxByDay[p];
       if (alwaysBonusByOriginal[p]) newAlwaysBonus.push(renameOf[p]);
     });
     newState.settings.schedule = newSched;
     newState.settings.periodCategories = newCategories;
     newState.settings.periodMax = newMax;
+    newState.settings.periodMaxByDay = newMaxByDay;
     newState.settings.alwaysBonusPeriods = newAlwaysBonus;
     // Carry past attendance over to the new name for anything actually renamed.
     state.settings.periods.forEach((p) => {
