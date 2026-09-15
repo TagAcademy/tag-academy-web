@@ -6364,6 +6364,7 @@ function wireScheduleDrag(root) {
 
 let bulkStaffResult = null;
 let showBulkStaffForm = false;
+let confirmDeleteStaffId = null;
 function renderAdminStaff(root) {
   let html = '<div class="card card-pad"><div class="section-title">Add a staff account</div><div class="field-row">' +
     '<div class="field"><label for="st-name">Name</label><input type="text" id="st-name"></div>' +
@@ -6402,13 +6403,19 @@ function renderAdminStaff(root) {
 
   html += '<div class="card card-pad"><div class="table-wrap"><table><thead><tr><th>Name</th><th>Username</th><th>Password</th><th>Role</th><th class="num" title="Earned from their own self-marked attendance &amp; participation -- never shown to students">TAG coins</th><th class="sticky-col-r"></th></tr></thead><tbody>';
   state.staff.forEach((s) => {
+    const actions = confirmDeleteStaffId === s.id
+      ? '<span style="color:var(--warn);font-weight:600;">Delete permanently?</span> ' +
+        '<button class="btn btn-danger btn-sm" data-confirm-delete-staff="' + s.id + '">Yes, delete everything</button>' +
+        '<button class="btn btn-ghost btn-sm" data-cancel-delete-staff="' + s.id + '">Cancel</button>'
+      : '<button class="btn btn-ghost btn-sm" data-view-as-staff="' + s.id + '">View as</button>' +
+        '<button class="btn btn-ghost btn-sm" data-reset-staff="' + s.id + '">Reset password</button>' +
+        '<button class="btn btn-ghost btn-sm" data-delete-staff="' + s.id + '" style="color:var(--warn);">Delete</button>';
     html += "<tr><td>" + escapeHtml(s.name) + '</td><td class="num">' + escapeHtml(s.username) + '</td><td class="num">' + passwordCellHtml(s.password, "staff:" + s.id) +
       '</td><td>' + (s.role === "admin" ? '<span class="pill pill-gold">Admin</span>'
         : s.role === "limited" ? '<span class="pill pill-muted">Limited: ' + escapeHtml(s.restrictedPeriod || "?") + "</span>"
         : '<span class="pill pill-muted">Teacher</span>') +
       '</td><td class="num">' + num2(staffStats(s.id).balance) + "</td>" +
-      '<td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;"><button class="btn btn-ghost btn-sm" data-view-as-staff="' + s.id + '">View as</button>' +
-      '<button class="btn btn-ghost btn-sm" data-reset-staff="' + s.id + '">Reset password</button></td></tr>';
+      '<td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' + actions + "</td></tr>";
   });
   html += "</tbody></table></div></div>";
   root.innerHTML = html;
@@ -6451,6 +6458,39 @@ function renderAdminStaff(root) {
     rec.password = np;
     const res = await saveState(newState);
     if (res.ok || res.local) { toast("New password for " + rec.name + ": " + np, "good"); renderAll(); }
+  }));
+  root.querySelectorAll("[data-delete-staff]").forEach((btn) => btn.addEventListener("click", () => {
+    confirmDeleteStaffId = btn.getAttribute("data-delete-staff");
+    renderAdminStaff(root);
+  }));
+  root.querySelectorAll("[data-cancel-delete-staff]").forEach((btn) => btn.addEventListener("click", () => {
+    confirmDeleteStaffId = null;
+    renderAdminStaff(root);
+  }));
+  root.querySelectorAll("[data-confirm-delete-staff]").forEach((btn) => btn.addEventListener("click", async () => {
+    const id = btn.getAttribute("data-confirm-delete-staff");
+    const rec = staffById(id);
+    if (!rec) { confirmDeleteStaffId = null; renderAdminStaff(root); return; }
+    // Two guardrails a trial/throwaway account will never trip, but that keep a real cleanup
+    // from locking anyone out: never delete the only admin account (there'd be no one left who
+    // can manage staff/settings at all), and never delete the account you yourself are
+    // currently signed in as (currentSession() is the REAL login, ignoring any "View as"
+    // preview) -- sign in as a different admin first if that one genuinely needs to go.
+    if (rec.role === "admin" && state.staff.filter((s) => s.role === "admin").length <= 1) {
+      toast("Can't delete the only admin account — make someone else an admin first.", "warn");
+      confirmDeleteStaffId = null; renderAdminStaff(root); return;
+    }
+    const real = currentSession();
+    if (real && real.type === "staff" && real.record.id === id) {
+      toast("You can't delete the account you're currently signed in as — sign in as a different admin first.", "warn");
+      confirmDeleteStaffId = null; renderAdminStaff(root); return;
+    }
+    const newState = JSON.parse(JSON.stringify(state));
+    newState.staff = newState.staff.filter((s) => s.id !== id);
+    newState.staffAttendance = (newState.staffAttendance || []).filter((r) => r.staffId !== id);
+    confirmDeleteStaffId = null;
+    const res = await saveState(newState);
+    if (res.ok || res.local) { toast("Deleted " + rec.name + " and their attendance history.", "good"); renderAll(); }
   }));
   const bulkToggle = document.getElementById("st-bulk-toggle");
   if (bulkToggle) bulkToggle.addEventListener("click", () => { showBulkStaffForm = true; renderAdminStaff(root); });
