@@ -3376,6 +3376,15 @@ let gcGrantOpen = false;
 const LIVE_SCHEDULE_POLL_MS = 45000;
 let liveScheduleTimer = null;
 let liveScheduleStatus = null; // last poll result: { ok, matched, rawTitle, reason, detail, checkedAt }
+// The calendar is only allowed to auto-pick a class right after a *fresh* arrival at Today --
+// first page load, switching to the Today tab from somewhere else, or hitting the "Today" jump
+// button -- never on an ordinary 45s tick while someone is already on the page. Each of those
+// three moments sets this true; the very next poll consumes it (flips it back to false) whether
+// or not it actually changed selectedPeriod, so later ticks only refresh the live-status badge
+// and can't yank the selection out from under a teacher who deliberately switched to grade a
+// different class mid-visit.
+let liveScheduleAutoArmed = true;
+let liveScheduleLastRoute = null; // last route seen by ensureLiveSchedule, to detect a fresh arrival at "today"
 function liveScheduleConfig() {
   return (state && state.settings && state.settings.googleCalendar) || { enabled: false, calendarId: "", apiKey: "" };
 }
@@ -3431,23 +3440,36 @@ function stopLiveSchedule() { if (liveScheduleTimer) { clearInterval(liveSchedul
 function ensureLiveSchedule(route, session) {
   const cfg = liveScheduleConfig();
   const isLimitedStaff = !!(session && session.type === "staff" && session.record.role === "limited");
+  // A fresh arrival at Today (as opposed to just re-rendering while already there, e.g. from an
+  // autosave) re-arms the one-shot auto-select -- see liveScheduleAutoArmed above.
+  if (route === "today" && liveScheduleLastRoute !== "today") liveScheduleAutoArmed = true;
+  liveScheduleLastRoute = route;
   const shouldRun = route === "today" && todayDate === todayISO() && !isLimitedStaff && !!cfg.enabled && !!cfg.calendarId && !!cfg.apiKey;
   if (shouldRun && !liveScheduleTimer) {
-    pollLiveSchedule();
     liveScheduleTimer = setInterval(pollLiveSchedule, LIVE_SCHEDULE_POLL_MS);
+    pollLiveSchedule();
+  } else if (shouldRun && liveScheduleAutoArmed) {
+    // Already polling on a timer, but something just re-armed a fresh auto-select (the "Today"
+    // jump button) -- don't make the teacher wait up to 45s for the next scheduled tick.
+    pollLiveSchedule();
   } else if (!shouldRun) {
     stopLiveSchedule();
   }
 }
 async function pollLiveSchedule() {
+  // Consume the arm immediately, before the (async) fetch resolves -- this poll is the only one
+  // allowed to auto-select regardless of what it finds; every later tick on this same visit only
+  // updates the live-status badge.
+  const autoArmed = liveScheduleAutoArmed;
+  liveScheduleAutoArmed = false;
   const result = await fetchLiveCalendarPeriod();
   liveScheduleStatus = Object.assign({}, result, { checkedAt: Date.now() });
-  if (result.ok && result.matched && result.matched !== selectedPeriod) {
+  if (autoArmed && result.ok && result.matched && result.matched !== selectedPeriod) {
     // An actual class change -- worth a full re-render (same as picking it from the dropdown).
     selectedPeriod = result.matched;
     renderAll();
   } else {
-    updateLiveScheduleBadge(); // nothing to switch to -- just refresh the status pill in place
+    updateLiveScheduleBadge(); // nothing to switch to (or not allowed to right now) -- just refresh the status pill in place
   }
 }
 // Patches the badge's text/title directly instead of a full renderAll(), so a routine "nothing
@@ -4099,7 +4121,7 @@ function wireTodayHeader(root) {
   const dateInput = document.getElementById("today-date");
   if (dateInput) dateInput.addEventListener("change", () => { todayDate = dateInput.value; showAddExtraPeriod = false; showHebrewCal = false; localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
   const todayJumpBtn = document.getElementById("today-jump");
-  if (todayJumpBtn) todayJumpBtn.addEventListener("click", () => { todayDate = todayISO(); showAddExtraPeriod = false; showHebrewCal = false; localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
+  if (todayJumpBtn) todayJumpBtn.addEventListener("click", () => { todayDate = todayISO(); showAddExtraPeriod = false; showHebrewCal = false; liveScheduleAutoArmed = true; localStorage.setItem(LAST_DATE_KEY, todayDate); renderAll(); });
   const hcalTrigger = document.getElementById("hcal-trigger");
   if (hcalTrigger) hcalTrigger.addEventListener("click", () => { showHebrewCal = !showHebrewCal; renderAll(); });
   root.querySelectorAll(".hcal-day").forEach((btn) => {
@@ -4123,9 +4145,11 @@ function wireTodayHeader(root) {
 }
 function wirePeriodSelect(root) {
   const sel = document.getElementById("period-select");
-  if (sel) sel.addEventListener("change", () => { selectedPeriod = sel.value; renderAll(); });
+  // A deliberate manual pick always wins -- disarm the calendar auto-select immediately so a
+  // still-in-flight poll from the fresh-visit trigger can't land a moment later and override it.
+  if (sel) sel.addEventListener("change", () => { selectedPeriod = sel.value; liveScheduleAutoArmed = false; renderAll(); });
   root.querySelectorAll(".summary-period-btn").forEach((btn) => {
-    btn.addEventListener("click", () => { selectedPeriod = btn.getAttribute("data-period"); renderAll(); });
+    btn.addEventListener("click", () => { selectedPeriod = btn.getAttribute("data-period"); liveScheduleAutoArmed = false; renderAll(); });
   });
 }
 function wireTodaySummary(root) {
