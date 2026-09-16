@@ -3226,10 +3226,32 @@ async function setMyAvatar(session, url) {
 /* ---------- staff time clock: clock in/out for the specific staff accounts an admin has
    flagged with canClockInOut (see renderShell's clockBtn and Admin > Staff Accounts -- nobody
    else ever sees the clock icon at all). Every entry is kept forever in state.timeClock
-   ({ id, staffId, clockInAt, clockOutAt }); this is v1, a straightforward in/out log --
-   Admin > Time Clock (renderAdminTimeClock) shows the combined view across every staff member
-   with access, to build on later. ---------- */
+   ({ id, staffId, clockInAt, clockOutAt, category?, note? }); this is v1, a straightforward
+   in/out log -- Admin > Time Clock (renderAdminTimeClock) shows the combined view across every
+   staff member with access, plus weekly totals and manual corrections, to build on later. ----- */
 let timeClockOpen = false;
+// While clocking in outside normal hours, we stop for one extra step and ask what the time was
+// for before the entry is actually created -- this flag tracks whether that little form is
+// currently open (see renderTimeClockModal/toggleTimeClock).
+let timeClockShowReasonForm = false;
+// What a clock-in during normal hours never needs to explain, an after-hours clock-in or a
+// backfilled/manual entry (Admin > Time Clock's "Add a manual entry") always does -- a fixed set
+// of categories keeps the log scannable, with room for a free-text note alongside.
+const TIME_CLOCK_CATEGORIES = ["Student", "Staff", "Admin", "Fundraising"];
+// A simple, adjustable placeholder for "normal school hours" -- outside this window we ask what
+// the time was for (see TIME_CLOCK_CATEGORIES above); tighten or loosen this later if it doesn't
+// match how late the building actually runs.
+const TIME_CLOCK_BUSINESS_HOURS = { start: 7, end: 17 }; // 7:00 AM - 5:00 PM
+// A single seam for "the current time" so a test can pin it and deterministically exercise the
+// after-hours flow regardless of the real clock the suite happens to run under -- window.__TEST_NOW_MS__
+// is never set in production, so this is always just Date.now() for real users.
+function appNow() {
+  return (typeof window !== "undefined" && window.__TEST_NOW_MS__ != null) ? window.__TEST_NOW_MS__ : Date.now();
+}
+function timeClockIsAfterHoursAt(ms) {
+  const h = new Date(ms).getHours();
+  return h < TIME_CLOCK_BUSINESS_HOURS.start || h >= TIME_CLOCK_BUSINESS_HOURS.end;
+}
 function timeClockEntriesFor(staffId) {
   return (state.timeClock || []).filter((e) => e.staffId === staffId).sort((a, b) => b.clockInAt - a.clockInAt);
 }
@@ -3242,22 +3264,79 @@ function fmtDurationMs(ms) {
   const h = Math.floor(mins / 60), m = mins % 60;
   return h > 0 ? h + "h " + m + "m" : m + "m";
 }
+// Compact "what was this time for" cell -- a category pill plus an optional note underneath;
+// entries with neither (an ordinary in-hours clock-in) just show a dash.
+function timeClockDetailHtml(e) {
+  if (!e.category && !e.note) return "—";
+  return (e.category ? '<span class="pill pill-muted">' + escapeHtml(e.category) + "</span>" : "") +
+    (e.note ? '<div class="help-text" style="margin-top:2px;">' + escapeHtml(e.note) + "</div>" : "");
+}
+// Which school day (see SCHOOL_DAY_CUTOFF_HOUR/todayISO -- a class night that runs past
+// midnight is still "that day", not the next one) a clock-in at this real timestamp falls on --
+// used to group entries into the same Sunday-Shabbos week as the rest of the app (weekRangeFor)
+// for the Admin > Time Clock weekly totals.
+function schoolDateForMs(ms) {
+  const d = new Date(ms);
+  if (d.getHours() < SCHOOL_DAY_CUTOFF_HOUR) d.setDate(d.getDate() - 1);
+  return isoFromJsDate(d);
+}
+// <input type="datetime-local"> reads/writes "YYYY-MM-DDTHH:mm" in the browser's own local time
+// zone with no offset -- exactly the round trip a manual correction to a clock-in/out time needs.
+function msToLocalInputValue(ms) {
+  const d = new Date(ms);
+  const tz = d.getTimezoneOffset();
+  const local = new Date(d.getTime() - tz * 60000);
+  return local.toISOString().slice(0, 16);
+}
+function localInputValueToMs(v) {
+  const t = new Date(v).getTime();
+  return isNaN(t) ? null : t;
+}
+// One row per staff member per week they logged any completed time, most recent week first --
+// an entry still open (no clockOutAt yet) isn't counted toward any week's total until it's
+// closed, so a currently-running session never inflates a "finished" week's number.
+function timeClockWeeklyTotals() {
+  const map = new Map();
+  (state.timeClock || []).forEach((e) => {
+    if (!e.clockOutAt) return;
+    const wk = weekRangeFor(schoolDateForMs(e.clockInAt));
+    const key = wk.from + "|" + e.staffId;
+    if (!map.has(key)) map.set(key, { weekFrom: wk.from, weekTo: wk.to, staffId: e.staffId, ms: 0 });
+    map.get(key).ms += e.clockOutAt - e.clockInAt;
+  });
+  return Array.from(map.values()).sort((a, b) => {
+    if (a.weekFrom !== b.weekFrom) return b.weekFrom.localeCompare(a.weekFrom);
+    const an = (staffById(a.staffId) || {}).name || "", bn = (staffById(b.staffId) || {}).name || "";
+    return an.localeCompare(bn);
+  });
+}
 function renderTimeClockModal(session) {
   const root = document.getElementById("time-clock-root");
   if (!root) return;
   if (!timeClockOpen || session.type !== "staff" || !session.record.canClockInOut) { root.innerHTML = ""; return; }
   const entries = timeClockEntriesFor(session.record.id);
   const open = entries.find((e) => !e.clockOutAt);
+  const needsReason = !open && timeClockIsAfterHoursAt(appNow());
   const rows = entries.slice(0, 50).map((e) =>
-    "<tr><td>" + fmtClockTime(e.clockInAt) + "</td><td>" + (e.clockOutAt ? fmtClockTime(e.clockOutAt) : '<span class="pill pill-good">Clocked in</span>') + "</td><td>" + (e.clockOutAt ? fmtDurationMs(e.clockOutAt - e.clockInAt) : "—") + "</td></tr>"
+    "<tr><td>" + fmtClockTime(e.clockInAt) + "</td><td>" + (e.clockOutAt ? fmtClockTime(e.clockOutAt) : '<span class="pill pill-good">Clocked in</span>') + "</td><td>" + (e.clockOutAt ? fmtDurationMs(e.clockOutAt - e.clockInAt) : "—") + "</td><td>" + timeClockDetailHtml(e) + "</td></tr>"
   ).join("");
+  const actionHtml = (!open && needsReason && timeClockShowReasonForm)
+    ? '<div class="field" style="margin-bottom:8px;"><label for="tc-reason-category">What\'s this time for?</label>' +
+      '<select id="tc-reason-category"><option value="">Choose one…</option>' +
+      TIME_CLOCK_CATEGORIES.map((c) => '<option value="' + c + '">' + c + "</option>").join("") +
+      "</select></div>" +
+      '<div class="field" style="margin-bottom:10px;"><label for="tc-reason-note">Details (optional)</label><textarea id="tc-reason-note" rows="2" placeholder="Anything worth noting"></textarea></div>' +
+      '<div style="display:flex;gap:10px;margin-bottom:14px;">' +
+      '<button type="button" class="btn btn-primary" id="time-clock-confirm-btn" style="flex:1;">Confirm Clock In</button>' +
+      '<button type="button" class="btn btn-ghost" id="time-clock-reason-cancel-btn">Cancel</button></div>'
+    : '<button type="button" class="btn ' + (open ? "btn-danger" : "btn-primary") + '" id="time-clock-toggle-btn" style="width:100%;margin-bottom:14px;">' + (open ? "Clock Out" : "Clock In") + "</button>";
   root.innerHTML = '<div class="modal-backdrop" id="time-clock-backdrop">' +
     '<div class="modal modal-wide">' +
     "<h2>Time Clock</h2>" +
-    '<p class="sub">' + (open ? "Clocked in since " + fmtClockTime(open.clockInAt) + "." : "You’re not clocked in right now.") + "</p>" +
-    '<button type="button" class="btn ' + (open ? "btn-danger" : "btn-primary") + '" id="time-clock-toggle-btn" style="width:100%;margin-bottom:14px;">' + (open ? "Clock Out" : "Clock In") + "</button>" +
+    '<p class="sub">' + (open ? "Clocked in since " + fmtClockTime(open.clockInAt) + "." : needsReason ? "It's after hours — let us know what this time is for." : "You’re not clocked in right now.") + "</p>" +
+    actionHtml +
     (entries.length
-      ? '<div class="table-wrap"><table><thead><tr><th>Clocked in</th><th>Clocked out</th><th>Duration</th></tr></thead><tbody>' + rows + "</tbody></table></div>"
+      ? '<div class="table-wrap"><table><thead><tr><th>Clocked in</th><th>Clocked out</th><th>Duration</th><th>For</th></tr></thead><tbody>' + rows + "</tbody></table></div>"
       : '<p class="help-text">No time logged yet.</p>') +
     '<div style="display:flex;justify-content:flex-end;margin-top:14px;">' +
     '<button type="button" class="btn btn-ghost btn-sm" id="time-clock-close-btn">Close</button>' +
@@ -3266,23 +3345,46 @@ function renderTimeClockModal(session) {
     if (evt.target.id === "time-clock-backdrop") { closeTimeClock(session); }
   });
   document.getElementById("time-clock-close-btn").addEventListener("click", () => closeTimeClock(session));
-  document.getElementById("time-clock-toggle-btn").addEventListener("click", () => toggleTimeClock(session));
+  const toggleBtn = document.getElementById("time-clock-toggle-btn");
+  if (toggleBtn) toggleBtn.addEventListener("click", () => {
+    if (!open && needsReason) { timeClockShowReasonForm = true; renderTimeClockModal(session); return; }
+    toggleTimeClock(session);
+  });
+  const confirmBtn = document.getElementById("time-clock-confirm-btn");
+  if (confirmBtn) confirmBtn.addEventListener("click", () => {
+    const category = document.getElementById("tc-reason-category").value;
+    const note = document.getElementById("tc-reason-note").value.trim();
+    if (!category) { toast("Choose what this time is for.", "warn"); return; }
+    timeClockShowReasonForm = false;
+    toggleTimeClock(session, { category, note });
+  });
+  const reasonCancelBtn = document.getElementById("time-clock-reason-cancel-btn");
+  if (reasonCancelBtn) reasonCancelBtn.addEventListener("click", () => { timeClockShowReasonForm = false; renderTimeClockModal(session); });
 }
 function closeTimeClock(session) {
   timeClockOpen = false;
+  timeClockShowReasonForm = false;
   renderTimeClockModal(session);
 }
-async function toggleTimeClock(session) {
+async function toggleTimeClock(session, extra) {
   const newState = JSON.parse(JSON.stringify(state));
   newState.timeClock = newState.timeClock || [];
   const staffId = session.record.id;
-  const open = newState.timeClock.filter((e) => e.staffId === staffId).sort((a, b) => b.clockInAt - a.clockInAt)[0];
-  const now = Date.now();
-  const wasOpen = !!(open && !open.clockOutAt);
+  // Find the actual open entry (no clockOutAt) directly, rather than assuming the entry with the
+  // latest clockInAt is "the open one" -- two entries can legitimately share the same clockInAt
+  // millisecond (e.g. a manual backfill, or a test pinning the clock), and a plain sort-then-take-
+  // newest would then grab whichever one happens to land first instead of the one that's actually
+  // still open.
+  const open = newState.timeClock.find((e) => e.staffId === staffId && !e.clockOutAt);
+  const now = appNow();
+  const wasOpen = !!open;
   if (wasOpen) {
     open.clockOutAt = now;
   } else {
-    newState.timeClock.push({ id: uid("tc"), staffId, clockInAt: now, clockOutAt: null });
+    const entry = { id: uid("tc"), staffId, clockInAt: now, clockOutAt: null };
+    if (extra && extra.category) entry.category = extra.category;
+    if (extra && extra.note) entry.note = extra.note;
+    newState.timeClock.push(entry);
   }
   const res = await saveState(newState);
   if (res.ok || res.local) {
@@ -6628,28 +6730,156 @@ function renderAdminStaff(root) {
   }));
 }
 
-// Read-only v1: every clock in/out entry from every staff member who has (or ever had)
-// canClockInOut access, newest first, so an admin can see the combined organizational log --
-// not just each person's own history from their own modal. "Build it up from there" covers
-// editing/correcting entries and any reporting on top of this later.
+// Combined log across every staff member with (or who ever had) canClockInOut access -- not
+// just each person's own history from their own modal. An admin can also backfill an entry that
+// was never clocked live (always tagged with a category, same as an after-hours self clock-in),
+// see a weekly-totals rollup, and correct or delete any raw entry -- all admin-only, same as
+// every other edit/delete in this app.
+let editingTimeClockId = null;
+let confirmDeleteTimeClockId = null;
 function renderAdminTimeClock(root) {
   const entries = (state.timeClock || []).slice().sort((a, b) => b.clockInAt - a.clockInAt);
+  const weekly = timeClockWeeklyTotals();
+  const staffOptionsHtml = state.staff.slice().sort((a, b) => a.name.localeCompare(b.name))
+    .map((s) => '<option value="' + s.id + '">' + escapeHtml(s.name) + "</option>").join("");
+  const categoryOptionsHtml = '<option value="">Choose one…</option>' + TIME_CLOCK_CATEGORIES.map((c) => '<option value="' + c + '">' + c + "</option>").join("");
+
   let html = '<div class="card card-pad">' +
-    '<div class="section-title">Time Clock</div>' +
-    '<p class="help-text" style="margin-top:-6px;">Every clock in/out entry logged by staff with Time Clock access (Admin &gt; Staff Accounts). Read-only for now.</p>';
+    '<div class="section-title">Add a manual entry</div>' +
+    '<p class="help-text" style="margin-top:-6px;">For backfilling a session that wasn\'t clocked live — always tagged with what the time was for.</p>' +
+    '<div class="field-row">' +
+    '<div class="field"><label for="tc-add-staff">Staff</label><select id="tc-add-staff">' + staffOptionsHtml + "</select></div>" +
+    '<div class="field"><label for="tc-add-in">Clocked in</label><input type="datetime-local" id="tc-add-in"></div>' +
+    '<div class="field"><label for="tc-add-out">Clocked out (optional)</label><input type="datetime-local" id="tc-add-out"></div>' +
+    '<div class="field" style="max-width:170px;"><label for="tc-add-category">For</label><select id="tc-add-category">' + categoryOptionsHtml + "</select></div>" +
+    "</div>" +
+    '<div class="field"><label for="tc-add-note">Details (optional)</label><input type="text" id="tc-add-note" placeholder="Anything worth noting"></div>' +
+    '<button class="btn btn-primary btn-sm" id="tc-add-submit">Add entry</button>' +
+    "</div>";
+
+  html += '<div class="card card-pad">' +
+    '<div class="section-title">Weekly totals</div>' +
+    '<p class="help-text" style="margin-top:-6px;">Total time logged per staff member, by week — only counts sessions that have been clocked out.</p>';
+  if (!weekly.length) {
+    html += '<p class="help-text">No completed sessions yet.</p></div>';
+  } else {
+    html += '<div class="table-wrap" id="tc-weekly-totals"><table><thead><tr><th>Week</th><th>Staff</th><th class="num">Total</th></tr></thead><tbody>' +
+      weekly.map((w) => {
+        const rec = staffById(w.staffId);
+        return "<tr><td>" + escapeHtml(fmtDateShort(w.weekFrom)) + " – " + escapeHtml(fmtDateShort(w.weekTo)) + "</td><td>" +
+          escapeHtml(rec ? rec.name : "(removed staff)") + '</td><td class="num">' + fmtDurationMs(w.ms) + "</td></tr>";
+      }).join("") +
+      "</tbody></table></div></div>";
+  }
+
+  html += '<div class="card card-pad">' +
+    '<div class="section-title">Full log</div>' +
+    '<p class="help-text" style="margin-top:-6px;">Every clock in/out entry logged by staff with Time Clock access (Admin &gt; Staff Accounts). Edit a row to correct a time or its category, or delete one that was made by mistake.</p>';
   if (!entries.length) {
     html += '<p class="help-text">Nobody has clocked in yet.</p></div>';
   } else {
-    html += '<div class="table-wrap"><table><thead><tr><th>Staff</th><th>Clocked in</th><th>Clocked out</th><th>Duration</th></tr></thead><tbody>' +
+    html += '<div class="table-wrap" id="tc-full-log"><table><thead><tr><th>Staff</th><th>Clocked in</th><th>Clocked out</th><th>Duration</th><th>For</th><th class="sticky-col-r"></th></tr></thead><tbody>' +
       entries.map((e) => {
         const rec = staffById(e.staffId);
-        return "<tr><td>" + escapeHtml(rec ? rec.name : "(removed staff)") + "</td><td>" + fmtClockTime(e.clockInAt) + "</td><td>" +
+        const name = escapeHtml(rec ? rec.name : "(removed staff)");
+        if (editingTimeClockId === e.id) {
+          return "<tr><td>" + name + '</td><td><input type="datetime-local" id="tc-edit-in-' + e.id + '" value="' + msToLocalInputValue(e.clockInAt) + '"></td>' +
+            '<td><input type="datetime-local" id="tc-edit-out-' + e.id + '" value="' + (e.clockOutAt ? msToLocalInputValue(e.clockOutAt) : "") + '"><div class="help-text">Blank keeps it open</div></td>' +
+            '<td class="help-text">—</td>' +
+            '<td><select id="tc-edit-category-' + e.id + '">' + '<option value="">—</option>' + TIME_CLOCK_CATEGORIES.map((c) => '<option value="' + c + '"' + (e.category === c ? " selected" : "") + ">" + c + "</option>").join("") + "</select>" +
+            '<input type="text" id="tc-edit-note-' + e.id + '" value="' + escapeHtml(e.note || "") + '" placeholder="Details" style="margin-top:4px;"></td>' +
+            '<td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
+            '<button class="btn btn-primary btn-sm" data-save-tc="' + e.id + '">Save</button>' +
+            '<button class="btn btn-ghost btn-sm" data-cancel-edit-tc="' + e.id + '">Cancel</button></td></tr>';
+        }
+        if (confirmDeleteTimeClockId === e.id) {
+          return "<tr><td>" + name + '</td><td>' + fmtClockTime(e.clockInAt) + "</td><td>" +
+            (e.clockOutAt ? fmtClockTime(e.clockOutAt) : '<span class="pill pill-good">Clocked in</span>') + "</td><td>" +
+            (e.clockOutAt ? fmtDurationMs(e.clockOutAt - e.clockInAt) : "—") + "</td><td>" + timeClockDetailHtml(e) +
+            '</td><td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
+            '<span style="color:var(--warn);font-weight:600;">Delete this entry?</span> ' +
+            '<button class="btn btn-danger btn-sm" data-confirm-delete-tc="' + e.id + '">Yes, delete</button>' +
+            '<button class="btn btn-ghost btn-sm" data-cancel-delete-tc="' + e.id + '">Cancel</button></td></tr>';
+        }
+        return "<tr><td>" + name + "</td><td>" + fmtClockTime(e.clockInAt) + "</td><td>" +
           (e.clockOutAt ? fmtClockTime(e.clockOutAt) : '<span class="pill pill-good">Clocked in</span>') + "</td><td>" +
-          (e.clockOutAt ? fmtDurationMs(e.clockOutAt - e.clockInAt) : "—") + "</td></tr>";
+          (e.clockOutAt ? fmtDurationMs(e.clockOutAt - e.clockInAt) : "—") + "</td><td>" + timeClockDetailHtml(e) +
+          '</td><td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
+          '<button class="btn btn-ghost btn-sm" data-edit-tc="' + e.id + '">Edit</button>' +
+          '<button class="btn btn-ghost btn-sm" data-delete-tc="' + e.id + '" style="color:var(--warn);">Delete</button></td></tr>';
       }).join("") +
       "</tbody></table></div></div>";
   }
   root.innerHTML = html;
+
+  const addSubmit = document.getElementById("tc-add-submit");
+  if (addSubmit) addSubmit.addEventListener("click", async () => {
+    const staffId = document.getElementById("tc-add-staff").value;
+    const inVal = document.getElementById("tc-add-in").value;
+    const outVal = document.getElementById("tc-add-out").value;
+    const category = document.getElementById("tc-add-category").value;
+    const note = document.getElementById("tc-add-note").value.trim();
+    if (!staffId) { toast("Choose a staff member.", "warn"); return; }
+    const inMs = localInputValueToMs(inVal);
+    if (inMs == null) { toast("Enter a valid clock-in time.", "warn"); return; }
+    const outMs = outVal ? localInputValueToMs(outVal) : null;
+    if (outMs != null && outMs < inMs) { toast("Clock-out can't be before clock-in.", "warn"); return; }
+    if (!category) { toast("Choose what this time is for.", "warn"); return; }
+    const newState = JSON.parse(JSON.stringify(state));
+    newState.timeClock = newState.timeClock || [];
+    const entry = { id: uid("tc"), staffId, clockInAt: inMs, clockOutAt: outMs, category };
+    if (note) entry.note = note;
+    newState.timeClock.push(entry);
+    const res = await saveState(newState);
+    if (res.ok || res.local) { toast("Entry added.", "good"); renderAll(); } else { renderAdminTimeClock(root); }
+  });
+  root.querySelectorAll("[data-edit-tc]").forEach((btn) => btn.addEventListener("click", () => {
+    editingTimeClockId = btn.getAttribute("data-edit-tc");
+    confirmDeleteTimeClockId = null;
+    renderAdminTimeClock(root);
+  }));
+  root.querySelectorAll("[data-cancel-edit-tc]").forEach((btn) => btn.addEventListener("click", () => {
+    editingTimeClockId = null;
+    renderAdminTimeClock(root);
+  }));
+  root.querySelectorAll("[data-save-tc]").forEach((btn) => btn.addEventListener("click", async () => {
+    const id = btn.getAttribute("data-save-tc");
+    const inVal = document.getElementById("tc-edit-in-" + id).value;
+    const outVal = document.getElementById("tc-edit-out-" + id).value;
+    const category = document.getElementById("tc-edit-category-" + id).value;
+    const note = document.getElementById("tc-edit-note-" + id).value.trim();
+    const inMs = localInputValueToMs(inVal);
+    if (inMs == null) { toast("Enter a valid clock-in time.", "warn"); return; }
+    const outMs = outVal ? localInputValueToMs(outVal) : null;
+    if (outMs != null && outMs < inMs) { toast("Clock-out can't be before clock-in.", "warn"); return; }
+    const newState = JSON.parse(JSON.stringify(state));
+    const rec = (newState.timeClock || []).find((x) => x.id === id);
+    if (!rec) { editingTimeClockId = null; renderAdminTimeClock(root); return; }
+    rec.clockInAt = inMs;
+    rec.clockOutAt = outMs;
+    if (category) rec.category = category; else delete rec.category;
+    if (note) rec.note = note; else delete rec.note;
+    editingTimeClockId = null;
+    const res = await saveState(newState);
+    if (res.ok || res.local) { toast("Time clock entry updated.", "good"); renderAll(); } else { renderAdminTimeClock(root); }
+  }));
+  root.querySelectorAll("[data-delete-tc]").forEach((btn) => btn.addEventListener("click", () => {
+    confirmDeleteTimeClockId = btn.getAttribute("data-delete-tc");
+    editingTimeClockId = null;
+    renderAdminTimeClock(root);
+  }));
+  root.querySelectorAll("[data-cancel-delete-tc]").forEach((btn) => btn.addEventListener("click", () => {
+    confirmDeleteTimeClockId = null;
+    renderAdminTimeClock(root);
+  }));
+  root.querySelectorAll("[data-confirm-delete-tc]").forEach((btn) => btn.addEventListener("click", async () => {
+    const id = btn.getAttribute("data-confirm-delete-tc");
+    const newState = JSON.parse(JSON.stringify(state));
+    newState.timeClock = (newState.timeClock || []).filter((x) => x.id !== id);
+    confirmDeleteTimeClockId = null;
+    const res = await saveState(newState);
+    if (res.ok || res.local) { toast("Time clock entry deleted.", "good"); renderAll(); } else { renderAdminTimeClock(root); }
+  }));
 }
 
 let bulkStudentResult = null;
