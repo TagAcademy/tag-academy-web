@@ -225,6 +225,16 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 }
 .staff-chip .avatar:disabled { cursor: default; }
 .staff-chip .avatar img { width: 100%; height: 100%; object-fit: cover; }
+/* Clock-in/out icon button -- only rendered for the handful of staff with canClockInOut set
+   (see renderShell/renderAdminStaff); same 26px circular footprint as the avatar button next
+   to it, but an icon rather than a photo, with its own green "currently clocked in" state. */
+.time-clock-btn {
+  width: 26px; height: 26px; border-radius: 50%; background: var(--surface); color: var(--muted);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  border: 1px solid var(--line); padding: 0; cursor: pointer;
+}
+.time-clock-btn svg { width: 15px; height: 15px; }
+.time-clock-btn.is-clocked-in { background: var(--good-soft); color: var(--good); border-color: transparent; }
 .staff-chip .info { min-width: 0; flex: 1; }
 .staff-chip .name { font-weight: 700; font-size: 0.82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .staff-chip .switch { font-size: 0.72rem; color: var(--brand); background: none; border: none; cursor: pointer; padding: 0; font-weight: 600; }
@@ -1354,6 +1364,7 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
 <div id="shell" style="display:none;">
   <div id="preview-banner"></div>
   <div id="avatar-picker-root"></div>
+  <div id="time-clock-root"></div>
   <div id="app">
     <aside class="sidebar" id="sidebar"></aside>
     <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
@@ -3001,6 +3012,7 @@ const ICONS = {
   crown: '<path d="M2.7 13.2h12.6l1-7.3-3.9 2.9-2.7-4.8-2.7 4.8-3.9-2.9 1 7.3z" fill="currentColor" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/><rect x="2.7" y="13.2" width="12.6" height="1.9" rx="0.5" fill="currentColor"/>',
   chevron: '<path d="M4.5 7 9 11.5 13.5 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
   sparkle: '<path d="M9 1.5 10.6 7.4 16.5 9 10.6 10.6 9 16.5 7.4 10.6 1.5 9 7.4 7.4 Z" fill="currentColor"/>',
+  clock: '<circle cx="9" cy="9" r="7" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9 5v4.3l3 1.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',
 };
 function icon(name) { return '<svg viewBox="0 0 18 18">' + (ICONS[name] || "") + "</svg>"; }
 
@@ -3107,11 +3119,19 @@ function renderShell(session, previewing) {
   // rest of the app's read-only rule there.
   const avatarInner = '<img src="' + escapeHtml(session.record.photoUrl || defaultAvatarFor(session.record)) + '" alt="" />';
   const avatarAttrs = previewing ? " disabled" : ' data-open-avatar-picker="1"';
-  const staffBlock = '<div class="staff-chip"><button type="button" class="avatar"' + avatarAttrs + ' title="Change your avatar">' + avatarInner + "</button>" +
+  // Clock in/out icon -- only for the specific staff accounts an admin has flagged with
+  // canClockInOut (Admin > Staff Accounts); nobody else ever sees it, and it's hidden while
+  // previewing someone else's account, same as the rest of the app's read-only rule there.
+  const canClock = session.type === "staff" && !!session.record.canClockInOut && !previewing;
+  const clockedIn = canClock && timeClockEntriesFor(session.record.id).some((e) => !e.clockOutAt);
+  const clockBtn = canClock
+    ? '<button type="button" class="time-clock-btn' + (clockedIn ? " is-clocked-in" : "") + '" data-open-time-clock="1" title="' + (clockedIn ? "Clocked in — tap to clock out or view your time" : "Clock in / out") + '">' + icon("clock") + "</button>"
+    : "";
+  const staffBlock = '<div class="staff-chip">' + clockBtn + '<button type="button" class="avatar"' + avatarAttrs + ' title="Change your avatar">' + avatarInner + "</button>" +
     '<div class="info"><div class="name">' + escapeHtml(person) + '</div><div style="font-size:0.68rem;color:var(--muted);">' + roleLabel + '</div></div>' +
     (previewing ? "" : '<button class="switch btn-logout-action" type="button">Log out</button>') + "</div>";
   // Compact version for the mobile topbar (the sidebar it normally lives in is hidden there).
-  const mobileUserHtml = '<button type="button" class="avatar"' + avatarAttrs + ' title="' + escapeHtml(person) + " — " + escapeHtml(roleLabel) + '">' + avatarInner + "</button>" +
+  const mobileUserHtml = clockBtn + '<button type="button" class="avatar"' + avatarAttrs + ' title="' + escapeHtml(person) + " — " + escapeHtml(roleLabel) + '">' + avatarInner + "</button>" +
     (previewing ? "" : '<button class="switch btn-logout-action" type="button">Log out</button>');
 
   const sidebarHtml =
@@ -3146,6 +3166,8 @@ function renderShell(session, previewing) {
   document.querySelectorAll(".btn-logout-action").forEach((btn) => btn.addEventListener("click", logout));
   document.querySelectorAll("[data-open-avatar-picker]").forEach((btn) => btn.addEventListener("click", () => { avatarPickerOpen = true; renderAvatarPickerModal(session); }));
   renderAvatarPickerModal(session);
+  document.querySelectorAll("[data-open-time-clock]").forEach((btn) => btn.addEventListener("click", () => { timeClockOpen = true; renderTimeClockModal(session); }));
+  renderTimeClockModal(session);
 }
 
 /* ---------- avatar picker: tap your own avatar (sidebar or mobile topbar) to pick a face
@@ -3197,6 +3219,74 @@ async function setMyAvatar(session, url) {
   if (res.ok || res.local) {
     avatarPickerOpen = false;
     toast(url ? "Avatar updated." : "Avatar reset to the default.", "good");
+    renderAll();
+  }
+}
+
+/* ---------- staff time clock: clock in/out for the specific staff accounts an admin has
+   flagged with canClockInOut (see renderShell's clockBtn and Admin > Staff Accounts -- nobody
+   else ever sees the clock icon at all). Every entry is kept forever in state.timeClock
+   ({ id, staffId, clockInAt, clockOutAt }); this is v1, a straightforward in/out log --
+   Admin > Time Clock (renderAdminTimeClock) shows the combined view across every staff member
+   with access, to build on later. ---------- */
+let timeClockOpen = false;
+function timeClockEntriesFor(staffId) {
+  return (state.timeClock || []).filter((e) => e.staffId === staffId).sort((a, b) => b.clockInAt - a.clockInAt);
+}
+function fmtClockTime(ms) {
+  return new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+function fmtDurationMs(ms) {
+  if (ms == null || ms < 0) return "—";
+  const mins = Math.round(ms / 60000);
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return h > 0 ? h + "h " + m + "m" : m + "m";
+}
+function renderTimeClockModal(session) {
+  const root = document.getElementById("time-clock-root");
+  if (!root) return;
+  if (!timeClockOpen || session.type !== "staff" || !session.record.canClockInOut) { root.innerHTML = ""; return; }
+  const entries = timeClockEntriesFor(session.record.id);
+  const open = entries.find((e) => !e.clockOutAt);
+  const rows = entries.slice(0, 50).map((e) =>
+    "<tr><td>" + fmtClockTime(e.clockInAt) + "</td><td>" + (e.clockOutAt ? fmtClockTime(e.clockOutAt) : '<span class="pill pill-good">Clocked in</span>') + "</td><td>" + (e.clockOutAt ? fmtDurationMs(e.clockOutAt - e.clockInAt) : "—") + "</td></tr>"
+  ).join("");
+  root.innerHTML = '<div class="modal-backdrop" id="time-clock-backdrop">' +
+    '<div class="modal modal-wide">' +
+    "<h2>Time Clock</h2>" +
+    '<p class="sub">' + (open ? "Clocked in since " + fmtClockTime(open.clockInAt) + "." : "You’re not clocked in right now.") + "</p>" +
+    '<button type="button" class="btn ' + (open ? "btn-danger" : "btn-primary") + '" id="time-clock-toggle-btn" style="width:100%;margin-bottom:14px;">' + (open ? "Clock Out" : "Clock In") + "</button>" +
+    (entries.length
+      ? '<div class="table-wrap"><table><thead><tr><th>Clocked in</th><th>Clocked out</th><th>Duration</th></tr></thead><tbody>' + rows + "</tbody></table></div>"
+      : '<p class="help-text">No time logged yet.</p>') +
+    '<div style="display:flex;justify-content:flex-end;margin-top:14px;">' +
+    '<button type="button" class="btn btn-ghost btn-sm" id="time-clock-close-btn">Close</button>' +
+    "</div></div></div>";
+  document.getElementById("time-clock-backdrop").addEventListener("click", (evt) => {
+    if (evt.target.id === "time-clock-backdrop") { closeTimeClock(session); }
+  });
+  document.getElementById("time-clock-close-btn").addEventListener("click", () => closeTimeClock(session));
+  document.getElementById("time-clock-toggle-btn").addEventListener("click", () => toggleTimeClock(session));
+}
+function closeTimeClock(session) {
+  timeClockOpen = false;
+  renderTimeClockModal(session);
+}
+async function toggleTimeClock(session) {
+  const newState = JSON.parse(JSON.stringify(state));
+  newState.timeClock = newState.timeClock || [];
+  const staffId = session.record.id;
+  const open = newState.timeClock.filter((e) => e.staffId === staffId).sort((a, b) => b.clockInAt - a.clockInAt)[0];
+  const now = Date.now();
+  const wasOpen = !!(open && !open.clockOutAt);
+  if (wasOpen) {
+    open.clockOutAt = now;
+  } else {
+    newState.timeClock.push({ id: uid("tc"), staffId, clockInAt: now, clockOutAt: null });
+  }
+  const res = await saveState(newState);
+  if (res.ok || res.local) {
+    toast(wasOpen ? "Clocked out." : "Clocked in.", "good");
     renderAll();
   }
 }
@@ -6128,7 +6218,7 @@ function renderLeaderboard(root, session) {
    ================================================================ */
 let adminTab = "students";
 function renderAdmin(root) {
-  const tabs = [["students", "Students"], ["staff", "Staff Accounts"], ["privileges", "Coins & Privileges"], ["schedule", "Schedule"]];
+  const tabs = [["students", "Students"], ["staff", "Staff Accounts"], ["privileges", "Coins & Privileges"], ["schedule", "Schedule"], ["timeclock", "Time Clock"]];
   let html = '<div class="page-head"><div><span class="eyebrow">Set everything up</span><h1>Admin</h1>' +
     '<p>The weekly schedule, the coin rule, and every login — staff and student. Everything else in the app reads from here.</p></div></div>';
   html += '<div class="admin-tabs">' + tabs.map((t) => '<button class="admin-tab' + (adminTab === t[0] ? " active" : "") + '" data-admintab="' + t[0] + '">' + t[1] + "</button>").join("") + "</div>";
@@ -6139,6 +6229,7 @@ function renderAdmin(root) {
   if (adminTab === "schedule") renderAdminSchedule(content);
   else if (adminTab === "staff") renderAdminStaff(content);
   else if (adminTab === "students") renderAdminStudents(content);
+  else if (adminTab === "timeclock") renderAdminTimeClock(content);
   else renderAdminPrivileges(content);
 }
 
@@ -6400,11 +6491,13 @@ function renderAdminStaff(root) {
         '<button class="btn btn-ghost btn-sm" data-cancel-delete-staff="' + s.id + '">Cancel</button>'
       : '<button class="btn btn-ghost btn-sm" data-view-as-staff="' + s.id + '">View as</button>' +
         '<button class="btn btn-ghost btn-sm" data-reset-staff="' + s.id + '">Reset password</button>' +
+        '<button class="btn btn-ghost btn-sm" data-toggle-clock="' + s.id + '">' + (s.canClockInOut ? "Remove Time Clock access" : "Allow Time Clock access") + '</button>' +
         '<button class="btn btn-ghost btn-sm" data-delete-staff="' + s.id + '" style="color:var(--warn);">Delete</button>';
     html += "<tr><td>" + escapeHtml(s.name) + '</td><td class="num">' + escapeHtml(s.username) + '</td><td class="num">' + passwordCellHtml(s.password, "staff:" + s.id) +
       '</td><td>' + (s.role === "admin" ? '<span class="pill pill-gold">Admin</span>'
         : s.role === "limited" ? '<span class="pill pill-muted">Limited: ' + escapeHtml(s.restrictedPeriod || "?") + "</span>"
         : '<span class="pill pill-muted">Teacher</span>') +
+      (s.canClockInOut ? ' <span class="pill pill-good" title="Sees a clock icon next to their profile to clock in/out; every entry is kept under Admin &gt; Time Clock">⏱ Time Clock</span>' : "") +
       '</td><td class="num">' + num2(staffStats(s.id).balance) + "</td>" +
       '<td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' + actions + "</td></tr>";
   });
@@ -6449,6 +6542,14 @@ function renderAdminStaff(root) {
     rec.password = np;
     const res = await saveState(newState);
     if (res.ok || res.local) { toast("New password for " + rec.name + ": " + np, "good"); renderAll(); }
+  }));
+  root.querySelectorAll("[data-toggle-clock]").forEach((btn) => btn.addEventListener("click", async () => {
+    const id = btn.getAttribute("data-toggle-clock");
+    const newState = JSON.parse(JSON.stringify(state));
+    const s = newState.staff.find((x) => x.id === id);
+    s.canClockInOut = !s.canClockInOut;
+    const res = await saveState(newState);
+    if (res.ok || res.local) { toast(s.canClockInOut ? s.name + " can now clock in/out from a clock icon near their profile." : s.name + " no longer has Time Clock access.", "good"); renderAll(); }
   }));
   root.querySelectorAll("[data-delete-staff]").forEach((btn) => btn.addEventListener("click", () => {
     confirmDeleteStaffId = btn.getAttribute("data-delete-staff");
@@ -6525,6 +6626,30 @@ function renderAdminStaff(root) {
     if (revealedPasswords.has(key)) revealedPasswords.delete(key); else revealedPasswords.add(key);
     renderAdminStaff(root);
   }));
+}
+
+// Read-only v1: every clock in/out entry from every staff member who has (or ever had)
+// canClockInOut access, newest first, so an admin can see the combined organizational log --
+// not just each person's own history from their own modal. "Build it up from there" covers
+// editing/correcting entries and any reporting on top of this later.
+function renderAdminTimeClock(root) {
+  const entries = (state.timeClock || []).slice().sort((a, b) => b.clockInAt - a.clockInAt);
+  let html = '<div class="card card-pad">' +
+    '<div class="section-title">Time Clock</div>' +
+    '<p class="help-text" style="margin-top:-6px;">Every clock in/out entry logged by staff with Time Clock access (Admin &gt; Staff Accounts). Read-only for now.</p>';
+  if (!entries.length) {
+    html += '<p class="help-text">Nobody has clocked in yet.</p></div>';
+  } else {
+    html += '<div class="table-wrap"><table><thead><tr><th>Staff</th><th>Clocked in</th><th>Clocked out</th><th>Duration</th></tr></thead><tbody>' +
+      entries.map((e) => {
+        const rec = staffById(e.staffId);
+        return "<tr><td>" + escapeHtml(rec ? rec.name : "(removed staff)") + "</td><td>" + fmtClockTime(e.clockInAt) + "</td><td>" +
+          (e.clockOutAt ? fmtClockTime(e.clockOutAt) : '<span class="pill pill-good">Clocked in</span>') + "</td><td>" +
+          (e.clockOutAt ? fmtDurationMs(e.clockOutAt - e.clockInAt) : "—") + "</td></tr>";
+      }).join("") +
+      "</tbody></table></div></div>";
+  }
+  root.innerHTML = html;
 }
 
 let bulkStudentResult = null;
