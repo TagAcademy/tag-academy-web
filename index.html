@@ -3225,10 +3225,12 @@ async function setMyAvatar(session, url) {
 
 /* ---------- staff time clock: clock in/out for the specific staff accounts an admin has
    flagged with canClockInOut (see renderShell's clockBtn and Admin > Staff Accounts -- nobody
-   else ever sees the clock icon at all). Every entry is kept forever in state.timeClock
-   ({ id, staffId, clockInAt, clockOutAt, category?, note? }); this is v1, a straightforward
-   in/out log -- Admin > Time Clock (renderAdminTimeClock) shows the combined view across every
-   staff member with access, plus weekly totals and manual corrections, to build on later. ----- */
+   else ever sees the clock icon at all). Every entry is kept forever in state.timeClock, in one
+   of two shapes: a worked-time entry ({ id, staffId, clockInAt, clockOutAt, category?, note? })
+   or a whole-day personal/sick entry ({ id, staffId, dayOff: "Personal"|"Sick", date, note? }, no
+   clock times at all). Admin > Time Clock (renderAdminTimeClock) shows the combined log across
+   every staff member with access, weekly worked-hour totals, a running personal/sick day count
+   per staff member, and manual corrections -- to build on further from here. ----- */
 let timeClockOpen = false;
 // While clocking in outside normal hours, we stop for one extra step and ask what the time was
 // for before the entry is actually created -- this flag tracks whether that little form is
@@ -3238,6 +3240,18 @@ let timeClockShowReasonForm = false;
 // backfilled/manual entry (Admin > Time Clock's "Add a manual entry") always does -- a fixed set
 // of categories keeps the log scannable, with room for a free-text note alongside.
 const TIME_CLOCK_CATEGORIES = ["Student", "Staff", "Admin", "Fundraising"];
+// Whole-day personal/sick days live in the same state.timeClock array as worked-time entries,
+// distinguished by a `dayOff` field ({ id, staffId, dayOff: "Personal"|"Sick", date, note? } --
+// no clockInAt/clockOutAt at all, since no hours were actually worked) so the running count and
+// the combined admin log stay a single source of truth instead of a second parallel list.
+const DAY_OFF_TYPES = ["Personal", "Sick"];
+function isDayOffEntry(e) { return !!e.dayOff; }
+// A shared "how recent is this" key so worked-time entries (keyed on their real clockInAt) and
+// day-off entries (keyed on their plain calendar date, anchored to midday to avoid timezone edge
+// cases) can be sorted together in one combined, newest-first list.
+function entrySortKeyMs(e) {
+  return e.dayOff ? jsDateFor(e.date).getTime() + 12 * 60 * 60 * 1000 : e.clockInAt;
+}
 // A simple, adjustable placeholder for "normal school hours" -- outside this window we ask what
 // the time was for (see TIME_CLOCK_CATEGORIES above); tighten or loosen this later if it doesn't
 // match how late the building actually runs.
@@ -3253,7 +3267,7 @@ function timeClockIsAfterHoursAt(ms) {
   return h < TIME_CLOCK_BUSINESS_HOURS.start || h >= TIME_CLOCK_BUSINESS_HOURS.end;
 }
 function timeClockEntriesFor(staffId) {
-  return (state.timeClock || []).filter((e) => e.staffId === staffId).sort((a, b) => b.clockInAt - a.clockInAt);
+  return (state.timeClock || []).filter((e) => e.staffId === staffId).sort((a, b) => entrySortKeyMs(b) - entrySortKeyMs(a));
 }
 function fmtClockTime(ms) {
   return new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -3270,6 +3284,34 @@ function timeClockDetailHtml(e) {
   if (!e.category && !e.note) return "—";
   return (e.category ? '<span class="pill pill-muted">' + escapeHtml(e.category) + "</span>" : "") +
     (e.note ? '<div class="help-text" style="margin-top:2px;">' + escapeHtml(e.note) + "</div>" : "");
+}
+// The 4 middle cells (Clocked in / Clocked out / Duration / For) shared by the staff's own
+// history table and the Admin > Time Clock full log -- a day-off entry reuses the same 4 columns
+// (date, a Personal/Sick pill, a dash where a duration would go, and its note) so both tables
+// stay one consistent shape instead of needing a separate layout per entry kind.
+function timeClockRowCellsHtml(e) {
+  if (e.dayOff) {
+    return "<td>" + escapeHtml(fmtDateShort(e.date)) + "</td><td>" +
+      '<span class="pill ' + (e.dayOff === "Sick" ? "pill-warn" : "pill-caution") + '">' + escapeHtml(e.dayOff) + " day</span>" +
+      "</td><td>—</td><td>" + (e.note ? '<div class="help-text">' + escapeHtml(e.note) + "</div>" : "—") + "</td>";
+  }
+  return "<td>" + fmtClockTime(e.clockInAt) + "</td><td>" + (e.clockOutAt ? fmtClockTime(e.clockOutAt) : '<span class="pill pill-good">Clocked in</span>') + "</td><td>" +
+    (e.clockOutAt ? fmtDurationMs(e.clockOutAt - e.clockInAt) : "—") + "</td><td>" + timeClockDetailHtml(e) + "</td>";
+}
+// Running Personal/Sick counts for one staff member -- shown in their own Time Clock modal so
+// they can see their own tally, and reused per-row by timeClockDayOffTotals for the admin view.
+function dayOffCountsFor(staffId) {
+  const counts = { Personal: 0, Sick: 0 };
+  (state.timeClock || []).forEach((e) => { if (e.dayOff && e.staffId === staffId) counts[e.dayOff]++; });
+  return counts;
+}
+// One row per staff member who has ever logged a personal or sick day, alphabetical -- the
+// running count the admin asked for, kept in the same place as the rest of the time-clock views.
+function timeClockDayOffTotals() {
+  const ids = new Set();
+  (state.timeClock || []).forEach((e) => { if (e.dayOff) ids.add(e.staffId); });
+  return Array.from(ids).map((staffId) => Object.assign({ staffId }, dayOffCountsFor(staffId)))
+    .sort((a, b) => ((staffById(a.staffId) || {}).name || "").localeCompare((staffById(b.staffId) || {}).name || ""));
 }
 // Which school day (see SCHOOL_DAY_CUTOFF_HOUR/todayISO -- a class night that runs past
 // midnight is still "that day", not the next one) a clock-in at this real timestamp falls on --
@@ -3310,16 +3352,19 @@ function timeClockWeeklyTotals() {
     return an.localeCompare(bn);
   });
 }
+let timeClockShowDayOffForm = false;
 function renderTimeClockModal(session) {
   const root = document.getElementById("time-clock-root");
   if (!root) return;
   if (!timeClockOpen || session.type !== "staff" || !session.record.canClockInOut) { root.innerHTML = ""; return; }
   const entries = timeClockEntriesFor(session.record.id);
-  const open = entries.find((e) => !e.clockOutAt);
+  // A day-off entry is never "the open session" -- it has no clockInAt/clockOutAt at all, so it
+  // must be excluded here or a stray dayOff record would look like an ordinary still-clocked-in
+  // entry and the toggle button would try to "clock it out".
+  const open = entries.find((e) => !e.dayOff && !e.clockOutAt);
   const needsReason = !open && timeClockIsAfterHoursAt(appNow());
-  const rows = entries.slice(0, 50).map((e) =>
-    "<tr><td>" + fmtClockTime(e.clockInAt) + "</td><td>" + (e.clockOutAt ? fmtClockTime(e.clockOutAt) : '<span class="pill pill-good">Clocked in</span>') + "</td><td>" + (e.clockOutAt ? fmtDurationMs(e.clockOutAt - e.clockInAt) : "—") + "</td><td>" + timeClockDetailHtml(e) + "</td></tr>"
-  ).join("");
+  const rows = entries.slice(0, 50).map((e) => "<tr>" + timeClockRowCellsHtml(e) + "</tr>").join("");
+  const dayOffCounts = dayOffCountsFor(session.record.id);
   const actionHtml = (!open && needsReason && timeClockShowReasonForm)
     ? '<div class="field" style="margin-bottom:8px;"><label for="tc-reason-category">What\'s this time for?</label>' +
       '<select id="tc-reason-category"><option value="">Choose one…</option>' +
@@ -3329,11 +3374,21 @@ function renderTimeClockModal(session) {
       '<div style="display:flex;gap:10px;margin-bottom:14px;">' +
       '<button type="button" class="btn btn-primary" id="time-clock-confirm-btn" style="flex:1;">Confirm Clock In</button>' +
       '<button type="button" class="btn btn-ghost" id="time-clock-reason-cancel-btn">Cancel</button></div>'
-    : '<button type="button" class="btn ' + (open ? "btn-danger" : "btn-primary") + '" id="time-clock-toggle-btn" style="width:100%;margin-bottom:14px;">' + (open ? "Clock Out" : "Clock In") + "</button>";
+    : (!open && timeClockShowDayOffForm)
+    ? '<div class="field" style="margin-bottom:8px;"><label for="tc-dayoff-type">Day type</label>' +
+      '<select id="tc-dayoff-type">' + DAY_OFF_TYPES.map((t) => '<option value="' + t + '">' + t + "</option>").join("") + "</select></div>" +
+      '<div class="field" style="margin-bottom:8px;"><label for="tc-dayoff-date">Date</label><input type="date" id="tc-dayoff-date" value="' + todayISO() + '"></div>' +
+      '<div class="field" style="margin-bottom:10px;"><label for="tc-dayoff-note">Details (optional)</label><input type="text" id="tc-dayoff-note" placeholder="Anything worth noting"></div>' +
+      '<div style="display:flex;gap:10px;margin-bottom:14px;">' +
+      '<button type="button" class="btn btn-primary" id="time-clock-dayoff-save-btn" style="flex:1;">Log day</button>' +
+      '<button type="button" class="btn btn-ghost" id="time-clock-dayoff-cancel-btn">Cancel</button></div>'
+    : '<button type="button" class="btn ' + (open ? "btn-danger" : "btn-primary") + '" id="time-clock-toggle-btn" style="width:100%;margin-bottom:10px;">' + (open ? "Clock Out" : "Clock In") + "</button>" +
+      (open ? "" : '<button type="button" class="btn btn-ghost" id="time-clock-dayoff-open-btn" style="width:100%;margin-bottom:14px;">Take a personal or sick day</button>');
   root.innerHTML = '<div class="modal-backdrop" id="time-clock-backdrop">' +
     '<div class="modal modal-wide">' +
     "<h2>Time Clock</h2>" +
-    '<p class="sub">' + (open ? "Clocked in since " + fmtClockTime(open.clockInAt) + "." : needsReason ? "It's after hours — let us know what this time is for." : "You’re not clocked in right now.") + "</p>" +
+    '<p class="sub">' + (open ? "Clocked in since " + fmtClockTime(open.clockInAt) + "." : needsReason ? "It's after hours — let us know what this time is for." : timeClockShowDayOffForm ? "Log a personal or sick day." : "You’re not clocked in right now.") + "</p>" +
+    '<p class="help-text" style="margin-top:-4px;margin-bottom:14px;">Personal days used: ' + dayOffCounts.Personal + " · Sick days used: " + dayOffCounts.Sick + "</p>" +
     actionHtml +
     (entries.length
       ? '<div class="table-wrap"><table><thead><tr><th>Clocked in</th><th>Clocked out</th><th>Duration</th><th>For</th></tr></thead><tbody>' + rows + "</tbody></table></div>"
@@ -3360,22 +3415,35 @@ function renderTimeClockModal(session) {
   });
   const reasonCancelBtn = document.getElementById("time-clock-reason-cancel-btn");
   if (reasonCancelBtn) reasonCancelBtn.addEventListener("click", () => { timeClockShowReasonForm = false; renderTimeClockModal(session); });
+  const dayOffOpenBtn = document.getElementById("time-clock-dayoff-open-btn");
+  if (dayOffOpenBtn) dayOffOpenBtn.addEventListener("click", () => { timeClockShowDayOffForm = true; renderTimeClockModal(session); });
+  const dayOffCancelBtn = document.getElementById("time-clock-dayoff-cancel-btn");
+  if (dayOffCancelBtn) dayOffCancelBtn.addEventListener("click", () => { timeClockShowDayOffForm = false; renderTimeClockModal(session); });
+  const dayOffSaveBtn = document.getElementById("time-clock-dayoff-save-btn");
+  if (dayOffSaveBtn) dayOffSaveBtn.addEventListener("click", () => {
+    const type = document.getElementById("tc-dayoff-type").value;
+    const date = document.getElementById("tc-dayoff-date").value;
+    const note = document.getElementById("tc-dayoff-note").value.trim();
+    if (!date) { toast("Choose a date.", "warn"); return; }
+    logTimeClockDayOff(session, { type, date, note });
+  });
 }
 function closeTimeClock(session) {
   timeClockOpen = false;
   timeClockShowReasonForm = false;
+  timeClockShowDayOffForm = false;
   renderTimeClockModal(session);
 }
 async function toggleTimeClock(session, extra) {
   const newState = JSON.parse(JSON.stringify(state));
   newState.timeClock = newState.timeClock || [];
   const staffId = session.record.id;
-  // Find the actual open entry (no clockOutAt) directly, rather than assuming the entry with the
-  // latest clockInAt is "the open one" -- two entries can legitimately share the same clockInAt
-  // millisecond (e.g. a manual backfill, or a test pinning the clock), and a plain sort-then-take-
-  // newest would then grab whichever one happens to land first instead of the one that's actually
-  // still open.
-  const open = newState.timeClock.find((e) => e.staffId === staffId && !e.clockOutAt);
+  // Find the actual open entry (no clockOutAt, and not a day-off record) directly, rather than
+  // assuming the entry with the latest clockInAt is "the open one" -- two entries can
+  // legitimately share the same clockInAt millisecond (e.g. a manual backfill, or a test pinning
+  // the clock), and a plain sort-then-take-newest would then grab whichever one happens to land
+  // first instead of the one that's actually still open.
+  const open = newState.timeClock.find((e) => e.staffId === staffId && !e.dayOff && !e.clockOutAt);
   const now = appNow();
   const wasOpen = !!open;
   if (wasOpen) {
@@ -3389,6 +3457,19 @@ async function toggleTimeClock(session, extra) {
   const res = await saveState(newState);
   if (res.ok || res.local) {
     toast(wasOpen ? "Clocked out." : "Clocked in.", "good");
+    renderAll();
+  }
+}
+async function logTimeClockDayOff(session, { type, date, note }) {
+  const newState = JSON.parse(JSON.stringify(state));
+  newState.timeClock = newState.timeClock || [];
+  const entry = { id: uid("tc"), staffId: session.record.id, dayOff: type, date };
+  if (note) entry.note = note;
+  newState.timeClock.push(entry);
+  timeClockShowDayOffForm = false;
+  const res = await saveState(newState);
+  if (res.ok || res.local) {
+    toast((type === "Sick" ? "Sick" : "Personal") + " day logged for " + fmtDateShort(date) + ".", "good");
     renderAll();
   }
 }
@@ -6738,20 +6819,29 @@ function renderAdminStaff(root) {
 let editingTimeClockId = null;
 let confirmDeleteTimeClockId = null;
 function renderAdminTimeClock(root) {
-  const entries = (state.timeClock || []).slice().sort((a, b) => b.clockInAt - a.clockInAt);
+  const entries = (state.timeClock || []).slice().sort((a, b) => entrySortKeyMs(b) - entrySortKeyMs(a));
   const weekly = timeClockWeeklyTotals();
+  const dayOffTotals = timeClockDayOffTotals();
   const staffOptionsHtml = state.staff.slice().sort((a, b) => a.name.localeCompare(b.name))
     .map((s) => '<option value="' + s.id + '">' + escapeHtml(s.name) + "</option>").join("");
   const categoryOptionsHtml = '<option value="">Choose one…</option>' + TIME_CLOCK_CATEGORIES.map((c) => '<option value="' + c + '">' + c + "</option>").join("");
+  const dayOffTypeOptionsHtml = DAY_OFF_TYPES.map((t) => '<option value="' + t + '">' + t + "</option>").join("");
 
   let html = '<div class="card card-pad">' +
     '<div class="section-title">Add a manual entry</div>' +
-    '<p class="help-text" style="margin-top:-6px;">For backfilling a session that wasn\'t clocked live — always tagged with what the time was for.</p>' +
+    '<p class="help-text" style="margin-top:-6px;">For backfilling a session that wasn\'t clocked live, or logging a personal/sick day on someone\'s behalf.</p>' +
     '<div class="field-row">' +
+    '<div class="field" style="max-width:200px;"><label for="tc-add-kind">Entry type</label><select id="tc-add-kind"><option value="time">Worked time</option><option value="dayoff">Personal / sick day</option></select></div>' +
     '<div class="field"><label for="tc-add-staff">Staff</label><select id="tc-add-staff">' + staffOptionsHtml + "</select></div>" +
+    "</div>" +
+    '<div class="field-row" id="tc-add-time-fields">' +
     '<div class="field"><label for="tc-add-in">Clocked in</label><input type="datetime-local" id="tc-add-in"></div>' +
     '<div class="field"><label for="tc-add-out">Clocked out (optional)</label><input type="datetime-local" id="tc-add-out"></div>' +
     '<div class="field" style="max-width:170px;"><label for="tc-add-category">For</label><select id="tc-add-category">' + categoryOptionsHtml + "</select></div>" +
+    "</div>" +
+    '<div class="field-row" id="tc-add-dayoff-fields" style="display:none;">' +
+    '<div class="field" style="max-width:170px;"><label for="tc-add-dayoff-type">Day type</label><select id="tc-add-dayoff-type">' + dayOffTypeOptionsHtml + "</select></div>" +
+    '<div class="field"><label for="tc-add-dayoff-date">Date</label><input type="date" id="tc-add-dayoff-date" value="' + todayISO() + '"></div>' +
     "</div>" +
     '<div class="field"><label for="tc-add-note">Details (optional)</label><input type="text" id="tc-add-note" placeholder="Anything worth noting"></div>' +
     '<button class="btn btn-primary btn-sm" id="tc-add-submit">Add entry</button>' +
@@ -6773,8 +6863,22 @@ function renderAdminTimeClock(root) {
   }
 
   html += '<div class="card card-pad">' +
+    '<div class="section-title">Personal &amp; sick days</div>' +
+    '<p class="help-text" style="margin-top:-6px;">Running count of personal and sick days logged per staff member.</p>';
+  if (!dayOffTotals.length) {
+    html += '<p class="help-text">Nobody has logged a personal or sick day yet.</p></div>';
+  } else {
+    html += '<div class="table-wrap" id="tc-dayoff-totals"><table><thead><tr><th>Staff</th><th class="num">Personal</th><th class="num">Sick</th><th class="num">Total</th></tr></thead><tbody>' +
+      dayOffTotals.map((d) => {
+        const rec = staffById(d.staffId);
+        return "<tr><td>" + escapeHtml(rec ? rec.name : "(removed staff)") + '</td><td class="num">' + d.Personal + '</td><td class="num">' + d.Sick + '</td><td class="num">' + (d.Personal + d.Sick) + "</td></tr>";
+      }).join("") +
+      "</tbody></table></div></div>";
+  }
+
+  html += '<div class="card card-pad">' +
     '<div class="section-title">Full log</div>' +
-    '<p class="help-text" style="margin-top:-6px;">Every clock in/out entry logged by staff with Time Clock access (Admin &gt; Staff Accounts). Edit a row to correct a time or its category, or delete one that was made by mistake.</p>';
+    '<p class="help-text" style="margin-top:-6px;">Every clock in/out entry and personal/sick day logged by staff with Time Clock access (Admin &gt; Staff Accounts). Edit a row to correct it, or delete one that was made by mistake.</p>';
   if (!entries.length) {
     html += '<p class="help-text">Nobody has clocked in yet.</p></div>';
   } else {
@@ -6783,6 +6887,15 @@ function renderAdminTimeClock(root) {
         const rec = staffById(e.staffId);
         const name = escapeHtml(rec ? rec.name : "(removed staff)");
         if (editingTimeClockId === e.id) {
+          if (e.dayOff) {
+            return "<tr><td>" + name + '</td><td><input type="date" id="tc-edit-dayoff-date-' + e.id + '" value="' + e.date + '"></td>' +
+              '<td><select id="tc-edit-dayoff-type-' + e.id + '">' + DAY_OFF_TYPES.map((t) => '<option value="' + t + '"' + (e.dayOff === t ? " selected" : "") + ">" + t + "</option>").join("") + "</select></td>" +
+              '<td class="help-text">—</td>' +
+              '<td><input type="text" id="tc-edit-dayoff-note-' + e.id + '" value="' + escapeHtml(e.note || "") + '" placeholder="Details"></td>' +
+              '<td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
+              '<button class="btn btn-primary btn-sm" data-save-tc="' + e.id + '">Save</button>' +
+              '<button class="btn btn-ghost btn-sm" data-cancel-edit-tc="' + e.id + '">Cancel</button></td></tr>';
+          }
           return "<tr><td>" + name + '</td><td><input type="datetime-local" id="tc-edit-in-' + e.id + '" value="' + msToLocalInputValue(e.clockInAt) + '"></td>' +
             '<td><input type="datetime-local" id="tc-edit-out-' + e.id + '" value="' + (e.clockOutAt ? msToLocalInputValue(e.clockOutAt) : "") + '"><div class="help-text">Blank keeps it open</div></td>' +
             '<td class="help-text">—</td>' +
@@ -6793,18 +6906,14 @@ function renderAdminTimeClock(root) {
             '<button class="btn btn-ghost btn-sm" data-cancel-edit-tc="' + e.id + '">Cancel</button></td></tr>';
         }
         if (confirmDeleteTimeClockId === e.id) {
-          return "<tr><td>" + name + '</td><td>' + fmtClockTime(e.clockInAt) + "</td><td>" +
-            (e.clockOutAt ? fmtClockTime(e.clockOutAt) : '<span class="pill pill-good">Clocked in</span>') + "</td><td>" +
-            (e.clockOutAt ? fmtDurationMs(e.clockOutAt - e.clockInAt) : "—") + "</td><td>" + timeClockDetailHtml(e) +
-            '</td><td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
+          return "<tr><td>" + name + "</td>" + timeClockRowCellsHtml(e) +
+            '<td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
             '<span style="color:var(--warn);font-weight:600;">Delete this entry?</span> ' +
             '<button class="btn btn-danger btn-sm" data-confirm-delete-tc="' + e.id + '">Yes, delete</button>' +
             '<button class="btn btn-ghost btn-sm" data-cancel-delete-tc="' + e.id + '">Cancel</button></td></tr>';
         }
-        return "<tr><td>" + name + "</td><td>" + fmtClockTime(e.clockInAt) + "</td><td>" +
-          (e.clockOutAt ? fmtClockTime(e.clockOutAt) : '<span class="pill pill-good">Clocked in</span>') + "</td><td>" +
-          (e.clockOutAt ? fmtDurationMs(e.clockOutAt - e.clockInAt) : "—") + "</td><td>" + timeClockDetailHtml(e) +
-          '</td><td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
+        return "<tr><td>" + name + "</td>" + timeClockRowCellsHtml(e) +
+          '<td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
           '<button class="btn btn-ghost btn-sm" data-edit-tc="' + e.id + '">Edit</button>' +
           '<button class="btn btn-ghost btn-sm" data-delete-tc="' + e.id + '" style="color:var(--warn);">Delete</button></td></tr>';
       }).join("") +
@@ -6812,24 +6921,41 @@ function renderAdminTimeClock(root) {
   }
   root.innerHTML = html;
 
+  const addKindSelect = document.getElementById("tc-add-kind");
+  const addTimeFields = document.getElementById("tc-add-time-fields");
+  const addDayoffFields = document.getElementById("tc-add-dayoff-fields");
+  if (addKindSelect) addKindSelect.addEventListener("change", () => {
+    const isDayOff = addKindSelect.value === "dayoff";
+    addTimeFields.style.display = isDayOff ? "none" : "";
+    addDayoffFields.style.display = isDayOff ? "" : "none";
+  });
   const addSubmit = document.getElementById("tc-add-submit");
   if (addSubmit) addSubmit.addEventListener("click", async () => {
     const staffId = document.getElementById("tc-add-staff").value;
-    const inVal = document.getElementById("tc-add-in").value;
-    const outVal = document.getElementById("tc-add-out").value;
-    const category = document.getElementById("tc-add-category").value;
-    const note = document.getElementById("tc-add-note").value.trim();
     if (!staffId) { toast("Choose a staff member.", "warn"); return; }
-    const inMs = localInputValueToMs(inVal);
-    if (inMs == null) { toast("Enter a valid clock-in time.", "warn"); return; }
-    const outMs = outVal ? localInputValueToMs(outVal) : null;
-    if (outMs != null && outMs < inMs) { toast("Clock-out can't be before clock-in.", "warn"); return; }
-    if (!category) { toast("Choose what this time is for.", "warn"); return; }
+    const note = document.getElementById("tc-add-note").value.trim();
     const newState = JSON.parse(JSON.stringify(state));
     newState.timeClock = newState.timeClock || [];
-    const entry = { id: uid("tc"), staffId, clockInAt: inMs, clockOutAt: outMs, category };
-    if (note) entry.note = note;
-    newState.timeClock.push(entry);
+    if (addKindSelect.value === "dayoff") {
+      const type = document.getElementById("tc-add-dayoff-type").value;
+      const date = document.getElementById("tc-add-dayoff-date").value;
+      if (!date) { toast("Choose a date.", "warn"); return; }
+      const entry = { id: uid("tc"), staffId, dayOff: type, date };
+      if (note) entry.note = note;
+      newState.timeClock.push(entry);
+    } else {
+      const inVal = document.getElementById("tc-add-in").value;
+      const outVal = document.getElementById("tc-add-out").value;
+      const category = document.getElementById("tc-add-category").value;
+      const inMs = localInputValueToMs(inVal);
+      if (inMs == null) { toast("Enter a valid clock-in time.", "warn"); return; }
+      const outMs = outVal ? localInputValueToMs(outVal) : null;
+      if (outMs != null && outMs < inMs) { toast("Clock-out can't be before clock-in.", "warn"); return; }
+      if (!category) { toast("Choose what this time is for.", "warn"); return; }
+      const entry = { id: uid("tc"), staffId, clockInAt: inMs, clockOutAt: outMs, category };
+      if (note) entry.note = note;
+      newState.timeClock.push(entry);
+    }
     const res = await saveState(newState);
     if (res.ok || res.local) { toast("Entry added.", "good"); renderAll(); } else { renderAdminTimeClock(root); }
   });
@@ -6844,6 +6970,23 @@ function renderAdminTimeClock(root) {
   }));
   root.querySelectorAll("[data-save-tc]").forEach((btn) => btn.addEventListener("click", async () => {
     const id = btn.getAttribute("data-save-tc");
+    const original = (state.timeClock || []).find((x) => x.id === id);
+    if (!original) { editingTimeClockId = null; renderAdminTimeClock(root); return; }
+    if (original.dayOff) {
+      const type = document.getElementById("tc-edit-dayoff-type-" + id).value;
+      const date = document.getElementById("tc-edit-dayoff-date-" + id).value;
+      const note = document.getElementById("tc-edit-dayoff-note-" + id).value.trim();
+      if (!date) { toast("Choose a date.", "warn"); return; }
+      const newState = JSON.parse(JSON.stringify(state));
+      const rec = (newState.timeClock || []).find((x) => x.id === id);
+      rec.dayOff = type;
+      rec.date = date;
+      if (note) rec.note = note; else delete rec.note;
+      editingTimeClockId = null;
+      const res = await saveState(newState);
+      if (res.ok || res.local) { toast("Time clock entry updated.", "good"); renderAll(); } else { renderAdminTimeClock(root); }
+      return;
+    }
     const inVal = document.getElementById("tc-edit-in-" + id).value;
     const outVal = document.getElementById("tc-edit-out-" + id).value;
     const category = document.getElementById("tc-edit-category-" + id).value;
