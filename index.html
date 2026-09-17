@@ -1420,6 +1420,9 @@ try {
 
 /* ---------- constants ---------- */
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Shabbos"];
+// "GC Bonus" is no longer a producible ledger type (see wireGcGrant/migrateGcBonusLedgerEntries
+// -- it's a bonus Gemilas Chassidim attendance credit now, not a TAG Coin grant) but stays
+// listed here since old ledger exports/history may still reference it.
 const TX_TYPES = ["Manual Grant", "Spent/Redeemed", "Transfer Out", "Transfer In", "Chazzan Bonus", "GC Bonus"];
 /* Chazzan (leading davening) bonus coins -- student.isTA is a PERMISSION, not an eligibility
    flag: admin grants it (Admin > Students > "Allow to grant Chazzan coins") to a student who's
@@ -1663,7 +1666,16 @@ function initialsFor(name) {
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
-function pct(n) { return (n === null || n === undefined || isNaN(n)) ? "—" : Math.round(n * 100) + "%"; }
+/* A bonus-marked class only ever helps a student's average (see isBonusPeriod / computeStats),
+   which means the raw ratio can legitimately land above 100% -- there's no ceiling on the
+   numerator (attPts) while the denominator (attPoss) skips bonus sessions entirely. Rather than
+   showing a confusing "112%", cap the headline number at 100% and call out how far past it they
+   are with a "+" suffix (e.g. "100% +12%"), so it's still obvious the extra credit is real. */
+function pct(n) {
+  if (n === null || n === undefined || isNaN(n)) return "—";
+  const whole = Math.round(n * 100);
+  return whole > 100 ? "100% +" + (whole - 100) + "%" : whole + "%";
+}
 /* Percentage color-coding: 90%+ good, 75-89% caution, below 75% needs attention. */
 const PCT_GOOD_MIN = 0.9, PCT_CAUTION_MIN = 0.75;
 function pctTone(n) {
@@ -2343,6 +2355,20 @@ function computeStats(studentId, opts) {
       if (pt !== null && pt !== undefined && pt !== "") { partPts += Math.min(Number(pt), maxVal); if (!bonus) { partPoss += maxVal; partCount += 1; } }
     }
   }
+  // Bonus Gemilas Chassidim credit (see wireGcGrant) -- an act of kindness isn't tied to any
+  // scheduled period, so it can't go through the periods loop above. It counts the same way a
+  // bonus-marked class does: straight into the numerator, never the denominator, so it only
+  // ever helps -- and it counts toward the overall Attendance figure and the "gc" leaderboard
+  // category (which is exactly what a bonus mark in a real GC-tagged class would do too), but
+  // not toward a single specific class (onlyPeriod), which it was never marked under.
+  if (!onlyPeriod && (!onlyCategory || onlyCategory === "gc")) {
+    for (const credit of (state.gcBonusCredits || [])) {
+      if (credit.studentId !== studentId) continue;
+      if (from && credit.date < from) continue;
+      if (to && credit.date > to) continue;
+      attPts += Number(credit.amount) || 0;
+    }
+  }
   // TAG coins are earned from Attendance AND Participation points combined.
   const pointsPerCoin = state.settings.pointsPerCoin || 10;
   const coinsEarned = Math.floor((attPts + partPts) / pointsPerCoin);
@@ -2954,6 +2980,12 @@ const ROUTES = [
   { id: "ledger", label: "TAG Coins", icon: "coin", roles: ["teacher", "admin"] },
   { id: "overview", label: "Reports", icon: "grid", roles: ["teacher", "admin"] },
   { id: "leaderboard", label: "Leaderboard", icon: "trophy", roles: ["teacher", "admin", "student"] },
+  // Not an admin-only page -- it's gated by the canClockInOut permission itself (Admin > Staff
+  // Accounts), the same flag that shows the clock icon at all, so exactly the staff members who
+  // can clock in/out (whether or not they're also an admin) get this full view: everyone's
+  // combined log, weekly totals, personal/sick-day counts, and manual add/correct -- moved out
+  // of the Admin menu since it isn't admin-specific.
+  { id: "timeclock", label: "Time Clock", icon: "clock", roles: ["teacher", "admin"], visible: (session) => session.type === "staff" && !!session.record.canClockInOut },
   { id: "admin", label: "Admin", icon: "gear", roles: ["admin"] },
   { id: "balance", label: "My Balance", icon: "search", roles: ["student"] },
   // Only ever shown to the one student(s) admin has granted isTA permission to (see
@@ -3120,12 +3152,14 @@ function renderShell(session, previewing) {
   const avatarInner = '<img src="' + escapeHtml(session.record.photoUrl || defaultAvatarFor(session.record)) + '" alt="" />';
   const avatarAttrs = previewing ? " disabled" : ' data-open-avatar-picker="1"';
   // Clock in/out icon -- only for the specific staff accounts an admin has flagged with
-  // canClockInOut (Admin > Staff Accounts); nobody else ever sees it, and it's hidden while
-  // previewing someone else's account, same as the rest of the app's read-only rule there.
-  const canClock = session.type === "staff" && !!session.record.canClockInOut && !previewing;
-  const clockedIn = canClock && timeClockEntriesFor(session.record.id).some((e) => !e.clockOutAt);
+  // canClockInOut (Admin > Staff Accounts); nobody else ever sees it. Same convention as the
+  // avatar button above: it stays VISIBLE while an admin is previewing that account (so they can
+  // confirm access was granted and see that person's history) but is disabled, since previewing
+  // is read-only and must never actually clock someone in/out on their behalf.
+  const canClock = session.type === "staff" && !!session.record.canClockInOut;
+  const clockedIn = canClock && timeClockEntriesFor(session.record.id).some((e) => !e.dayOff && !e.clockOutAt);
   const clockBtn = canClock
-    ? '<button type="button" class="time-clock-btn' + (clockedIn ? " is-clocked-in" : "") + '" data-open-time-clock="1" title="' + (clockedIn ? "Clocked in — tap to clock out or view your time" : "Clock in / out") + '">' + icon("clock") + "</button>"
+    ? '<button type="button" class="time-clock-btn' + (clockedIn ? " is-clocked-in" : "") + '"' + (previewing ? " disabled" : ' data-open-time-clock="1"') + ' title="' + (clockedIn ? "Clocked in — tap to clock out or view your time" : "Clock in / out") + '">' + icon("clock") + "</button>"
     : "";
   const staffBlock = '<div class="staff-chip">' + clockBtn + '<button type="button" class="avatar"' + avatarAttrs + ' title="Change your avatar">' + avatarInner + "</button>" +
     '<div class="info"><div class="name">' + escapeHtml(person) + '</div><div style="font-size:0.68rem;color:var(--muted);">' + roleLabel + '</div></div>' +
@@ -3237,9 +3271,45 @@ let timeClockOpen = false;
 // currently open (see renderTimeClockModal/toggleTimeClock).
 let timeClockShowReasonForm = false;
 // What a clock-in during normal hours never needs to explain, an after-hours clock-in or a
-// backfilled/manual entry (Admin > Time Clock's "Add a manual entry") always does -- a fixed set
-// of categories keeps the log scannable, with room for a free-text note alongside.
+// backfilled/manual entry (Time Clock's "Add a manual entry") always does -- a fixed set of
+// categories keeps the log scannable, with room for a free-text note alongside. "Add…" is a
+// special, always-last option (see TIME_CLOCK_CATEGORY_CUSTOM_VALUE) that reveals a plain text
+// box instead of being a real category itself, for whatever doesn't fit the preset list.
 const TIME_CLOCK_CATEGORIES = ["Student", "Staff", "Admin", "Fundraising"];
+const TIME_CLOCK_CATEGORY_CUSTOM_VALUE = "__custom__";
+// Builds the <option>s for a category <select> -- the preset list, then "Add…" last, pre-selecting
+// whichever one matches the entry's current category (or "Add…" itself, if that category is a
+// custom one typed in previously and isn't one of the presets).
+function timeClockCategoryOptionsHtml(selected, emptyLabel) {
+  let html = '<option value="">' + escapeHtml(emptyLabel) + "</option>";
+  TIME_CLOCK_CATEGORIES.forEach((c) => { html += '<option value="' + c + '"' + (selected === c ? " selected" : "") + ">" + escapeHtml(c) + "</option>"; });
+  const isCustom = !!selected && !TIME_CLOCK_CATEGORIES.includes(selected);
+  html += '<option value="' + TIME_CLOCK_CATEGORY_CUSTOM_VALUE + '"' + (isCustom ? " selected" : "") + ">Add…</option>";
+  return html;
+}
+// The free-text box paired with that select, pre-filled and shown only when the current category
+// is already a custom one (e.g. re-opening an edit row) -- otherwise hidden until "Add…" is chosen.
+function timeClockCategoryCustomInputHtml(id, selected) {
+  const isCustom = !!selected && !TIME_CLOCK_CATEGORIES.includes(selected);
+  return '<input type="text" id="' + id + '" placeholder="Type a category" value="' + escapeHtml(isCustom ? selected : "") + '" style="margin-top:4px;' + (isCustom ? "" : "display:none;") + '">';
+}
+// Shows/hides the custom-text box as the select changes -- call once per select+input pair right
+// after they're in the DOM.
+function wireTimeClockCategorySelect(selectEl, customInputEl) {
+  if (!selectEl || !customInputEl) return;
+  selectEl.addEventListener("change", () => {
+    const isCustom = selectEl.value === TIME_CLOCK_CATEGORY_CUSTOM_VALUE;
+    customInputEl.style.display = isCustom ? "" : "none";
+    if (isCustom) customInputEl.focus();
+  });
+}
+// The actual category string to save -- the select's value, unless "Add…" is chosen, in which
+// case it's whatever was typed into the paired custom box (trimmed; empty means "none chosen").
+function resolveTimeClockCategory(selectEl, customInputEl) {
+  if (!selectEl) return "";
+  if (selectEl.value === TIME_CLOCK_CATEGORY_CUSTOM_VALUE) return customInputEl ? customInputEl.value.trim() : "";
+  return selectEl.value;
+}
 // Whole-day personal/sick days live in the same state.timeClock array as worked-time entries,
 // distinguished by a `dayOff` field ({ id, staffId, dayOff: "Personal"|"Sick", date, note? } --
 // no clockInAt/clockOutAt at all, since no hours were actually worked) so the running count and
@@ -3252,10 +3322,11 @@ function isDayOffEntry(e) { return !!e.dayOff; }
 function entrySortKeyMs(e) {
   return e.dayOff ? jsDateFor(e.date).getTime() + 12 * 60 * 60 * 1000 : e.clockInAt;
 }
-// A simple, adjustable placeholder for "normal school hours" -- outside this window we ask what
-// the time was for (see TIME_CLOCK_CATEGORIES above); tighten or loosen this later if it doesn't
-// match how late the building actually runs.
-const TIME_CLOCK_BUSINESS_HOURS = { start: 7, end: 17 }; // 7:00 AM - 5:00 PM
+// The school's regular hours: 8:00 AM - 5:15 PM. A clock-in inside this window is automatically
+// tagged "Student" with no extra step (see the toggle button's click handler in
+// renderTimeClockModal) -- it's what a normal school-day clock-in is nearly always for. Outside
+// this window, the person must choose what the time was for (see TIME_CLOCK_CATEGORIES above).
+const TIME_CLOCK_BUSINESS_HOURS = { startMinutes: 8 * 60, endMinutes: 17 * 60 + 15 }; // 8:00 AM - 5:15 PM
 // A single seam for "the current time" so a test can pin it and deterministically exercise the
 // after-hours flow regardless of the real clock the suite happens to run under -- window.__TEST_NOW_MS__
 // is never set in production, so this is always just Date.now() for real users.
@@ -3263,8 +3334,9 @@ function appNow() {
   return (typeof window !== "undefined" && window.__TEST_NOW_MS__ != null) ? window.__TEST_NOW_MS__ : Date.now();
 }
 function timeClockIsAfterHoursAt(ms) {
-  const h = new Date(ms).getHours();
-  return h < TIME_CLOCK_BUSINESS_HOURS.start || h >= TIME_CLOCK_BUSINESS_HOURS.end;
+  const d = new Date(ms);
+  const minutes = d.getHours() * 60 + d.getMinutes();
+  return minutes < TIME_CLOCK_BUSINESS_HOURS.startMinutes || minutes >= TIME_CLOCK_BUSINESS_HOURS.endMinutes;
 }
 function timeClockEntriesFor(staffId) {
   return (state.timeClock || []).filter((e) => e.staffId === staffId).sort((a, b) => entrySortKeyMs(b) - entrySortKeyMs(a));
@@ -3367,9 +3439,9 @@ function renderTimeClockModal(session) {
   const dayOffCounts = dayOffCountsFor(session.record.id);
   const actionHtml = (!open && needsReason && timeClockShowReasonForm)
     ? '<div class="field" style="margin-bottom:8px;"><label for="tc-reason-category">What\'s this time for?</label>' +
-      '<select id="tc-reason-category"><option value="">Choose one…</option>' +
-      TIME_CLOCK_CATEGORIES.map((c) => '<option value="' + c + '">' + c + "</option>").join("") +
-      "</select></div>" +
+      '<select id="tc-reason-category">' + timeClockCategoryOptionsHtml("", "Choose one…") + "</select>" +
+      timeClockCategoryCustomInputHtml("tc-reason-category-custom", "") +
+      "</div>" +
       '<div class="field" style="margin-bottom:10px;"><label for="tc-reason-note">Details (optional)</label><textarea id="tc-reason-note" rows="2" placeholder="Anything worth noting"></textarea></div>' +
       '<div style="display:flex;gap:10px;margin-bottom:14px;">' +
       '<button type="button" class="btn btn-primary" id="time-clock-confirm-btn" style="flex:1;">Confirm Clock In</button>' +
@@ -3403,11 +3475,14 @@ function renderTimeClockModal(session) {
   const toggleBtn = document.getElementById("time-clock-toggle-btn");
   if (toggleBtn) toggleBtn.addEventListener("click", () => {
     if (!open && needsReason) { timeClockShowReasonForm = true; renderTimeClockModal(session); return; }
-    toggleTimeClock(session);
+    // A regular clock-in during normal school hours needs no manual tagging at all -- it's
+    // automatically logged under "Student", the overwhelming common case, with no extra step.
+    toggleTimeClock(session, open ? undefined : { category: "Student" });
   });
+  wireTimeClockCategorySelect(document.getElementById("tc-reason-category"), document.getElementById("tc-reason-category-custom"));
   const confirmBtn = document.getElementById("time-clock-confirm-btn");
   if (confirmBtn) confirmBtn.addEventListener("click", () => {
-    const category = document.getElementById("tc-reason-category").value;
+    const category = resolveTimeClockCategory(document.getElementById("tc-reason-category"), document.getElementById("tc-reason-category-custom"));
     const note = document.getElementById("tc-reason-note").value.trim();
     if (!category) { toast("Choose what this time is for.", "warn"); return; }
     timeClockShowReasonForm = false;
@@ -4637,29 +4712,42 @@ function wireCancelPeriod(root) {
   }));
 }
 // Quick "GC" bonus-credit grant -- only non-empty while gcGrantOpen is true (see the "GC" button
-// beside "+ Class" on Today). A straight ledger grant (type "GC Bonus"), the same mechanism the
-// Chazzan bonus already uses -- it never touches GC's own attendance/participation marks, since
-// an act of kindness happens whenever it happens, not on a fixed schedule, so there's no "GC
-// session" for this to be attached to.
+// beside "+ Class" on Today). A bonus ATTENDANCE credit (state.gcBonusCredits), not a TAG Coin
+// ledger grant -- it counts toward that student's Gemilas Chassidim attendance/leaderboard score
+// for the chosen date the same way a bonus-marked class period does (see isBonusPeriod /
+// computeStats): it only ever helps the average, never hurts it, and since it isn't tied to any
+// scheduled period, it adds straight to the numerator without ever touching the denominator.
+// TAG coins still follow automatically wherever they always have -- attendance points convert to
+// coins at the usual pointsPerCoin rate, so a bonus credit here earns coins the same way a real
+// marked class does, rather than through a separate one-time grant.
 function gcGrantModalHtml() {
   if (!gcGrantOpen) return "";
   const roster = activeRoster();
   if (!roster.length) return "";
+  const recent = (state.gcBonusCredits || []).slice().sort((a, b) => b.enteredAt - a.enteredAt).slice(0, 5);
+  const recentHtml = !recent.length ? "" :
+    '<div style="margin-top:16px;"><div class="section-title" style="font-size:0.85rem;">Recent bonus credits</div>' +
+    '<div class="table-wrap"><table><thead><tr><th>Student</th><th>Date</th><th class="num">Credit</th><th>Note</th><th></th></tr></thead><tbody>' +
+    recent.map((c) => {
+      const s = studentById(c.studentId);
+      return "<tr><td>" + escapeHtml(s ? fullName(s) : "(removed student)") + "</td><td>" + fmtDateShort(c.date) + '</td><td class="num">' + num2(c.amount) + "</td><td>" + escapeHtml(c.note || "") +
+        '</td><td class="sticky-col-r"><button type="button" class="btn btn-ghost btn-sm" data-delete-gc-credit="' + c.id + '">Delete</button></td></tr>';
+    }).join("") + "</tbody></table></div></div>";
   return '<div class="modal-backdrop" id="gc-grant-backdrop"><div class="modal">' +
     "<h2>Give bonus GC credit</h2>" +
-    '<p class="sub">Award TAG coins for an act of Gemilas Chassidim on the spot — this doesn\'t touch GC\'s own attendance record.</p>' +
+    '<p class="sub">Award bonus Gemilas Chassidim attendance credit for an act of kindness on the spot — this only ever helps their attendance average, never hurts it, and earns TAG coins the same way real attendance does.</p>' +
     '<div class="field" style="margin-top:14px;"><label for="gc-grant-student">Student</label><select id="gc-grant-student">' +
     roster.map((s) => '<option value="' + s.id + '">' + fullName(s) + "</option>").join("") +
     "</select></div>" +
     '<div class="field-row" style="margin-top:10px;">' +
     '<div class="field"><label for="gc-grant-date">Date</label><input type="date" id="gc-grant-date" value="' + escapeHtml(todayDate) + '"></div>' +
-    '<div class="field"><label for="gc-grant-amount">Amount</label><input type="number" min="0.5" step="0.5" id="gc-grant-amount" placeholder="1"></div>' +
+    '<div class="field"><label for="gc-grant-amount">Credit</label><input type="number" min="0.5" step="0.5" id="gc-grant-amount" placeholder="1"></div>' +
     "</div>" +
     '<div class="field" style="margin-top:10px;"><label for="gc-grant-note">Note</label><input type="text" id="gc-grant-note" placeholder="e.g. helped a classmate study"></div>' +
     '<div style="display:flex;justify-content:space-between;gap:10px;margin-top:16px;flex-wrap:wrap;">' +
     '<button type="button" class="btn btn-ghost btn-sm" id="gc-grant-cancel">Cancel</button>' +
     '<button type="button" class="btn btn-primary btn-sm" id="gc-grant-submit">Grant</button>' +
-    "</div></div></div>";
+    "</div>" + recentHtml + "</div></div>";
 }
 function wireGcGrant(root, session) {
   const openBtn = document.getElementById("gc-grant-open");
@@ -4669,8 +4757,7 @@ function wireGcGrant(root, session) {
   const cancelBtn = document.getElementById("gc-grant-cancel");
   if (cancelBtn) cancelBtn.addEventListener("click", () => { gcGrantOpen = false; renderAll(); });
   const submitBtn = document.getElementById("gc-grant-submit");
-  if (!submitBtn) return;
-  submitBtn.addEventListener("click", async () => {
+  if (submitBtn) submitBtn.addEventListener("click", async () => {
     const studentId = document.getElementById("gc-grant-student").value;
     const date = document.getElementById("gc-grant-date").value;
     const amount = Number(document.getElementById("gc-grant-amount").value);
@@ -4679,17 +4766,25 @@ function wireGcGrant(root, session) {
     if (!date || !amount || amount <= 0) { toast("Pick a date and a positive amount.", "warn"); return; }
     submitBtn.disabled = true;
     const newState = JSON.parse(JSON.stringify(state));
-    newState.ledger.push({ id: uid("l"), date, studentId, type: "GC Bonus", amount, note, enteredBy: session.record.name, enteredAt: Date.now() });
+    newState.gcBonusCredits = newState.gcBonusCredits || [];
+    newState.gcBonusCredits.push({ id: uid("gcb"), date, studentId, amount, note, enteredBy: session.record.name, enteredAt: Date.now() });
     const res = await saveState(newState);
     if (res.ok || res.local) {
       const s = studentById(studentId);
       gcGrantOpen = false;
-      toast("Granted " + num2(amount) + " GC coin" + (amount === 1 ? "" : "s") + (s ? " to " + s.first : "") + ".", "good");
+      toast("Awarded " + num2(amount) + " bonus GC credit" + (amount === 1 ? "" : "s") + (s ? " to " + s.first : "") + ".", "good");
       renderAll();
     } else {
       submitBtn.disabled = false;
     }
   });
+  root.querySelectorAll("[data-delete-gc-credit]").forEach((btn) => btn.addEventListener("click", async () => {
+    const id = btn.getAttribute("data-delete-gc-credit");
+    const newState = JSON.parse(JSON.stringify(state));
+    newState.gcBonusCredits = (newState.gcBonusCredits || []).filter((c) => c.id !== id);
+    const res = await saveState(newState);
+    if (res.ok || res.local) { toast("Bonus credit deleted.", "good"); renderAll(); }
+  }));
 }
 function wireTodayGrid(root, teacherName) {
   const body = document.getElementById("period-entry-body");
@@ -6401,7 +6496,7 @@ function renderLeaderboard(root, session) {
    ================================================================ */
 let adminTab = "students";
 function renderAdmin(root) {
-  const tabs = [["students", "Students"], ["staff", "Staff Accounts"], ["privileges", "Coins & Privileges"], ["schedule", "Schedule"], ["timeclock", "Time Clock"]];
+  const tabs = [["students", "Students"], ["staff", "Staff Accounts"], ["privileges", "Coins & Privileges"], ["schedule", "Schedule"]];
   let html = '<div class="page-head"><div><span class="eyebrow">Set everything up</span><h1>Admin</h1>' +
     '<p>The weekly schedule, the coin rule, and every login — staff and student. Everything else in the app reads from here.</p></div></div>';
   html += '<div class="admin-tabs">' + tabs.map((t) => '<button class="admin-tab' + (adminTab === t[0] ? " active" : "") + '" data-admintab="' + t[0] + '">' + t[1] + "</button>").join("") + "</div>";
@@ -6412,7 +6507,6 @@ function renderAdmin(root) {
   if (adminTab === "schedule") renderAdminSchedule(content);
   else if (adminTab === "staff") renderAdminStaff(content);
   else if (adminTab === "students") renderAdminStudents(content);
-  else if (adminTab === "timeclock") renderAdminTimeClock(content);
   else renderAdminPrivileges(content);
 }
 
@@ -6680,7 +6774,7 @@ function renderAdminStaff(root) {
       '</td><td>' + (s.role === "admin" ? '<span class="pill pill-gold">Admin</span>'
         : s.role === "limited" ? '<span class="pill pill-muted">Limited: ' + escapeHtml(s.restrictedPeriod || "?") + "</span>"
         : '<span class="pill pill-muted">Teacher</span>') +
-      (s.canClockInOut ? ' <span class="pill pill-good" title="Sees a clock icon next to their profile to clock in/out; every entry is kept under Admin &gt; Time Clock">⏱ Time Clock</span>' : "") +
+      (s.canClockInOut ? ' <span class="pill pill-good" title="Sees a clock icon next to their profile to clock in/out, plus a Time Clock tab in their own nav with the full combined log">⏱ Time Clock</span>' : "") +
       '</td><td class="num">' + num2(staffStats(s.id).balance) + "</td>" +
       '<td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' + actions + "</td></tr>";
   });
@@ -6824,10 +6918,12 @@ function renderAdminTimeClock(root) {
   const dayOffTotals = timeClockDayOffTotals();
   const staffOptionsHtml = state.staff.slice().sort((a, b) => a.name.localeCompare(b.name))
     .map((s) => '<option value="' + s.id + '">' + escapeHtml(s.name) + "</option>").join("");
-  const categoryOptionsHtml = '<option value="">Choose one…</option>' + TIME_CLOCK_CATEGORIES.map((c) => '<option value="' + c + '">' + c + "</option>").join("");
   const dayOffTypeOptionsHtml = DAY_OFF_TYPES.map((t) => '<option value="' + t + '">' + t + "</option>").join("");
 
-  let html = '<div class="card card-pad">' +
+  let html = '<div class="page-head"><div><span class="eyebrow">Hours, corrections &amp; time off</span><h1>Time Clock</h1>' +
+    '<p>The combined clock in/out log for every staff member with Time Clock access, weekly totals, personal &amp; sick day counts, and manual corrections.</p></div></div>';
+
+  html += '<div class="card card-pad">' +
     '<div class="section-title">Add a manual entry</div>' +
     '<p class="help-text" style="margin-top:-6px;">For backfilling a session that wasn\'t clocked live, or logging a personal/sick day on someone\'s behalf.</p>' +
     '<div class="field-row">' +
@@ -6837,7 +6933,7 @@ function renderAdminTimeClock(root) {
     '<div class="field-row" id="tc-add-time-fields">' +
     '<div class="field"><label for="tc-add-in">Clocked in</label><input type="datetime-local" id="tc-add-in"></div>' +
     '<div class="field"><label for="tc-add-out">Clocked out (optional)</label><input type="datetime-local" id="tc-add-out"></div>' +
-    '<div class="field" style="max-width:170px;"><label for="tc-add-category">For</label><select id="tc-add-category">' + categoryOptionsHtml + "</select></div>" +
+    '<div class="field" style="max-width:170px;"><label for="tc-add-category">For</label><select id="tc-add-category">' + timeClockCategoryOptionsHtml("", "Choose one…") + "</select>" + timeClockCategoryCustomInputHtml("tc-add-category-custom", "") + "</div>" +
     "</div>" +
     '<div class="field-row" id="tc-add-dayoff-fields" style="display:none;">' +
     '<div class="field" style="max-width:170px;"><label for="tc-add-dayoff-type">Day type</label><select id="tc-add-dayoff-type">' + dayOffTypeOptionsHtml + "</select></div>" +
@@ -6899,7 +6995,8 @@ function renderAdminTimeClock(root) {
           return "<tr><td>" + name + '</td><td><input type="datetime-local" id="tc-edit-in-' + e.id + '" value="' + msToLocalInputValue(e.clockInAt) + '"></td>' +
             '<td><input type="datetime-local" id="tc-edit-out-' + e.id + '" value="' + (e.clockOutAt ? msToLocalInputValue(e.clockOutAt) : "") + '"><div class="help-text">Blank keeps it open</div></td>' +
             '<td class="help-text">—</td>' +
-            '<td><select id="tc-edit-category-' + e.id + '">' + '<option value="">—</option>' + TIME_CLOCK_CATEGORIES.map((c) => '<option value="' + c + '"' + (e.category === c ? " selected" : "") + ">" + c + "</option>").join("") + "</select>" +
+            '<td><select id="tc-edit-category-' + e.id + '">' + timeClockCategoryOptionsHtml(e.category || "", "—") + "</select>" +
+            timeClockCategoryCustomInputHtml("tc-edit-category-custom-" + e.id, e.category || "") +
             '<input type="text" id="tc-edit-note-' + e.id + '" value="' + escapeHtml(e.note || "") + '" placeholder="Details" style="margin-top:4px;"></td>' +
             '<td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
             '<button class="btn btn-primary btn-sm" data-save-tc="' + e.id + '">Save</button>' +
@@ -6929,6 +7026,8 @@ function renderAdminTimeClock(root) {
     addTimeFields.style.display = isDayOff ? "none" : "";
     addDayoffFields.style.display = isDayOff ? "" : "none";
   });
+  wireTimeClockCategorySelect(document.getElementById("tc-add-category"), document.getElementById("tc-add-category-custom"));
+  if (editingTimeClockId) wireTimeClockCategorySelect(document.getElementById("tc-edit-category-" + editingTimeClockId), document.getElementById("tc-edit-category-custom-" + editingTimeClockId));
   const addSubmit = document.getElementById("tc-add-submit");
   if (addSubmit) addSubmit.addEventListener("click", async () => {
     const staffId = document.getElementById("tc-add-staff").value;
@@ -6946,7 +7045,7 @@ function renderAdminTimeClock(root) {
     } else {
       const inVal = document.getElementById("tc-add-in").value;
       const outVal = document.getElementById("tc-add-out").value;
-      const category = document.getElementById("tc-add-category").value;
+      const category = resolveTimeClockCategory(document.getElementById("tc-add-category"), document.getElementById("tc-add-category-custom"));
       const inMs = localInputValueToMs(inVal);
       if (inMs == null) { toast("Enter a valid clock-in time.", "warn"); return; }
       const outMs = outVal ? localInputValueToMs(outVal) : null;
@@ -6989,7 +7088,7 @@ function renderAdminTimeClock(root) {
     }
     const inVal = document.getElementById("tc-edit-in-" + id).value;
     const outVal = document.getElementById("tc-edit-out-" + id).value;
-    const category = document.getElementById("tc-edit-category-" + id).value;
+    const category = resolveTimeClockCategory(document.getElementById("tc-edit-category-" + id), document.getElementById("tc-edit-category-custom-" + id));
     const note = document.getElementById("tc-edit-note-" + id).value.trim();
     const inMs = localInputValueToMs(inVal);
     if (inMs == null) { toast("Enter a valid clock-in time.", "warn"); return; }
@@ -8226,7 +8325,7 @@ function renderAll() {
   // building its HTML/wiring, so restoring it right after is safe).
   const savedCanWrite = canWrite;
   if (previewing) canWrite = false;
-  ({ today: renderToday, ledger: renderLedger, overview: renderOverview, leaderboard: renderLeaderboard, admin: renderAdmin, balance: renderMyBalance, chazzan: renderChazzanTab })[route](root, session);
+  ({ today: renderToday, ledger: renderLedger, overview: renderOverview, leaderboard: renderLeaderboard, timeclock: renderAdminTimeClock, admin: renderAdmin, balance: renderMyBalance, chazzan: renderChazzanTab })[route](root, session);
   canWrite = savedCanWrite;
   updateLiveScheduleBadge(); // reflect the last known poll result immediately, don't wait for the next tick
   wireStudentLinks(root);
@@ -8236,6 +8335,24 @@ function renderAll() {
 /* ================================================================
    INIT
    ================================================================ */
+// One-time cleanup: "GC Bonus" ledger entries (the old quick-GC-grant mechanism, before it
+// became a bonus attendance credit -- see wireGcGrant) were TAG Coin ledger transactions;
+// convert any still sitting in the shared document into the equivalent state.gcBonusCredits
+// entry and drop them from the ledger, so nothing already awarded that way is lost. Runs once,
+// automatically, the next time anyone's browser loads the app after this change ships -- there's
+// no separate admin tool to run this by hand, so the first person to open the app after the
+// deploy is who fixes it for everyone.
+async function migrateGcBonusLedgerEntries() {
+  const oldEntries = (state.ledger || []).filter((tx) => tx.type === "GC Bonus");
+  if (!oldEntries.length) return;
+  const newState = JSON.parse(JSON.stringify(state));
+  newState.ledger = newState.ledger.filter((tx) => tx.type !== "GC Bonus");
+  newState.gcBonusCredits = newState.gcBonusCredits || [];
+  oldEntries.forEach((tx) => {
+    newState.gcBonusCredits.push({ id: uid("gcb"), date: tx.date, studentId: tx.studentId, amount: tx.amount, note: tx.note, enteredBy: tx.enteredBy, enteredAt: tx.enteredAt || Date.now() });
+  });
+  await saveState(newState);
+}
 async function init() {
   renderAll(); // shows the "Loading..." screen (state is still null at this point)
   try {
@@ -8248,6 +8365,7 @@ async function init() {
     if (loginEl) loginEl.innerHTML = '<div class="login-wrap"><div class="login-card"><p class="sub" style="text-align:center;color:var(--warn);">Couldn’t connect — check your internet connection and reload the page.</p></div></div>';
     return;
   }
+  try { await migrateGcBonusLedgerEntries(); } catch (e) { console.error("GC Bonus migration failed:", e); }
   renderAll();
   listenForLiveUpdates();
 }
