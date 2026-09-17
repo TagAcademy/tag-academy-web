@@ -2676,6 +2676,20 @@ function studentLogRowsFor(studentId, range, classFilter) {
       rows.push({ date: rec.date, period: p, att: pair[0], part: pair[1], note: pair[2] || "", by: pair[3] || "", excused, bonus: isBonusPeriod(rec.date, p) });
     });
   });
+  // Bonus Gemilas Chassidim credits (see wireGcGrant) aren't tied to a scheduled period, so they
+  // never show up in the loop above -- surface them here too, as their own labeled row, so a
+  // bonus credit is visible right where every other mark for this student already is (this same
+  // function also feeds the exported CSV/print report, so it shows up there too). Included when
+  // browsing every class or specifically filtered to "GC", since that's the class this bonus
+  // credit is thematically part of.
+  if (!classFilter || classFilter === "GC") {
+    (state.gcBonusCredits || []).forEach((c) => {
+      if (c.studentId !== studentId) return;
+      if (range.from && c.date < range.from) return;
+      if (range.to && c.date > range.to) return;
+      rows.push({ date: c.date, period: "Gemilas Chassidim (bonus)", att: c.amount, part: null, note: c.note || "", by: c.enteredBy || "", excused: false, bonus: true });
+    });
+  }
   rows.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : a.period.localeCompare(b.period)));
   return rows;
 }
