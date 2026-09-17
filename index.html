@@ -2203,14 +2203,21 @@ function canceledPeriodsFor(dateStr) {
 }
 /* A bonus class only ever helps a student's attendance/participation average, never hurts it --
    see the bonus handling in computeStats for exactly what that means numerically. A class can be
-   bonus two ways, and either one is enough: permanently, via the "Always bonus" checkbox on its
+   bonus three ways, and any one is enough: permanently, via the "Always bonus" checkbox on its
    row in Admin > Schedule (state.settings.alwaysBonusPeriods, a plain list of period names -- for
-   a class like a short Tehillim that should just always count as pure upside), or admin-toggled
-   for one specific day from the Today page (state.settings.bonusPeriods, keyed by date -- for a
-   one-off day some other class should get the same treatment). */
+   a class like a short Tehillim that should just always count as pure upside); admin-toggled for
+   one specific day from the Today page (state.settings.bonusPeriods, keyed by date -- for a
+   one-off day some other class should get the same treatment); or automatically, for whichever
+   class(es) are tagged the "gc" leaderboard category (see categoryFor), on any date a bonus GC
+   credit (see wireGcGrant) was granted -- awarding one is exactly the same "only ever helps"
+   promise a manually bonus-marked day makes, so that day's real GC class shows the same "★
+   Bonus" treatment everywhere a period's bonus status is displayed, instead of only the credit's
+   own synthetic log row looking bonus while the actual class next to it doesn't. */
 function isBonusPeriod(dateStr, period) {
   if (state.settings.alwaysBonusPeriods && state.settings.alwaysBonusPeriods.includes(period)) return true;
-  return !!(state.settings.bonusPeriods && state.settings.bonusPeriods[dateStr] && state.settings.bonusPeriods[dateStr].includes(period));
+  if (state.settings.bonusPeriods && state.settings.bonusPeriods[dateStr] && state.settings.bonusPeriods[dateStr].includes(period)) return true;
+  if (categoryFor(period) === "gc" && (state.gcBonusCredits || []).some((c) => c.date === dateStr)) return true;
+  return false;
 }
 /* ---------- Chazzan bonus coins (see CHAZZAN_PERIODS/CHAZZAN_COIN_TABLE) ---------- */
 function chazzanFor(dateStr, period) {
@@ -3985,11 +3992,18 @@ function renderToday(root, session) {
   // permanently bonus in Admin > Schedule (see alwaysBonusPeriods) has nothing to toggle here --
   // the per-day button only ever applies to a class that ISN'T already always-bonus.
   const alwaysBonus = !!(selectedPeriod && (state.settings.alwaysBonusPeriods || []).includes(selectedPeriod));
+  // A GC-category class (see categoryFor) reads as bonus on its own, with no manual toggle
+  // needed, on any date at least one bonus GC credit (see wireGcGrant) was granted that day --
+  // isBonusPeriod already covers this, but the manual "Mark/Unmark bonus" button below only
+  // ever edits state.settings.bonusPeriods, so it can't actually clear THIS source of bonus --
+  // deleting the credit itself (from the GC button's "Recent bonus credits" list) is what undoes it.
+  const gcCreditBonus = !!(selectedPeriod && categoryFor(selectedPeriod) === "gc" && (state.gcBonusCredits || []).some((c) => c.date === todayDate));
   const periodIsBonus = selectedPeriod && isBonusPeriod(todayDate, selectedPeriod);
-  const canToggleBonus = canWrite && isAdmin(session) && !alwaysBonus;
+  const canToggleBonus = canWrite && isAdmin(session) && !alwaysBonus && !gcCreditBonus;
   const bonusPieceHtml = (periodIsBonus ? '<span class="pill pill-gold" title="Marked scores help this average; a missed or low mark leaves it unchanged.">★ ' + (alwaysBonus ? "Always bonus" : "Bonus today") + " — only helps, never hurts</span>" : "") +
     (canToggleBonus ? '<button class="btn btn-ghost btn-sm" id="toggle-bonus" type="button" title="' + (periodIsBonus ? "Unmark " + escapeHtml(selectedPeriod) + " as bonus" : "Mark " + escapeHtml(selectedPeriod) + " as bonus today") + '">' + (periodIsBonus ? "Unmark bonus" : "Mark bonus") + "</button>" :
-      (alwaysBonus && isAdmin(session) ? '<span class="help-text" style="margin:0;">Set to always-bonus in Admin &gt; Schedule</span>' : ""));
+      (alwaysBonus && isAdmin(session) ? '<span class="help-text" style="margin:0;">Set to always-bonus in Admin &gt; Schedule</span>' :
+        (gcCreditBonus && isAdmin(session) ? '<span class="help-text" style="margin:0;">Bonus today because a GC credit was granted — delete it from the GC button to undo</span>' : "")));
 
   // A class with a lower max (see periodMaxFor, set in Admin > Schedule, optionally overridden
   // for just one day of the week -- see periodMaxByDay) still marks as a full dial/bar when
