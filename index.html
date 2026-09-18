@@ -3427,24 +3427,6 @@ function localInputValueToMs(v) {
   const t = new Date(v).getTime();
   return isNaN(t) ? null : t;
 }
-// One row per staff member per week they logged any completed time, most recent week first --
-// an entry still open (no clockOutAt yet) isn't counted toward any week's total until it's
-// closed, so a currently-running session never inflates a "finished" week's number.
-function timeClockWeeklyTotals() {
-  const map = new Map();
-  (state.timeClock || []).forEach((e) => {
-    if (!e.clockOutAt) return;
-    const wk = weekRangeFor(schoolDateForMs(e.clockInAt));
-    const key = wk.from + "|" + e.staffId;
-    if (!map.has(key)) map.set(key, { weekFrom: wk.from, weekTo: wk.to, staffId: e.staffId, ms: 0 });
-    map.get(key).ms += e.clockOutAt - e.clockInAt;
-  });
-  return Array.from(map.values()).sort((a, b) => {
-    if (a.weekFrom !== b.weekFrom) return b.weekFrom.localeCompare(a.weekFrom);
-    const an = (staffById(a.staffId) || {}).name || "", bn = (staffById(b.staffId) || {}).name || "";
-    return an.localeCompare(bn);
-  });
-}
 let timeClockShowDayOffForm = false;
 function renderTimeClockModal(session) {
   const root = document.getElementById("time-clock-root");
@@ -6940,16 +6922,74 @@ function renderAdminStaff(root) {
 // every other edit/delete in this app.
 let editingTimeClockId = null;
 let confirmDeleteTimeClockId = null;
+// Time range for the Totals/Leaderboard cards on the Time Clock page -- same "all time / a
+// specific week / a specific Hebrew month / a custom range" pattern as Reports (reportScope/
+// reportRange), so it reads the same way everywhere it appears. Deliberately only scopes the
+// Totals and Leaderboard cards below, not the Personal & sick days or Full log cards, which stay
+// full running histories the way they already were.
+let timeClockScope = "week"; // "all" | "week" | "hmonth" | "custom"
+let timeClockAnchor = todayISO();
+let timeClockFrom = todayISO();
+let timeClockTo = todayISO();
+function timeClockRange() {
+  if (timeClockScope === "week") {
+    const r = weekRangeFor(timeClockAnchor);
+    const parsha = parshaFor(r.from);
+    return { from: r.from, to: r.to, title: parsha || ("Week of " + fmtDateShort(r.from)), sub: fmtDateShort(r.from) + " – " + fmtDateShort(r.to) };
+  }
+  if (timeClockScope === "hmonth") {
+    const r = hebrewMonthRangeFor(timeClockAnchor);
+    if (!r) return { from: null, to: null, title: "This month", sub: "" };
+    return { from: r.from, to: r.to, title: r.monthName + " " + r.year, sub: fmtDateShort(r.from) + " – " + fmtDateShort(r.to) };
+  }
+  if (timeClockScope === "custom") {
+    const from = timeClockFrom <= timeClockTo ? timeClockFrom : timeClockTo;
+    const to = timeClockFrom <= timeClockTo ? timeClockTo : timeClockFrom;
+    return { from, to, title: "Custom range", sub: fmtDateShort(from) + " – " + fmtDateShort(to) };
+  }
+  return { from: null, to: null, title: "All time", sub: "Every logged session" };
+}
+// Total worked time per staff member within a range (see timeClockRange) -- staffId -> ms.
+// Grouped by the school day the session started on (schoolDateForMs), so a class night that
+// runs past midnight still counts on the day it began. Only counts sessions that have been
+// clocked out -- a still-open session isn't counted toward any range's total until it's closed.
+function timeClockTotalsFor(range) {
+  const map = new Map();
+  (state.timeClock || []).forEach((e) => {
+    if (e.dayOff || !e.clockOutAt) return;
+    const d = schoolDateForMs(e.clockInAt);
+    if (range.from && d < range.from) return;
+    if (range.to && d > range.to) return;
+    map.set(e.staffId, (map.get(e.staffId) || 0) + (e.clockOutAt - e.clockInAt));
+  });
+  return map;
+}
+// Ranked staff list for the small Time Clock Leaderboard card -- same totals as the Totals
+// table below, just sorted highest-first with a rank (ties share a rank, same principle as any
+// other ranked list in the app, just without the full student Leaderboard's podium visuals --
+// this is deliberately a plain compact list, not a scaled-down podium).
+function timeClockLeaderboardFor(range) {
+  const totals = Array.from(timeClockTotalsFor(range).entries()).map(([staffId, ms]) => ({ staffId, ms })).sort((a, b) => b.ms - a.ms);
+  let rank = 0, lastMs = null;
+  return totals.map((t, i) => {
+    if (lastMs === null || t.ms !== lastMs) rank = i + 1;
+    lastMs = t.ms;
+    return Object.assign({ rank }, t);
+  });
+}
 function renderAdminTimeClock(root) {
   const entries = (state.timeClock || []).slice().sort((a, b) => entrySortKeyMs(b) - entrySortKeyMs(a));
-  const weekly = timeClockWeeklyTotals();
+  const tcRange = timeClockRange();
+  const tcLeaderboard = timeClockLeaderboardFor(tcRange);
+  const tcTotals = Array.from(timeClockTotalsFor(tcRange).entries()).map(([staffId, ms]) => ({ staffId, ms }))
+    .sort((a, b) => ((staffById(a.staffId) || {}).name || "").localeCompare((staffById(b.staffId) || {}).name || ""));
   const dayOffTotals = timeClockDayOffTotals();
   const staffOptionsHtml = state.staff.slice().sort((a, b) => a.name.localeCompare(b.name))
     .map((s) => '<option value="' + s.id + '">' + escapeHtml(s.name) + "</option>").join("");
   const dayOffTypeOptionsHtml = DAY_OFF_TYPES.map((t) => '<option value="' + t + '">' + t + "</option>").join("");
 
   let html = '<div class="page-head"><div><span class="eyebrow">Hours, corrections &amp; time off</span><h1>Time Clock</h1>' +
-    '<p>The combined clock in/out log for every staff member with Time Clock access, weekly totals, personal &amp; sick day counts, and manual corrections.</p></div></div>';
+    '<p>The combined clock in/out log for every staff member with Time Clock access, totals and a small leaderboard for any time range, personal &amp; sick day counts, and manual corrections.</p></div></div>';
 
   html += '<div class="card card-pad">' +
     '<div class="section-title">Add a manual entry</div>' +
@@ -6971,17 +7011,58 @@ function renderAdminTimeClock(root) {
     '<button class="btn btn-primary btn-sm" id="tc-add-submit">Add entry</button>' +
     "</div>";
 
-  html += '<div class="card card-pad">' +
-    '<div class="section-title">Weekly totals</div>' +
-    '<p class="help-text" style="margin-top:-6px;">Total time logged per staff member, by week — only counts sessions that have been clocked out.</p>';
-  if (!weekly.length) {
-    html += '<p class="help-text">No completed sessions yet.</p></div>';
+  // Time range for the Leaderboard + Totals cards below -- same bubble-group/prev-next-today/
+  // custom-range pattern as Reports (renderOverview), so it behaves identically to every other
+  // date-range picker in the app instead of introducing a new one.
+  html += '<div class="card card-pad" style="margin-bottom:16px;">' +
+    '<div class="field" style="margin-bottom:0;"><label>Time range</label><div class="bubble-group">' +
+    [["all", "All time"], ["week", "This week"], ["hmonth", "This Hebrew month"], ["custom", "Custom range"]].map(([v, label]) =>
+      '<button type="button" class="bubble-btn' + (timeClockScope === v ? " active" : "") + '" data-tc-scope="' + v + '">' + label + "</button>"
+    ).join("") + "</div></div>" +
+    (timeClockScope === "week" || timeClockScope === "hmonth" ? '<div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
+      '<button class="btn btn-ghost btn-sm" id="tc-range-prev" type="button">&larr;</button>' +
+      '<button class="btn btn-ghost btn-sm" id="tc-range-today" type="button">Today</button>' +
+      '<button class="btn btn-ghost btn-sm" id="tc-range-next" type="button">&rarr;</button></div>' : "") +
+    (timeClockScope === "custom" ? '<div class="field-row" style="margin-top:12px;">' +
+      '<div class="field" style="min-width:150px;"><label for="tc-range-from">From</label><input type="date" id="tc-range-from" value="' + escapeHtml(timeClockFrom) + '"></div>' +
+      '<div class="field" style="min-width:150px;"><label for="tc-range-to">To</label><input type="date" id="tc-range-to" value="' + escapeHtml(timeClockTo) + '"></div></div>' : "");
+  if (timeClockScope === "week" || timeClockScope === "hmonth") {
+    html += '<div style="margin-top:12px;font-family:var(--font-display);font-weight:800;font-size:1.05rem;">' + escapeHtml(tcRange.title) + "</div>" +
+      '<div style="font-size:0.82rem;color:var(--muted);margin-top:2px;">' + escapeHtml(tcRange.sub) + "</div>";
+  }
+  html += "</div>";
+
+  // A small ranked list, not a scaled-down copy of the student Leaderboard's podium -- just who
+  // logged the most time in the range above, at a glance, for the (at most a handful of) staff
+  // with Time Clock access.
+  html += '<div class="card card-pad" style="margin-bottom:16px;max-width:420px;">' +
+    '<div class="section-title">Time Clock Leaderboard</div>' +
+    '<p class="help-text" style="margin-top:-6px;">' + escapeHtml(tcRange.title) + (tcRange.sub ? " — " + escapeHtml(tcRange.sub) : "") + "</p>";
+  if (!tcLeaderboard.length) {
+    html += '<p class="help-text">Nobody has logged time in this range yet.</p></div>';
   } else {
-    html += '<div class="table-wrap" id="tc-weekly-totals"><table><thead><tr><th>Week</th><th>Staff</th><th class="num">Total</th></tr></thead><tbody>' +
-      weekly.map((w) => {
-        const rec = staffById(w.staffId);
-        return "<tr><td>" + escapeHtml(fmtDateShort(w.weekFrom)) + " – " + escapeHtml(fmtDateShort(w.weekTo)) + "</td><td>" +
-          escapeHtml(rec ? rec.name : "(removed staff)") + '</td><td class="num">' + fmtDurationMs(w.ms) + "</td></tr>";
+    html += '<div id="tc-leaderboard" style="display:flex;flex-direction:column;gap:6px;">' +
+      tcLeaderboard.map((r) => {
+        const rec = staffById(r.staffId);
+        const medal = r.rank === 1 ? "🥇" : r.rank === 2 ? "🥈" : r.rank === 3 ? "🥉" : "";
+        return '<div style="display:flex;align-items:center;gap:10px;padding:6px 4px;border-bottom:1px solid var(--border);">' +
+          '<span style="width:1.6em;text-align:center;font-weight:800;color:var(--muted);">' + (medal || r.rank) + "</span>" +
+          '<span style="flex:1;font-weight:600;">' + escapeHtml(rec ? rec.name : "(removed staff)") + "</span>" +
+          '<span style="font-weight:800;">' + fmtDurationMs(r.ms) + "</span></div>";
+      }).join("") +
+      "</div></div>";
+  }
+
+  html += '<div class="card card-pad">' +
+    '<div class="section-title">Totals</div>' +
+    '<p class="help-text" style="margin-top:-6px;">Total time logged per staff member for ' + escapeHtml(tcRange.title.toLowerCase()) + ' — only counts sessions that have been clocked out.</p>';
+  if (!tcTotals.length) {
+    html += '<p class="help-text">No completed sessions in this range yet.</p></div>';
+  } else {
+    html += '<div class="table-wrap" id="tc-totals"><table><thead><tr><th>Staff</th><th class="num">Total</th></tr></thead><tbody>' +
+      tcTotals.map((t) => {
+        const rec = staffById(t.staffId);
+        return "<tr><td>" + escapeHtml(rec ? rec.name : "(removed staff)") + '</td><td class="num">' + fmtDurationMs(t.ms) + "</td></tr>";
       }).join("") +
       "</tbody></table></div></div>";
   }
@@ -7045,6 +7126,24 @@ function renderAdminTimeClock(root) {
       "</tbody></table></div></div>";
   }
   root.innerHTML = html;
+
+  root.querySelectorAll("[data-tc-scope]").forEach((btn) => btn.addEventListener("click", () => { timeClockScope = btn.getAttribute("data-tc-scope"); renderAll(); }));
+  const tcRangePrev = document.getElementById("tc-range-prev");
+  if (tcRangePrev) tcRangePrev.addEventListener("click", () => {
+    timeClockAnchor = timeClockScope === "week" ? shiftDate(timeClockAnchor, -7) : shiftHebrewMonth(timeClockAnchor, -1);
+    renderAll();
+  });
+  const tcRangeNext = document.getElementById("tc-range-next");
+  if (tcRangeNext) tcRangeNext.addEventListener("click", () => {
+    timeClockAnchor = timeClockScope === "week" ? shiftDate(timeClockAnchor, 7) : shiftHebrewMonth(timeClockAnchor, 1);
+    renderAll();
+  });
+  const tcRangeToday = document.getElementById("tc-range-today");
+  if (tcRangeToday) tcRangeToday.addEventListener("click", () => { timeClockAnchor = todayISO(); renderAll(); });
+  const tcRangeFromInput = document.getElementById("tc-range-from");
+  if (tcRangeFromInput) tcRangeFromInput.addEventListener("change", () => { timeClockFrom = tcRangeFromInput.value || timeClockFrom; renderAll(); });
+  const tcRangeToInput = document.getElementById("tc-range-to");
+  if (tcRangeToInput) tcRangeToInput.addEventListener("change", () => { timeClockTo = tcRangeToInput.value || timeClockTo; renderAll(); });
 
   const addKindSelect = document.getElementById("tc-add-kind");
   const addTimeFields = document.getElementById("tc-add-time-fields");
