@@ -2878,47 +2878,71 @@ function clearDraft(key) { try { sessionStorage.removeItem("draft:" + key); } ca
 async function saveState(newState, opts) {
   opts = opts || {};
   if (opts.stashKey) stashDraft(opts.stashKey, opts.stashData);
-  // opts.retry(freshState) -> newState: when given, a conflict (below) doesn't stop and ask
-  // the person to press Save again -- it recomputes just this one edit against whatever the
-  // fresh server data turned out to be, and writes that instead, up to a few times. This is
-  // what makes autosave actually fire-and-forget: with several people marking at once, a
-  // conflict here is expected to happen occasionally, and re-deriving the same intended edit
-  // from current data is safe as long as the recompute (like per-student attendance patches)
-  // only touches what this one action actually changed.
-  const maxAttempts = opts.retry ? 5 : 1;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      // Everyone shares one Firestore document, everyone's tab keeps its own in-memory copy
-      // of it, and .set() below fully replaces the document -- so without a check here, a
-      // tab that's been open a while (its `state` now stale) would silently overwrite
-      // whatever anyone else saved in the meantime (e.g. a new staff account another admin
-      // just added). `_rev` is a save counter: re-read the server's current value right
-      // before writing, and if it's moved past what our copy of `state` was built from,
-      // someone else saved first -- pull in their version instead of clobbering it.
-      const freshSnap = await STATE_DOC.get();
-      const serverRev = freshSnap.exists ? (freshSnap.data()._rev || 0) : 0;
-      const ourRev = (state && state._rev) || 0;
-      if (freshSnap.exists && serverRev !== ourRev) {
-        state = freshSnap.data();
-        if (opts.retry && attempt < maxAttempts) {
-          newState = opts.retry(state);
-          continue;
+  // opts.retry(freshState) -> newState: when given, a conflict doesn't stop and ask the person
+  // to press Save again -- it recomputes just this one edit against whatever the fresh server
+  // data turned out to be, and writes that instead. This is what makes autosave actually
+  // fire-and-forget: with several people marking at once, a conflict here is expected to happen
+  // occasionally, and re-deriving the same intended edit from current data is safe as long as
+  // the recompute (like per-student attendance patches) only touches what this one action
+  // actually changed.
+  //
+  // Everyone shares one Firestore document, everyone's tab keeps its own in-memory copy of it,
+  // and the write below fully replaces the document -- so without a check here, a tab that's
+  // been open a while (its `state` now stale) would silently overwrite whatever anyone else
+  // saved in the meantime. `_rev` is a save counter used for that check. Read-then-check-then-
+  // write as two separate round trips (a plain .get() followed later by a plain .set()) is NOT
+  // atomic -- two saves from two different devices can both read the same `_rev`, both pass the
+  // check, and then the second .set() completely overwrites the first one's write, silently
+  // losing whatever it just saved. That's exactly the failure mode multiple staff marking the
+  // same class at once can hit. db.runTransaction() closes that gap: Firestore guarantees the
+  // read inside it and the write it produces are atomic against every other transaction on this
+  // document, and if another write lands in between, it re-runs this whole function itself with
+  // a fresh read rather than letting two writes race. That's also why the retry recompute has to
+  // happen from serverData INSIDE the transaction (not from whatever `newState` looked like when
+  // this call started) -- Firestore may invoke this function more than once per call.
+  //
+  // Deliberately only recomputes via opts.retry when serverRev actually disagrees with ourRev --
+  // NOT unconditionally -- so a call with no real conflict still writes exactly the `newState`
+  // the caller built, same as before this was a transaction.
+  const ourRev = (state && state._rev) || 0;
+  try {
+    let conflicted = false, conflictState = null;
+    const written = await db.runTransaction(async (tx) => {
+      const freshSnap = await tx.get(STATE_DOC);
+      const serverData = freshSnap.exists ? freshSnap.data() : null;
+      const serverRev = serverData ? (serverData._rev || 0) : 0;
+      let toWrite;
+      if (serverData && serverRev !== ourRev) {
+        if (opts.retry) {
+          toWrite = opts.retry(serverData);
+        } else {
+          // No way to safely recompute a full-document write against newer data we haven't seen
+          // -- bail out without writing anything, and let the caller ask the person to try again.
+          conflicted = true;
+          conflictState = serverData;
+          return null;
         }
-        toast("Someone else just saved changes, so we didn't overwrite them — we've pulled in the latest data. Please try your save again.", "warn");
-        renderAll();
-        return { ok: false, code: "conflict" };
+      } else {
+        toWrite = newState;
       }
-      newState._rev = serverRev + 1;
-      await STATE_DOC.set(newState);
-      // Keep our in-memory copy in sync with what we just saved -- otherwise the next
-      // edit in this session would clone the old (pre-save) state and silently undo
-      // whatever this save just changed.
-      state = newState;
-      clearDraft(opts.stashKey);
-      return { ok: true };
-    } catch (err) {
-      return saveStateError(err);
+      toWrite._rev = serverRev + 1;
+      tx.set(STATE_DOC, toWrite);
+      return toWrite;
+    });
+    if (conflicted) {
+      state = conflictState;
+      toast("Someone else just saved changes, so we didn't overwrite them — we've pulled in the latest data. Please try your save again.", "warn");
+      renderAll();
+      return { ok: false, code: "conflict" };
     }
+    // Keep our in-memory copy in sync with what we just saved -- otherwise the next
+    // edit in this session would clone the old (pre-save) state and silently undo
+    // whatever this save just changed.
+    state = written;
+    clearDraft(opts.stashKey);
+    return { ok: true };
+  } catch (err) {
+    return saveStateError(err);
   }
 }
 function saveStateError(err) {
@@ -3179,6 +3203,22 @@ function renderShell(session, previewing) {
   // is read-only and must never actually clock someone in/out on their behalf.
   const canClock = session.type === "staff" && !!session.record.canClockInOut;
   const clockedIn = canClock && timeClockEntriesFor(session.record.id).some((e) => !e.dayOff && !e.clockOutAt);
+  // Auto-prompt to clock in: the first time in a school day that one of the handful of staff
+  // with Time Clock access (R. Levi, R. Zalmy, R. Aizik -- anyone Admin > Staff Accounts has
+  // flagged with canClockInOut) opens the app without already being clocked in, pop the Time
+  // Clock modal open on its own instead of waiting for them to notice the clock icon and tap it.
+  // A localStorage flag keyed to staff+school-day makes this fire exactly once per day per
+  // device -- it naturally resets itself the next day, and doesn't nag again later that same day
+  // even if they close the modal without actually clocking in.
+  if (!previewing && canClock && !clockedIn) {
+    const autoPromptKey = "tc-auto-prompt:" + session.record.id + ":" + todayISO();
+    let alreadyPrompted = true;
+    try { alreadyPrompted = localStorage.getItem(autoPromptKey) === "1"; } catch (e) {}
+    if (!alreadyPrompted) {
+      try { localStorage.setItem(autoPromptKey, "1"); } catch (e) {}
+      timeClockOpen = true;
+    }
+  }
   const clockBtn = canClock
     ? '<button type="button" class="time-clock-btn' + (clockedIn ? " is-clocked-in" : "") + '"' + (previewing ? " disabled" : ' data-open-time-clock="1"') + ' title="' + (clockedIn ? "Clocked in — tap to clock out or view your time" : "Clock in / out") + '">' + icon("clock") + "</button>"
     : "";
@@ -6977,26 +7017,39 @@ function timeClockLeaderboardFor(range) {
     return Object.assign({ rank }, t);
   });
 }
-function renderAdminTimeClock(root) {
+function renderAdminTimeClock(root, session) {
+  const admin = isAdmin(session);
+  const me = session && session.type === "staff" ? session.record : null;
   const entries = (state.timeClock || []).slice().sort((a, b) => entrySortKeyMs(b) - entrySortKeyMs(a));
   const tcRange = timeClockRange();
   const tcLeaderboard = timeClockLeaderboardFor(tcRange);
   const tcTotals = Array.from(timeClockTotalsFor(tcRange).entries()).map(([staffId, ms]) => ({ staffId, ms }))
     .sort((a, b) => ((staffById(a.staffId) || {}).name || "").localeCompare((staffById(b.staffId) || {}).name || ""));
   const dayOffTotals = timeClockDayOffTotals();
-  const staffOptionsHtml = state.staff.slice().sort((a, b) => a.name.localeCompare(b.name))
+  // Only staff who actually use the Time Clock (Admin > Staff Accounts' canClockInOut flag) ever
+  // belong in this list -- the rest of the school's staff roster never clocks in/out at all, so
+  // showing them here just makes the real handful of names harder to find.
+  const staffOptionsHtml = state.staff.filter((s) => s.canClockInOut).sort((a, b) => a.name.localeCompare(b.name))
     .map((s) => '<option value="' + s.id + '">' + escapeHtml(s.name) + "</option>").join("");
   const dayOffTypeOptionsHtml = DAY_OFF_TYPES.map((t) => '<option value="' + t + '">' + t + "</option>").join("");
 
   let html = '<div class="page-head"><div><span class="eyebrow">Hours, corrections &amp; time off</span><h1>Time Clock</h1>' +
     '<p>The combined clock in/out log for every staff member with Time Clock access, totals and a small leaderboard for any time range, personal &amp; sick day counts, and manual corrections.</p></div></div>';
 
+  // Non-admin staff can only add/correct entries for THEMSELVES -- no picking someone else off a
+  // list. Admin keeps the full picker (scoped to just the staff who actually use the clock, see
+  // staffOptionsHtml above) so they can still backfill or fix anyone's time.
   html += '<div class="card card-pad">' +
     '<div class="section-title">Add a manual entry</div>' +
-    '<p class="help-text" style="margin-top:-6px;">For backfilling a session that wasn\'t clocked live, or logging a personal/sick day on someone\'s behalf.</p>' +
+    '<p class="help-text" style="margin-top:-6px;">' + (admin ?
+      "For backfilling a session that wasn't clocked live, or logging a personal/sick day on someone's behalf." :
+      "For backfilling one of your own sessions that wasn't clocked live, or logging your own personal/sick day.") + "</p>" +
     '<div class="field-row">' +
     '<div class="field" style="max-width:200px;"><label for="tc-add-kind">Entry type</label><select id="tc-add-kind"><option value="time">Worked time</option><option value="dayoff">Personal / sick day</option></select></div>' +
-    '<div class="field"><label for="tc-add-staff">Staff</label><select id="tc-add-staff">' + staffOptionsHtml + "</select></div>" +
+    '<div class="field"><label for="tc-add-staff">Staff</label>' + (admin ?
+      '<select id="tc-add-staff">' + staffOptionsHtml + "</select>" :
+      '<input type="text" value="' + escapeHtml(me ? me.name : "") + '" disabled>' +
+        '<input type="hidden" id="tc-add-staff" value="' + (me ? me.id : "") + '">') + "</div>" +
     "</div>" +
     '<div class="field-row" id="tc-add-time-fields">' +
     '<div class="field"><label for="tc-add-in">Clocked in</label><input type="datetime-local" id="tc-add-in"></div>' +
@@ -7083,7 +7136,9 @@ function renderAdminTimeClock(root) {
 
   html += '<div class="card card-pad">' +
     '<div class="section-title">Full log</div>' +
-    '<p class="help-text" style="margin-top:-6px;">Every clock in/out entry and personal/sick day logged by staff with Time Clock access (Admin &gt; Staff Accounts). Edit a row to correct it, or delete one that was made by mistake.</p>';
+    '<p class="help-text" style="margin-top:-6px;">' + (admin ?
+      "Every clock in/out entry and personal/sick day logged by staff with Time Clock access (Admin &gt; Staff Accounts). Edit a row to correct it, or delete one that was made by mistake." :
+      "Every clock in/out entry and personal/sick day logged by staff with Time Clock access. You can edit or delete your own entries below -- an admin can correct anyone's.") + "</p>";
   if (!entries.length) {
     html += '<p class="help-text">Nobody has clocked in yet.</p></div>';
   } else {
@@ -7091,7 +7146,10 @@ function renderAdminTimeClock(root) {
       entries.map((e) => {
         const rec = staffById(e.staffId);
         const name = escapeHtml(rec ? rec.name : "(removed staff)");
-        if (editingTimeClockId === e.id) {
+        // Non-admin staff can only edit/delete their OWN entries -- same "add for yourself only"
+        // rule as the manual-add form above, applied to correcting/removing existing rows too.
+        const canManage = admin || (me && e.staffId === me.id);
+        if (editingTimeClockId === e.id && canManage) {
           if (e.dayOff) {
             return "<tr><td>" + name + '</td><td><input type="date" id="tc-edit-dayoff-date-' + e.id + '" value="' + e.date + '"></td>' +
               '<td><select id="tc-edit-dayoff-type-' + e.id + '">' + DAY_OFF_TYPES.map((t) => '<option value="' + t + '"' + (e.dayOff === t ? " selected" : "") + ">" + t + "</option>").join("") + "</select></td>" +
@@ -7111,7 +7169,7 @@ function renderAdminTimeClock(root) {
             '<button class="btn btn-primary btn-sm" data-save-tc="' + e.id + '">Save</button>' +
             '<button class="btn btn-ghost btn-sm" data-cancel-edit-tc="' + e.id + '">Cancel</button></td></tr>';
         }
-        if (confirmDeleteTimeClockId === e.id) {
+        if (confirmDeleteTimeClockId === e.id && canManage) {
           return "<tr><td>" + name + "</td>" + timeClockRowCellsHtml(e) +
             '<td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
             '<span style="color:var(--warn);font-weight:600;">Delete this entry?</span> ' +
@@ -7120,8 +7178,10 @@ function renderAdminTimeClock(root) {
         }
         return "<tr><td>" + name + "</td>" + timeClockRowCellsHtml(e) +
           '<td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
-          '<button class="btn btn-ghost btn-sm" data-edit-tc="' + e.id + '">Edit</button>' +
-          '<button class="btn btn-ghost btn-sm" data-delete-tc="' + e.id + '" style="color:var(--warn);">Delete</button></td></tr>';
+          (canManage ?
+            '<button class="btn btn-ghost btn-sm" data-edit-tc="' + e.id + '">Edit</button>' +
+            '<button class="btn btn-ghost btn-sm" data-delete-tc="' + e.id + '" style="color:var(--warn);">Delete</button>' :
+            '<span class="help-text">—</span>') + "</td></tr>";
       }).join("") +
       "</tbody></table></div></div>";
   }
@@ -7183,21 +7243,21 @@ function renderAdminTimeClock(root) {
       newState.timeClock.push(entry);
     }
     const res = await saveState(newState);
-    if (res.ok || res.local) { toast("Entry added.", "good"); renderAll(); } else { renderAdminTimeClock(root); }
+    if (res.ok || res.local) { toast("Entry added.", "good"); renderAll(); } else { renderAdminTimeClock(root, session); }
   });
   root.querySelectorAll("[data-edit-tc]").forEach((btn) => btn.addEventListener("click", () => {
     editingTimeClockId = btn.getAttribute("data-edit-tc");
     confirmDeleteTimeClockId = null;
-    renderAdminTimeClock(root);
+    renderAdminTimeClock(root, session);
   }));
   root.querySelectorAll("[data-cancel-edit-tc]").forEach((btn) => btn.addEventListener("click", () => {
     editingTimeClockId = null;
-    renderAdminTimeClock(root);
+    renderAdminTimeClock(root, session);
   }));
   root.querySelectorAll("[data-save-tc]").forEach((btn) => btn.addEventListener("click", async () => {
     const id = btn.getAttribute("data-save-tc");
     const original = (state.timeClock || []).find((x) => x.id === id);
-    if (!original) { editingTimeClockId = null; renderAdminTimeClock(root); return; }
+    if (!original) { editingTimeClockId = null; renderAdminTimeClock(root, session); return; }
     if (original.dayOff) {
       const type = document.getElementById("tc-edit-dayoff-type-" + id).value;
       const date = document.getElementById("tc-edit-dayoff-date-" + id).value;
@@ -7210,7 +7270,7 @@ function renderAdminTimeClock(root) {
       if (note) rec.note = note; else delete rec.note;
       editingTimeClockId = null;
       const res = await saveState(newState);
-      if (res.ok || res.local) { toast("Time clock entry updated.", "good"); renderAll(); } else { renderAdminTimeClock(root); }
+      if (res.ok || res.local) { toast("Time clock entry updated.", "good"); renderAll(); } else { renderAdminTimeClock(root, session); }
       return;
     }
     const inVal = document.getElementById("tc-edit-in-" + id).value;
@@ -7223,23 +7283,23 @@ function renderAdminTimeClock(root) {
     if (outMs != null && outMs < inMs) { toast("Clock-out can't be before clock-in.", "warn"); return; }
     const newState = JSON.parse(JSON.stringify(state));
     const rec = (newState.timeClock || []).find((x) => x.id === id);
-    if (!rec) { editingTimeClockId = null; renderAdminTimeClock(root); return; }
+    if (!rec) { editingTimeClockId = null; renderAdminTimeClock(root, session); return; }
     rec.clockInAt = inMs;
     rec.clockOutAt = outMs;
     if (category) rec.category = category; else delete rec.category;
     if (note) rec.note = note; else delete rec.note;
     editingTimeClockId = null;
     const res = await saveState(newState);
-    if (res.ok || res.local) { toast("Time clock entry updated.", "good"); renderAll(); } else { renderAdminTimeClock(root); }
+    if (res.ok || res.local) { toast("Time clock entry updated.", "good"); renderAll(); } else { renderAdminTimeClock(root, session); }
   }));
   root.querySelectorAll("[data-delete-tc]").forEach((btn) => btn.addEventListener("click", () => {
     confirmDeleteTimeClockId = btn.getAttribute("data-delete-tc");
     editingTimeClockId = null;
-    renderAdminTimeClock(root);
+    renderAdminTimeClock(root, session);
   }));
   root.querySelectorAll("[data-cancel-delete-tc]").forEach((btn) => btn.addEventListener("click", () => {
     confirmDeleteTimeClockId = null;
-    renderAdminTimeClock(root);
+    renderAdminTimeClock(root, session);
   }));
   root.querySelectorAll("[data-confirm-delete-tc]").forEach((btn) => btn.addEventListener("click", async () => {
     const id = btn.getAttribute("data-confirm-delete-tc");
@@ -7247,7 +7307,7 @@ function renderAdminTimeClock(root) {
     newState.timeClock = (newState.timeClock || []).filter((x) => x.id !== id);
     confirmDeleteTimeClockId = null;
     const res = await saveState(newState);
-    if (res.ok || res.local) { toast("Time clock entry deleted.", "good"); renderAll(); } else { renderAdminTimeClock(root); }
+    if (res.ok || res.local) { toast("Time clock entry deleted.", "good"); renderAll(); } else { renderAdminTimeClock(root, session); }
   }));
 }
 
