@@ -6889,6 +6889,10 @@ function wireScheduleDrag(root) {
 let bulkStaffResult = null;
 let showBulkStaffForm = false;
 let confirmDeleteStaffId = null;
+// Which staff row (if any) is showing its inline edit form -- name, username, role, and (for a
+// "limited" account) which class it's restricted to. Password isn't part of this form; that's
+// still the separate "Reset password" action, same as before.
+let editingStaffId = null;
 function renderAdminStaff(root) {
   let html = '<div class="card card-pad"><div class="section-title">Add a staff account</div><div class="field-row">' +
     '<div class="field"><label for="st-name">Name</label><input type="text" id="st-name"></div>' +
@@ -6927,11 +6931,31 @@ function renderAdminStaff(root) {
 
   html += '<div class="card card-pad"><div class="table-wrap"><table><thead><tr><th>Name</th><th>Username</th><th>Password</th><th>Role</th><th class="num" title="Earned from their own self-marked attendance &amp; participation -- never shown to students">TAG coins</th><th class="sticky-col-r"></th></tr></thead><tbody>';
   state.staff.forEach((s) => {
+    if (editingStaffId === s.id) {
+      html += "<tr><td><input type=\"text\" id=\"st-edit-name-" + s.id + "\" value=\"" + escapeHtml(s.name) + "\"></td>" +
+        "<td class=\"num\"><input type=\"text\" id=\"st-edit-username-" + s.id + "\" value=\"" + escapeHtml(s.username) + "\"></td>" +
+        '<td class="num">' + passwordCellHtml(s.password, "staff:" + s.id) + "</td>" +
+        "<td><select id=\"st-edit-role-" + s.id + "\">" +
+        "<option value=\"teacher\"" + (s.role === "teacher" ? " selected" : "") + ">Teacher</option>" +
+        "<option value=\"admin\"" + (s.role === "admin" ? " selected" : "") + ">Admin</option>" +
+        "<option value=\"limited\"" + (s.role === "limited" ? " selected" : "") + ">Limited (one class)</option>" +
+        "</select>" +
+        "<div id=\"st-edit-restricted-wrap-" + s.id + "\" style=\"margin-top:4px;display:" + (s.role === "limited" ? "" : "none") + ";\">" +
+        "<select id=\"st-edit-restricted-" + s.id + "\">" +
+        state.settings.periods.map((p) => "<option value=\"" + escapeHtml(p) + "\"" + (s.restrictedPeriod === p ? " selected" : "") + ">" + escapeHtml(p) + "</option>").join("") +
+        "</select></div></td>" +
+        '<td class="num">' + num2(staffStats(s.id).balance) + "</td>" +
+        '<td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
+        '<button class="btn btn-primary btn-sm" data-save-edit-staff="' + s.id + '">Save</button>' +
+        '<button class="btn btn-ghost btn-sm" data-cancel-edit-staff="' + s.id + '">Cancel</button></td></tr>';
+      return;
+    }
     const actions = confirmDeleteStaffId === s.id
       ? '<span style="color:var(--warn);font-weight:600;">Delete permanently?</span> ' +
         '<button class="btn btn-danger btn-sm" data-confirm-delete-staff="' + s.id + '">Yes, delete everything</button>' +
         '<button class="btn btn-ghost btn-sm" data-cancel-delete-staff="' + s.id + '">Cancel</button>'
       : '<button class="btn btn-ghost btn-sm" data-view-as-staff="' + s.id + '">View as</button>' +
+        '<button class="btn btn-ghost btn-sm" data-edit-staff="' + s.id + '">Edit</button>' +
         '<button class="btn btn-ghost btn-sm" data-reset-staff="' + s.id + '">Reset password</button>' +
         '<button class="btn btn-ghost btn-sm" data-toggle-clock="' + s.id + '">' + (s.canClockInOut ? "Remove Time Clock access" : "Allow Time Clock access") + '</button>' +
         '<button class="btn btn-ghost btn-sm" data-delete-staff="' + s.id + '" style="color:var(--warn);">Delete</button>';
@@ -6996,6 +7020,68 @@ function renderAdminStaff(root) {
   root.querySelectorAll("[data-delete-staff]").forEach((btn) => btn.addEventListener("click", () => {
     confirmDeleteStaffId = btn.getAttribute("data-delete-staff");
     renderAdminStaff(root);
+  }));
+  root.querySelectorAll("[data-edit-staff]").forEach((btn) => btn.addEventListener("click", () => {
+    editingStaffId = btn.getAttribute("data-edit-staff");
+    confirmDeleteStaffId = null;
+    renderAdminStaff(root);
+  }));
+  root.querySelectorAll("[data-cancel-edit-staff]").forEach((btn) => btn.addEventListener("click", () => {
+    editingStaffId = null;
+    renderAdminStaff(root);
+  }));
+  if (editingStaffId) {
+    const editRoleSelect = document.getElementById("st-edit-role-" + editingStaffId);
+    const editRestrictedWrap = document.getElementById("st-edit-restricted-wrap-" + editingStaffId);
+    if (editRoleSelect && editRestrictedWrap) {
+      editRoleSelect.addEventListener("change", () => { editRestrictedWrap.style.display = editRoleSelect.value === "limited" ? "" : "none"; });
+    }
+  }
+  root.querySelectorAll("[data-save-edit-staff]").forEach((btn) => btn.addEventListener("click", async () => {
+    const id = btn.getAttribute("data-save-edit-staff");
+    const original = staffById(id);
+    if (!original) { editingStaffId = null; renderAdminStaff(root); return; }
+    const name = document.getElementById("st-edit-name-" + id).value.trim();
+    const username = document.getElementById("st-edit-username-" + id).value.trim();
+    const role = document.getElementById("st-edit-role-" + id).value;
+    if (!name || !username) { toast("Enter a name and username.", "warn"); return; }
+    const taken = new Set(state.staff.filter((s) => s.id !== id).map((s) => s.username.toLowerCase()).concat(state.roster.map((s) => (s.username || "").toLowerCase())));
+    if (taken.has(username.toLowerCase())) { toast("That username is already taken.", "warn"); return; }
+    let restrictedPeriod = null;
+    if (role === "limited") {
+      if (!state.settings.periods.length) { toast("Add a class in Schedule first, then you can restrict a staff account to it.", "warn"); return; }
+      restrictedPeriod = document.getElementById("st-edit-restricted-" + id).value;
+    }
+    // Same two guardrails as deleting an account (see data-confirm-delete-staff below): moving
+    // the only admin off of "Admin", or moving the account you yourself are signed in as off of
+    // it, would lock someone out of Admin entirely -- catch it here too, not just on delete.
+    if (original.role === "admin" && role !== "admin") {
+      if (state.staff.filter((s) => s.role === "admin").length <= 1) {
+        toast("Can't remove admin from the only admin account — make someone else an admin first.", "warn");
+        return;
+      }
+      const real = currentSession();
+      if (real && real.type === "staff" && real.record.id === id) {
+        toast("You can't remove your own admin access — sign in as a different admin first.", "warn");
+        return;
+      }
+    }
+    // Find-by-id-and-set is naturally safe to recompute against fresher server data (see
+    // opts.retry / saveState's comment) -- if the account is gone by the time this actually
+    // commits (someone else deleted it in between), there's simply nothing left to update.
+    const applyEdit = (base) => {
+      const ns = JSON.parse(JSON.stringify(base));
+      const rec = (ns.staff || []).find((x) => x.id === id);
+      if (!rec) return ns;
+      rec.name = name;
+      rec.username = username;
+      rec.role = role;
+      if (role === "limited") rec.restrictedPeriod = restrictedPeriod; else delete rec.restrictedPeriod;
+      return ns;
+    };
+    editingStaffId = null;
+    const res = await saveState(applyEdit(state), { retry: applyEdit });
+    if (res.ok || res.local) { toast("Updated " + name + ".", "good"); renderAll(); } else { renderAdminStaff(root); }
   }));
   root.querySelectorAll("[data-cancel-delete-staff]").forEach((btn) => btn.addEventListener("click", () => {
     confirmDeleteStaffId = null;
@@ -7077,6 +7163,12 @@ function renderAdminStaff(root) {
 // every other edit/delete in this app.
 let editingTimeClockId = null;
 let confirmDeleteTimeClockId = null;
+// Full log ordering: tapping the "Staff" column heading groups every entry by staff member
+// (alphabetically, most-recent-first within each person's own entries) instead of the default
+// most-recent-first-overall order, so it's easy to review one person's whole history at a
+// glance; tapping it again switches back. Purely a local view preference, never saved to
+// Firestore, same as the Time Clock range scope above.
+let timeClockLogSortByStaff = false;
 // Time range for the Totals/Leaderboard cards on the Time Clock page -- same "all time / a
 // specific week / a specific Hebrew month / a custom range" pattern as Reports (reportScope/
 // reportRange), so it reads the same way everywhere it appears. Deliberately only scopes the
@@ -7135,7 +7227,11 @@ function timeClockLeaderboardFor(range) {
 function renderAdminTimeClock(root, session) {
   const admin = isAdmin(session);
   const me = session && session.type === "staff" ? session.record : null;
-  const entries = (state.timeClock || []).slice().sort((a, b) => entrySortKeyMs(b) - entrySortKeyMs(a));
+  const entries = (state.timeClock || []).slice().sort(timeClockLogSortByStaff ? (a, b) => {
+    const nameA = (staffById(a.staffId) || {}).name || "";
+    const nameB = (staffById(b.staffId) || {}).name || "";
+    return nameA.localeCompare(nameB) || (entrySortKeyMs(b) - entrySortKeyMs(a));
+  } : (a, b) => entrySortKeyMs(b) - entrySortKeyMs(a));
   const tcRange = timeClockRange();
   const tcLeaderboard = timeClockLeaderboardFor(tcRange);
   const tcTotals = Array.from(timeClockTotalsFor(tcRange).entries()).map(([staffId, ms]) => ({ staffId, ms }))
@@ -7257,7 +7353,7 @@ function renderAdminTimeClock(root, session) {
   if (!entries.length) {
     html += '<p class="help-text">Nobody has clocked in yet.</p></div>';
   } else {
-    html += '<div class="table-wrap" id="tc-full-log"><table><thead><tr><th>Staff</th><th>Clocked in</th><th>Clocked out</th><th>Duration</th><th>For</th><th class="sticky-col-r"></th></tr></thead><tbody>' +
+    html += '<div class="table-wrap" id="tc-full-log"><table><thead><tr><th id="tc-log-sort-staff" style="cursor:pointer;user-select:none;' + (timeClockLogSortByStaff ? "color:var(--accent);" : "") + '" title="' + (timeClockLogSortByStaff ? "Grouped by staff — tap to switch back to most recent first" : "Tap to group by staff") + '">Staff <span style="font-size:0.75em;opacity:' + (timeClockLogSortByStaff ? "1" : "0.45") + ';">&#8645;</span></th><th>Clocked in</th><th>Clocked out</th><th>Duration</th><th>For</th><th class="sticky-col-r"></th></tr></thead><tbody>' +
       entries.map((e) => {
         const rec = staffById(e.staffId);
         const name = escapeHtml(rec ? rec.name : "(removed staff)");
@@ -7302,6 +7398,8 @@ function renderAdminTimeClock(root, session) {
   }
   root.innerHTML = html;
 
+  const tcLogSortStaffTh = document.getElementById("tc-log-sort-staff");
+  if (tcLogSortStaffTh) tcLogSortStaffTh.addEventListener("click", () => { timeClockLogSortByStaff = !timeClockLogSortByStaff; renderAll(); });
   root.querySelectorAll("[data-tc-scope]").forEach((btn) => btn.addEventListener("click", () => { timeClockScope = btn.getAttribute("data-tc-scope"); renderAll(); }));
   const tcRangePrev = document.getElementById("tc-range-prev");
   if (tcRangePrev) tcRangePrev.addEventListener("click", () => {
