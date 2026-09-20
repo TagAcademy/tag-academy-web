@@ -3487,6 +3487,26 @@ function timeClockEntriesFor(staffId) {
 function fmtClockTime(ms) {
   return new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
+// Guards against exactly the mistake behind a double-counted Time Clock entry: the same staff
+// member ending up with two worked (non-day-off) sessions whose clock-in/out ranges overlap --
+// most often from adding a manual correction that duplicates a session that's already there, or
+// editing one so it now overlaps a different one. An entry still clocked in (no clockOutAt yet)
+// is treated as open-ended for this check, since the person can't simultaneously be on a second
+// clock. The overlap test is strict (start < otherEnd && otherStart < end) so back-to-back
+// sessions -- one ending exactly when the next begins, an ordinary shift change -- don't count.
+function timeClockEntryEnd(e) { return e.clockOutAt != null ? e.clockOutAt : Infinity; }
+function findOverlappingTimeClockEntry(entries, staffId, startMs, endMs, excludeId) {
+  const effectiveEnd = endMs != null ? endMs : Infinity;
+  return (entries || []).find((e) =>
+    e.id !== excludeId && e.staffId === staffId && !e.dayOff &&
+    startMs < timeClockEntryEnd(e) && e.clockInAt < effectiveEnd
+  );
+}
+function timeClockOverlapMessage(existing, staffName) {
+  return (staffName ? staffName + " already has" : "There's already") + " an overlapping entry: " +
+    fmtClockTime(existing.clockInAt) + " – " + (existing.clockOutAt != null ? fmtClockTime(existing.clockOutAt) : "still clocked in") +
+    ". Edit or delete that one first, or adjust this time so they don't overlap.";
+}
 function fmtDurationMs(ms) {
   if (ms == null || ms < 0) return "—";
   const mins = Math.round(ms / 60000);
@@ -7342,6 +7362,10 @@ function renderAdminTimeClock(root, session) {
       const outMs = outVal ? localInputValueToMs(outVal) : null;
       if (outMs != null && outMs < inMs) { toast("Clock-out can't be before clock-in.", "warn"); return; }
       if (!category) { toast("Choose what this time is for.", "warn"); return; }
+      // Catch exactly the mistake behind a double-counted entry -- adding a session that's
+      // already there, or that overlaps one that is -- before it ever gets saved.
+      const overlap = findOverlappingTimeClockEntry(state.timeClock, staffId, inMs, outMs, null);
+      if (overlap) { const s = staffById(staffId); toast(timeClockOverlapMessage(overlap, s && s.name), "warn"); return; }
       applyAdd = (base) => {
         const ns = JSON.parse(JSON.stringify(base));
         ns.timeClock = ns.timeClock || [];
@@ -7397,6 +7421,10 @@ function renderAdminTimeClock(root, session) {
     if (inMs == null) { toast("Enter a valid clock-in time.", "warn"); return; }
     const outMs = outVal ? localInputValueToMs(outVal) : null;
     if (outMs != null && outMs < inMs) { toast("Clock-out can't be before clock-in.", "warn"); return; }
+    // Catch an edit that would create/leave an overlap with a different entry for the same
+    // staff member -- exclude this entry's own id so it doesn't flag itself.
+    const overlap = findOverlappingTimeClockEntry(state.timeClock, original.staffId, inMs, outMs, id);
+    if (overlap) { const s = staffById(original.staffId); toast(timeClockOverlapMessage(overlap, s && s.name), "warn"); return; }
     const applyEdit = (base) => {
       const ns = JSON.parse(JSON.stringify(base));
       const rec = (ns.timeClock || []).find((x) => x.id === id);
