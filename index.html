@@ -2165,23 +2165,34 @@ function staffById(id) { return state.staff.find((s) => s.id === id); }
 // under the same host -- see participationRows). `familyCounts` is the one extra number field per
 // event that only ever applies to Head Staff rows (R. Aizik/Levi/Zalmy today): how many of their
 // family are participating, kept separate from the ordinary cell so it doesn't get confused with
-// their own checkbox/extra mark.
-function newParticipationState() { return { events: [], cells: {}, guests: [], familyCounts: {} }; }
+// their own checkbox/extra mark. `hiddenIds` lets Head Staff remove a real staff member or
+// student from the Lists tab specifically -- e.g. someone who doesn't belong on these headcounts
+// for whatever reason -- without touching their record anywhere else in the app (Today, Reports,
+// Leaderboard, etc. all keep showing them normally; see participationRows/renderParticipation's
+// "Removed from Lists" section, which is the only way back in).
+function newParticipationState() { return { events: [], cells: {}, guests: [], familyCounts: {}, hiddenIds: [] }; }
 function participationState() { return state.participation || newParticipationState(); }
-// The left column, top to bottom: every staff member, then every active student (alphabetically
-// within each group, matching the sort every other roster/staff list in the app already uses),
-// with any guests inserted directly under whichever person they were added under -- in the order
-// they were added, so a second guest under the same person lands right after the first rather
-// than at the very bottom of the whole list.
-function participationRows() {
-  const p = participationState();
+// Every staff member + every active student, before hiddenIds is applied -- this is the full
+// candidate list participationRows filters down, and also what backs the "Removed from Lists"
+// section's names (a hidden person still needs their name looked up to show "Add Antonio back").
+function participationCandidates() {
   const staffRows = state.staff.slice().sort((a, b) => a.name.localeCompare(b.name))
     .map((s) => ({ id: s.id, name: s.name, isStaff: true, isHeadStaff: isHeadStaffRecord(s) }));
   const studentRows = activeRoster().map((s) => ({ id: s.id, name: s.first + " " + s.last, isStaff: false, isHeadStaff: false }));
+  return staffRows.concat(studentRows);
+}
+// The left column, top to bottom: every staff member, then every active student (alphabetically
+// within each group, matching the sort every other roster/staff list in the app already uses),
+// minus anyone removed via hiddenIds, with any guests inserted directly under whichever person
+// they were added under -- in the order they were added, so a second guest under the same person
+// lands right after the first rather than at the very bottom of the whole list.
+function participationRows() {
+  const p = participationState();
+  const hidden = new Set(p.hiddenIds || []);
   const guestsByHost = {};
   (p.guests || []).forEach((g) => { (guestsByHost[g.afterId] = guestsByHost[g.afterId] || []).push(g); });
   const rows = [];
-  staffRows.concat(studentRows).forEach((row) => {
+  participationCandidates().filter((row) => !hidden.has(row.id)).forEach((row) => {
     rows.push(row);
     (guestsByHost[row.id] || []).forEach((g) => rows.push({ id: g.id, name: g.name, isStaff: false, isHeadStaff: false, isGuest: true, hostId: row.id }));
   });
@@ -8590,48 +8601,63 @@ function renderParticipation(root, session) {
     '<div class="field" style="flex:1;"><label for="pt-add-event-name">New list name</label><input type="text" id="pt-add-event-name" placeholder="e.g. Chanukah Trip"></div>' +
     '<div class="field" style="flex-shrink:0;"><button class="btn btn-ghost btn-sm" id="pt-add-event-btn" type="button">Add list</button></div></div></div>';
 
-  if (!events.length) {
-    html += '<div class="card card-pad" style="margin-top:14px;"><p class="help-text">No lists yet — add one above to start tracking who\'s participating.</p></div>';
-  } else {
-    const totals = {};
-    events.forEach((ev) => { totals[ev.id] = participationEventTotal(ev.id, rows); });
-    html += '<div class="card card-pad" style="margin-top:14px;"><p class="help-text">Check a box, or type text or a number in the small box next to it — a plain number there counts toward the total at the top of that list, same as a family-count number. Everyone with a Time Clock icon also gets a family-count field of their own per list.</p>';
-    html += '<div class="table-wrap"><table><thead><tr><th class="sticky-col-l" style="min-width:170px;">Name</th>' +
-      events.map((ev) =>
-        '<th style="min-width:150px;">' +
-        '<input type="text" class="pt-event-name-input" data-event-id="' + ev.id + '" data-original="' + escapeHtml(ev.name) + '" value="' + escapeHtml(ev.name) + '" style="width:100%;font-weight:700;">' +
-        '<div class="help-text" style="margin:4px 0 2px;font-weight:700;">Total: ' + num2(totals[ev.id]) + "</div>" +
-        '<button class="btn btn-ghost btn-sm" data-remove-event="' + ev.id + '" type="button" style="margin-top:2px;">Remove</button>' +
-        "</th>"
-      ).join("") +
-      "<th></th></tr></thead><tbody>";
-    rows.forEach((row) => {
-      html += '<tr><td class="sticky-col-l">';
-      if (row.isGuest) {
-        html += '<input type="text" class="pt-guest-name-input" data-guest-id="' + row.id + '" value="' + escapeHtml(row.name) + '" style="width:100%;" placeholder="Guest name">';
-      } else {
-        html += escapeHtml(row.name) + (row.isStaff ? ' <span class="pill pill-muted" style="font-size:0.62rem;font-weight:700;vertical-align:middle;">Staff</span>' : "") +
-          (row.isHeadStaff ? ' <span class="pill pill-good" style="font-size:0.62rem;font-weight:700;vertical-align:middle;">Head Staff</span>' : "");
+  const totals = {};
+  events.forEach((ev) => { totals[ev.id] = participationEventTotal(ev.id, rows); });
+  html += '<div class="card card-pad" style="margin-top:14px;">';
+  html += events.length
+    ? '<p class="help-text">Check a box, or type text or a number in the small box next to it — a plain number there counts toward the total at the top of that list, same as a family-count number. Everyone with a Time Clock icon also gets a family-count field of their own per list. Use "Remove" on anyone who shouldn\'t appear on these lists at all — it only hides them here, not anywhere else in the app.</p>'
+    : '<p class="help-text">No lists yet — add one above to start tracking who\'s participating. You can still remove someone from the Lists tab below.</p>';
+  html += '<div class="table-wrap"><table><thead><tr><th class="sticky-col-l" style="min-width:170px;">Name</th>' +
+    events.map((ev) =>
+      '<th style="min-width:150px;">' +
+      '<input type="text" class="pt-event-name-input" data-event-id="' + ev.id + '" data-original="' + escapeHtml(ev.name) + '" value="' + escapeHtml(ev.name) + '" style="width:100%;font-weight:700;">' +
+      '<div class="help-text" style="margin:4px 0 2px;font-weight:700;">Total: ' + num2(totals[ev.id]) + "</div>" +
+      '<button class="btn btn-ghost btn-sm" data-remove-event="' + ev.id + '" type="button" style="margin-top:2px;">Remove</button>' +
+      "</th>"
+    ).join("") +
+    "<th></th></tr></thead><tbody>";
+  rows.forEach((row) => {
+    html += '<tr><td class="sticky-col-l">';
+    if (row.isGuest) {
+      html += '<input type="text" class="pt-guest-name-input" data-guest-id="' + row.id + '" value="' + escapeHtml(row.name) + '" style="width:100%;" placeholder="Guest name">';
+    } else {
+      html += escapeHtml(row.name) + (row.isStaff ? ' <span class="pill pill-muted" style="font-size:0.62rem;font-weight:700;vertical-align:middle;">Staff</span>' : "") +
+        (row.isHeadStaff ? ' <span class="pill pill-good" style="font-size:0.62rem;font-weight:700;vertical-align:middle;">Head Staff</span>' : "");
+    }
+    html += "</td>";
+    events.forEach((ev) => {
+      const cell = participationCell(row.id, ev.id);
+      html += '<td><div style="display:flex;align-items:center;gap:6px;">' +
+        '<input type="checkbox" class="pt-cell-check" data-row-id="' + row.id + '" data-event-id="' + ev.id + '"' + (cell.checked ? " checked" : "") + '>' +
+        '<input type="text" class="pt-cell-extra" data-row-id="' + row.id + '" data-event-id="' + ev.id + '" value="' + escapeHtml(cell.extra || "") + '" placeholder="note or #" style="width:80px;">' +
+        "</div>";
+      if (row.isHeadStaff) {
+        const fc = (p.familyCounts[row.id] || {})[ev.id];
+        html += '<div style="margin-top:4px;"><label class="help-text" style="font-size:0.68rem;">Family: <input type="number" class="pt-family-input" data-row-id="' + row.id + '" data-event-id="' + ev.id + '" value="' + (fc === undefined || fc === null ? "" : escapeHtml(fc)) + '" min="0" step="1" style="width:52px;"></label></div>';
       }
       html += "</td>";
-      events.forEach((ev) => {
-        const cell = participationCell(row.id, ev.id);
-        html += '<td><div style="display:flex;align-items:center;gap:6px;">' +
-          '<input type="checkbox" class="pt-cell-check" data-row-id="' + row.id + '" data-event-id="' + ev.id + '"' + (cell.checked ? " checked" : "") + '>' +
-          '<input type="text" class="pt-cell-extra" data-row-id="' + row.id + '" data-event-id="' + ev.id + '" value="' + escapeHtml(cell.extra || "") + '" placeholder="note or #" style="width:80px;">' +
-          "</div>";
-        if (row.isHeadStaff) {
-          const fc = (p.familyCounts[row.id] || {})[ev.id];
-          html += '<div style="margin-top:4px;"><label class="help-text" style="font-size:0.68rem;">Family: <input type="number" class="pt-family-input" data-row-id="' + row.id + '" data-event-id="' + ev.id + '" value="' + (fc === undefined || fc === null ? "" : escapeHtml(fc)) + '" min="0" step="1" style="width:52px;"></label></div>';
-        }
-        html += "</td>";
-      });
-      html += '<td style="white-space:nowrap;">' + (row.isGuest
-        ? '<button class="btn btn-ghost btn-sm" data-remove-guest="' + row.id + '" type="button">Remove</button>'
-        : '<button class="btn btn-ghost btn-sm" data-add-guest="' + row.id + '" type="button">+ Guest</button>') + "</td></tr>";
     });
-    html += "</tbody></table></div>" +
-      '<button class="btn btn-primary btn-sm" id="pt-save-btn" style="margin-top:12px;">Save</button></div>';
+    html += '<td style="white-space:nowrap;">' + (row.isGuest
+      ? '<button class="btn btn-ghost btn-sm" data-remove-guest="' + row.id + '" type="button">Remove</button>'
+      : '<button class="btn btn-ghost btn-sm" data-add-guest="' + row.id + '" type="button">+ Guest</button> <button class="btn btn-ghost btn-sm" data-hide-person="' + row.id + '" type="button" title="Hide from the Lists tab only">Remove</button>') + "</td></tr>";
+  });
+  html += "</tbody></table></div>" +
+    '<button class="btn btn-primary btn-sm" id="pt-save-btn" style="margin-top:12px;">Save</button></div>';
+
+  const hiddenIds = p.hiddenIds || [];
+  if (hiddenIds.length) {
+    const candidatesById = {};
+    participationCandidates().forEach((c) => { candidatesById[c.id] = c; });
+    html += '<div class="card card-pad" style="margin-top:14px;"><div class="section-title">Removed from Lists</div>' +
+      '<p class="help-text">Hidden from every list above, but unaffected everywhere else in the app.</p>' +
+      hiddenIds.map((id) => {
+        const c = candidatesById[id];
+        const name = c ? c.name : "(no longer on the roster)";
+        return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);">' +
+          "<span>" + escapeHtml(name) + "</span>" +
+          '<button class="btn btn-ghost btn-sm" data-unhide-person="' + id + '" type="button">Add back</button></div>';
+      }).join("") +
+      "</div>";
   }
 
   root.innerHTML = html;
@@ -8691,6 +8717,32 @@ function renderParticipation(root, session) {
     }
     const res = await saveState(applyRemove(state), { retry: applyRemove });
     if (res.ok || res.local) { toast("Guest removed.", "good"); renderAll(); }
+  }));
+
+  root.querySelectorAll("[data-hide-person]").forEach((btn) => btn.addEventListener("click", async () => {
+    const personId = btn.getAttribute("data-hide-person");
+    const person = participationCandidates().find((c) => c.id === personId);
+    function applyHide(base) {
+      const ns = JSON.parse(JSON.stringify(base));
+      ns.participation = ns.participation || newParticipationState();
+      ns.participation.hiddenIds = ns.participation.hiddenIds || [];
+      if (!ns.participation.hiddenIds.includes(personId)) ns.participation.hiddenIds.push(personId);
+      return ns;
+    }
+    const res = await saveState(applyHide(state), { retry: applyHide });
+    if (res.ok || res.local) { toast((person ? person.name : "That person") + " removed from Lists — “Removed from Lists” below can bring them back.", "good"); renderAll(); }
+  }));
+
+  root.querySelectorAll("[data-unhide-person]").forEach((btn) => btn.addEventListener("click", async () => {
+    const personId = btn.getAttribute("data-unhide-person");
+    function applyUnhide(base) {
+      const ns = JSON.parse(JSON.stringify(base));
+      ns.participation = ns.participation || newParticipationState();
+      ns.participation.hiddenIds = (ns.participation.hiddenIds || []).filter((id) => id !== personId);
+      return ns;
+    }
+    const res = await saveState(applyUnhide(state), { retry: applyUnhide });
+    if (res.ok || res.local) { toast("Added back to Lists.", "good"); renderAll(); }
   }));
 
   const saveBtn = document.getElementById("pt-save-btn");
