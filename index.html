@@ -8589,6 +8589,12 @@ function renderStudentDetail(root, student, opts) {
    above for the data model. Only ever reached by Head Staff (isHeadStaff),
    the same three people canClockInOut already covers for Time Clock.
    ================================================================ */
+// The table's zoom level (see the pt-zoom-* controls and pinch handling in renderParticipation)
+// is a plain view preference, not app data -- it's never saved to Firestore, so it resets on a
+// fresh page load but survives every autosave-triggered re-render within a session, the same way
+// e.g. adminTab or todayView already do for other tabs.
+let ptZoom = 1;
+const PT_ZOOM_MIN = 0.3, PT_ZOOM_MAX = 1.3;
 function renderParticipation(root, session) {
   const p = participationState();
   const rows = participationRows();
@@ -8604,10 +8610,32 @@ function renderParticipation(root, session) {
   const totals = {};
   events.forEach((ev) => { totals[ev.id] = participationEventTotal(ev.id, rows); });
   html += '<div class="card card-pad" style="margin-top:14px;">';
+  html += '<div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:10px;">';
   html += events.length
-    ? '<p class="help-text">Check a box, or type text or a number in the small box next to it — a plain number there counts toward the total at the top of that list, same as a family-count number. Everyone with a Time Clock icon also gets a family-count field of their own per list. Use "Remove" on anyone who shouldn\'t appear on these lists at all — it only hides them here, not anywhere else in the app.</p>'
-    : '<p class="help-text">No lists yet — add one above to start tracking who\'s participating. You can still remove someone from the Lists tab below.</p>';
-  html += '<div class="table-wrap"><table><thead><tr><th class="sticky-col-l" style="min-width:170px;">Name</th>' +
+    ? '<p class="help-text" style="margin:0;max-width:640px;">Check a box, or type text or a number in the small box next to it — it saves the moment you check it or click away, no Save button needed. A plain number counts toward the total next to that list\'s name, same as a family-count number. Everyone with a Time Clock icon also gets a family-count field of their own per list. Use "Remove" on anyone who shouldn\'t appear on these lists at all — it only hides them here, not anywhere else in the app.</p>'
+    : '<p class="help-text" style="margin:0;max-width:640px;">No lists yet — add one above to start tracking who\'s participating. You can still remove someone from the Lists tab below.</p>';
+  // Pinch-to-zoom (wired below on #pt-table-wrap) covers touch devices; these buttons give
+  // mouse/keyboard users -- and anyone whose pinch gesture is being eaten by a home-screen/
+  // standalone install, where the OS chrome that normally handles pinch isn't there -- the same
+  // "see the whole list at once" escape hatch. "Fit to screen" measures the table's true width
+  // at 100% and picks the zoom that makes it fit the visible area in one shot.
+  html += '<div class="pt-zoom-controls" style="display:flex;align-items:center;gap:6px;flex-shrink:0;">' +
+    '<button class="btn btn-ghost btn-sm" id="pt-zoom-out" type="button" title="Zoom out">－</button>' +
+    '<span class="help-text" id="pt-zoom-level" style="min-width:38px;text-align:center;">' + Math.round(ptZoom * 100) + '%</span>' +
+    '<button class="btn btn-ghost btn-sm" id="pt-zoom-in" type="button" title="Zoom in">＋</button>' +
+    '<button class="btn btn-ghost btn-sm" id="pt-zoom-fit" type="button">Fit to screen</button>' +
+    "</div></div>";
+  // max-height (with the resulting overflow-y:auto) is what actually makes the frozen header
+  // and frozen Name column work: .table-wrap's own overflow-x:auto already forces overflow-y to
+  // compute as "auto" too (a CSS rule -- overflow-x/y can't independently mix visible with a
+  // non-visible value), which makes this div the scroll container `thead th`'s position:sticky
+  // sticks against. Without a bounded height there's nothing to actually scroll INSIDE this div
+  // -- every row shows here and the whole page scrolls instead -- so the sticky header/column
+  // never get a scroll to stick through and just scroll away with everything else. Bounding the
+  // height gives them a real internal scrollport to freeze against, Excel/Sheets-style, and
+  // pairs with zoom (below) to show more rows/columns in that same bounded view.
+  html += '<div class="table-wrap" id="pt-table-wrap" style="zoom:' + ptZoom + ';max-height:70vh;overflow-y:auto;"><table><thead><tr>' +
+    '<th class="sticky-col-l" style="min-width:170px;">Name <span class="pill pill-muted" style="font-size:0.62rem;font-weight:700;">' + rows.length + "</span></th>" +
     events.map((ev) =>
       '<th style="min-width:150px;">' +
       '<input type="text" class="pt-event-name-input" data-event-id="' + ev.id + '" data-original="' + escapeHtml(ev.name) + '" value="' + escapeHtml(ev.name) + '" style="width:100%;font-weight:700;">' +
@@ -8629,11 +8657,12 @@ function renderParticipation(root, session) {
       const cell = participationCell(row.id, ev.id);
       html += '<td><div style="display:flex;align-items:center;gap:6px;">' +
         '<input type="checkbox" class="pt-cell-check" data-row-id="' + row.id + '" data-event-id="' + ev.id + '"' + (cell.checked ? " checked" : "") + '>' +
-        '<input type="text" class="pt-cell-extra" data-row-id="' + row.id + '" data-event-id="' + ev.id + '" value="' + escapeHtml(cell.extra || "") + '" placeholder="note or #" style="width:80px;">' +
+        '<input type="text" class="pt-cell-extra" data-row-id="' + row.id + '" data-event-id="' + ev.id + '" data-original="' + escapeHtml(cell.extra || "") + '" value="' + escapeHtml(cell.extra || "") + '" placeholder="note or #" style="width:80px;">' +
         "</div>";
       if (row.isHeadStaff) {
         const fc = (p.familyCounts[row.id] || {})[ev.id];
-        html += '<div style="margin-top:4px;"><label class="help-text" style="font-size:0.68rem;">Family: <input type="number" class="pt-family-input" data-row-id="' + row.id + '" data-event-id="' + ev.id + '" value="' + (fc === undefined || fc === null ? "" : escapeHtml(fc)) + '" min="0" step="1" style="width:52px;"></label></div>';
+        const fcVal = (fc === undefined || fc === null) ? "" : fc;
+        html += '<div style="margin-top:4px;"><label class="help-text" style="font-size:0.68rem;">Family: <input type="number" class="pt-family-input" data-row-id="' + row.id + '" data-event-id="' + ev.id + '" data-original="' + escapeHtml(fcVal) + '" value="' + escapeHtml(fcVal) + '" min="0" step="1" style="width:52px;"></label></div>';
       }
       html += "</td>";
     });
@@ -8641,8 +8670,7 @@ function renderParticipation(root, session) {
       ? '<button class="btn btn-ghost btn-sm" data-remove-guest="' + row.id + '" type="button">Remove</button>'
       : '<button class="btn btn-ghost btn-sm" data-add-guest="' + row.id + '" type="button">+ Guest</button> <button class="btn btn-ghost btn-sm" data-hide-person="' + row.id + '" type="button" title="Hide from the Lists tab only">Remove</button>') + "</td></tr>";
   });
-  html += "</tbody></table></div>" +
-    '<button class="btn btn-primary btn-sm" id="pt-save-btn" style="margin-top:12px;">Save</button></div>';
+  html += "</tbody></table></div></div>";
 
   const hiddenIds = p.hiddenIds || [];
   if (hiddenIds.length) {
@@ -8703,7 +8731,7 @@ function renderParticipation(root, session) {
       return ns;
     }
     const res = await saveState(applyAdd(state), { retry: applyAdd });
-    if (res.ok || res.local) { toast("Guest added — rename them below and Save.", "good"); renderAll(); }
+    if (res.ok || res.local) { toast("Guest added — rename them below.", "good"); renderAll(); }
   }));
 
   root.querySelectorAll("[data-remove-guest]").forEach((btn) => btn.addEventListener("click", async () => {
@@ -8745,68 +8773,155 @@ function renderParticipation(root, session) {
     if (res.ok || res.local) { toast("Added back to Lists.", "good"); renderAll(); }
   }));
 
-  const saveBtn = document.getElementById("pt-save-btn");
-  if (saveBtn) saveBtn.addEventListener("click", async () => {
-    // Read every input on the page once, up front -- the same values get applied whether this
-    // is the first attempt or a retry rebuilding against a fresher copy of the data after a
-    // genuine save collision with another Head Staff member editing the same lists.
-    let renameError = "";
-    const eventRenames = {};
-    root.querySelectorAll(".pt-event-name-input").forEach((inp) => {
+  // No more Save button -- every field below commits the moment it changes, the same
+  // read-current-DOM-value/build-a-retry-safe-patch/saveState pattern used throughout this file,
+  // just fired per field instead of once for the whole grid. Checkboxes commit on "change"
+  // (there's nothing to type, so there's nothing to wait for); text/number fields commit on
+  // blur (Enter blurs early) so a save doesn't fire on every keystroke -- each skips the write
+  // entirely when the value didn't actually change (data-original), so tabbing through cells
+  // without editing them causes no writes and no re-renders.
+  root.querySelectorAll(".pt-event-name-input").forEach((inp) => {
+    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") inp.blur(); });
+    inp.addEventListener("blur", async () => {
+      const eventId = inp.getAttribute("data-event-id");
+      const original = inp.getAttribute("data-original");
       const next = inp.value.trim();
-      if (!next) renameError = "A list name can't be blank.";
-      eventRenames[inp.getAttribute("data-event-id")] = next;
+      if (next === original) return;
+      if (!next) { toast("A list name can't be blank.", "warn"); inp.value = original; return; }
+      if (p.events.some((ev) => ev.id !== eventId && ev.name === next)) { toast("There's already a list called “" + next + "”.", "warn"); inp.value = original; return; }
+      function applyRename(base) {
+        const ns = JSON.parse(JSON.stringify(base));
+        ns.participation = ns.participation || newParticipationState();
+        const ev = ns.participation.events.find((e) => e.id === eventId);
+        if (ev) ev.name = next;
+        return ns;
+      }
+      const res = await saveState(applyRename(state), { retry: applyRename });
+      if (res.ok || res.local) renderAll();
     });
-    if (!renameError) {
-      const finalNames = Object.values(eventRenames);
-      if (new Set(finalNames).size !== finalNames.length) renameError = "Two lists can't have the same name.";
-    }
-    if (renameError) { toast(renameError, "warn"); return; }
-    const guestRenames = {};
-    root.querySelectorAll(".pt-guest-name-input").forEach((inp) => { guestRenames[inp.getAttribute("data-guest-id")] = inp.value.trim() || "Guest"; });
-    const cellEdits = {};
-    root.querySelectorAll(".pt-cell-check").forEach((cb) => {
-      const rowId = cb.getAttribute("data-row-id"), eventId = cb.getAttribute("data-event-id");
-      cellEdits[rowId] = cellEdits[rowId] || {};
-      cellEdits[rowId][eventId] = cellEdits[rowId][eventId] || {};
-      cellEdits[rowId][eventId].checked = cb.checked;
-    });
-    root.querySelectorAll(".pt-cell-extra").forEach((inp) => {
-      const rowId = inp.getAttribute("data-row-id"), eventId = inp.getAttribute("data-event-id");
-      cellEdits[rowId] = cellEdits[rowId] || {};
-      cellEdits[rowId][eventId] = cellEdits[rowId][eventId] || {};
-      cellEdits[rowId][eventId].extra = inp.value;
-    });
-    const familyEdits = {};
-    root.querySelectorAll(".pt-family-input").forEach((inp) => {
-      const rowId = inp.getAttribute("data-row-id"), eventId = inp.getAttribute("data-event-id");
-      familyEdits[rowId] = familyEdits[rowId] || {};
-      familyEdits[rowId][eventId] = inp.value;
-    });
-    function applySave(base) {
-      const ns = JSON.parse(JSON.stringify(base));
-      ns.participation = ns.participation || newParticipationState();
-      ns.participation.events.forEach((ev) => { if (eventRenames[ev.id]) ev.name = eventRenames[ev.id]; });
-      ns.participation.guests.forEach((g) => { if (guestRenames[g.id]) g.name = guestRenames[g.id]; });
-      Object.keys(cellEdits).forEach((rowId) => {
-        ns.participation.cells[rowId] = ns.participation.cells[rowId] || {};
-        Object.keys(cellEdits[rowId]).forEach((eventId) => {
-          const existing = ns.participation.cells[rowId][eventId] || { checked: false, extra: "" };
-          ns.participation.cells[rowId][eventId] = {
-            checked: cellEdits[rowId][eventId].checked !== undefined ? cellEdits[rowId][eventId].checked : existing.checked,
-            extra: cellEdits[rowId][eventId].extra !== undefined ? cellEdits[rowId][eventId].extra : existing.extra,
-          };
-        });
-      });
-      Object.keys(familyEdits).forEach((rowId) => {
-        ns.participation.familyCounts[rowId] = ns.participation.familyCounts[rowId] || {};
-        Object.keys(familyEdits[rowId]).forEach((eventId) => { ns.participation.familyCounts[rowId][eventId] = familyEdits[rowId][eventId]; });
-      });
-      return ns;
-    }
-    const res = await saveState(applySave(state), { retry: applySave });
-    if (res.ok || res.local) { toast("Saved.", "good"); renderAll(); }
   });
+
+  root.querySelectorAll(".pt-guest-name-input").forEach((inp) => {
+    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") inp.blur(); });
+    inp.addEventListener("blur", async () => {
+      const guestId = inp.getAttribute("data-guest-id");
+      const next = inp.value.trim() || "Guest";
+      function applyRename(base) {
+        const ns = JSON.parse(JSON.stringify(base));
+        ns.participation = ns.participation || newParticipationState();
+        const g = ns.participation.guests.find((x) => x.id === guestId);
+        if (g) g.name = next;
+        return ns;
+      }
+      const res = await saveState(applyRename(state), { retry: applyRename });
+      if (res.ok || res.local) renderAll();
+    });
+  });
+
+  root.querySelectorAll(".pt-cell-check").forEach((cb) => {
+    cb.addEventListener("change", async () => {
+      const rowId = cb.getAttribute("data-row-id"), eventId = cb.getAttribute("data-event-id");
+      const checked = cb.checked;
+      function applyCheck(base) {
+        const ns = JSON.parse(JSON.stringify(base));
+        ns.participation = ns.participation || newParticipationState();
+        ns.participation.cells[rowId] = ns.participation.cells[rowId] || {};
+        const existing = ns.participation.cells[rowId][eventId] || { checked: false, extra: "" };
+        ns.participation.cells[rowId][eventId] = { checked, extra: existing.extra };
+        return ns;
+      }
+      const res = await saveState(applyCheck(state), { retry: applyCheck });
+      if (res.ok || res.local) renderAll();
+    });
+  });
+
+  root.querySelectorAll(".pt-cell-extra").forEach((inp) => {
+    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") inp.blur(); });
+    inp.addEventListener("blur", async () => {
+      const rowId = inp.getAttribute("data-row-id"), eventId = inp.getAttribute("data-event-id");
+      const next = inp.value;
+      if (next === inp.getAttribute("data-original")) return;
+      function applyExtra(base) {
+        const ns = JSON.parse(JSON.stringify(base));
+        ns.participation = ns.participation || newParticipationState();
+        ns.participation.cells[rowId] = ns.participation.cells[rowId] || {};
+        const existing = ns.participation.cells[rowId][eventId] || { checked: false, extra: "" };
+        ns.participation.cells[rowId][eventId] = { checked: existing.checked, extra: next };
+        return ns;
+      }
+      const res = await saveState(applyExtra(state), { retry: applyExtra });
+      if (res.ok || res.local) renderAll();
+    });
+  });
+
+  root.querySelectorAll(".pt-family-input").forEach((inp) => {
+    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") inp.blur(); });
+    inp.addEventListener("blur", async () => {
+      const rowId = inp.getAttribute("data-row-id"), eventId = inp.getAttribute("data-event-id");
+      const next = inp.value;
+      if (next === inp.getAttribute("data-original")) return;
+      function applyFamily(base) {
+        const ns = JSON.parse(JSON.stringify(base));
+        ns.participation = ns.participation || newParticipationState();
+        ns.participation.familyCounts[rowId] = ns.participation.familyCounts[rowId] || {};
+        ns.participation.familyCounts[rowId][eventId] = next;
+        return ns;
+      }
+      const res = await saveState(applyFamily(state), { retry: applyFamily });
+      if (res.ok || res.local) renderAll();
+    });
+  });
+
+  // ---- Zoom (see the ptZoom/PT_ZOOM_MIN/PT_ZOOM_MAX comment above) ----
+  const zoomWrap = document.getElementById("pt-table-wrap");
+  const zoomLevelEl = document.getElementById("pt-zoom-level");
+  function applyZoomToDom() {
+    if (zoomWrap) zoomWrap.style.zoom = ptZoom;
+    if (zoomLevelEl) zoomLevelEl.textContent = Math.round(ptZoom * 100) + "%";
+  }
+  function setZoom(z) {
+    if (isNaN(z) || !isFinite(z)) return;
+    ptZoom = Math.max(PT_ZOOM_MIN, Math.min(PT_ZOOM_MAX, z));
+    applyZoomToDom();
+  }
+  const zoomOutBtn = document.getElementById("pt-zoom-out");
+  if (zoomOutBtn) zoomOutBtn.addEventListener("click", () => setZoom(ptZoom - 0.1));
+  const zoomInBtn = document.getElementById("pt-zoom-in");
+  if (zoomInBtn) zoomInBtn.addEventListener("click", () => setZoom(ptZoom + 0.1));
+  const zoomFitBtn = document.getElementById("pt-zoom-fit");
+  if (zoomFitBtn) zoomFitBtn.addEventListener("click", () => {
+    if (!zoomWrap) return;
+    const table = zoomWrap.querySelector("table");
+    if (!table) return;
+    const prevZoom = zoomWrap.style.zoom;
+    zoomWrap.style.zoom = 1;
+    const naturalWidth = table.scrollWidth;
+    const available = zoomWrap.clientWidth;
+    zoomWrap.style.zoom = prevZoom || 1;
+    if (naturalWidth > 0 && available > 0) setZoom(available / naturalWidth);
+  });
+  // Two-finger pinch directly on the table -- covers touch devices whose native browser
+  // pinch-zoom doesn't reach here (most notably a home-screen/standalone install, which drops
+  // the OS-level pinch gesture entirely) as well as ordinary mobile Safari/Chrome.
+  if (zoomWrap) {
+    let pinchStartDist = null, pinchStartZoom = 1;
+    function touchDist(touches) {
+      const dx = touches[0].clientX - touches[1].clientX;
+      const dy = touches[0].clientY - touches[1].clientY;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+    zoomWrap.addEventListener("touchstart", (e) => {
+      if (e.touches.length === 2) { pinchStartDist = touchDist(e.touches); pinchStartZoom = ptZoom; }
+    }, { passive: true });
+    zoomWrap.addEventListener("touchmove", (e) => {
+      if (e.touches.length === 2 && pinchStartDist) {
+        e.preventDefault();
+        setZoom(pinchStartZoom * (touchDist(e.touches) / pinchStartDist));
+      }
+    }, { passive: false });
+    zoomWrap.addEventListener("touchend", () => { pinchStartDist = null; });
+    zoomWrap.addEventListener("touchcancel", () => { pinchStartDist = null; });
+  }
 }
 
 /* ================================================================
