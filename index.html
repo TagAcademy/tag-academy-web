@@ -3553,39 +3553,52 @@ function closeTimeClock(session) {
   renderTimeClockModal(session);
 }
 async function toggleTimeClock(session, extra) {
-  const newState = JSON.parse(JSON.stringify(state));
-  newState.timeClock = newState.timeClock || [];
   const staffId = session.record.id;
+  const now = appNow();
+  // A fixed id, generated once up front, for the entry this toggle might create -- so if this
+  // has to recompute against fresher data (see opts.retry below, and saveState's own comment on
+  // why: the whole app, attendance included, shares this one document, so a genuine collision
+  // with someone else's save elsewhere isn't rare), it creates/touches that SAME entry rather
+  // than a duplicate every time the recompute runs.
+  const newEntryId = uid("tc");
+  const wasOpenNow = (state.timeClock || []).some((e) => e.staffId === staffId && !e.dayOff && !e.clockOutAt);
   // Find the actual open entry (no clockOutAt, and not a day-off record) directly, rather than
   // assuming the entry with the latest clockInAt is "the open one" -- two entries can
   // legitimately share the same clockInAt millisecond (e.g. a manual backfill, or a test pinning
   // the clock), and a plain sort-then-take-newest would then grab whichever one happens to land
   // first instead of the one that's actually still open.
-  const open = newState.timeClock.find((e) => e.staffId === staffId && !e.dayOff && !e.clockOutAt);
-  const now = appNow();
-  const wasOpen = !!open;
-  if (wasOpen) {
-    open.clockOutAt = now;
-  } else {
-    const entry = { id: uid("tc"), staffId, clockInAt: now, clockOutAt: null };
-    if (extra && extra.category) entry.category = extra.category;
-    if (extra && extra.note) entry.note = extra.note;
-    newState.timeClock.push(entry);
+  function applyToggle(base) {
+    const ns = JSON.parse(JSON.stringify(base));
+    ns.timeClock = ns.timeClock || [];
+    const open = ns.timeClock.find((e) => e.staffId === staffId && !e.dayOff && !e.clockOutAt);
+    if (open) {
+      open.clockOutAt = now;
+    } else {
+      const entry = { id: newEntryId, staffId, clockInAt: now, clockOutAt: null };
+      if (extra && extra.category) entry.category = extra.category;
+      if (extra && extra.note) entry.note = extra.note;
+      ns.timeClock.push(entry);
+    }
+    return ns;
   }
-  const res = await saveState(newState);
+  const res = await saveState(applyToggle(state), { retry: applyToggle });
   if (res.ok || res.local) {
-    toast(wasOpen ? "Clocked out." : "Clocked in.", "good");
+    toast(wasOpenNow ? "Clocked out." : "Clocked in.", "good");
     renderAll();
   }
 }
 async function logTimeClockDayOff(session, { type, date, note }) {
-  const newState = JSON.parse(JSON.stringify(state));
-  newState.timeClock = newState.timeClock || [];
-  const entry = { id: uid("tc"), staffId: session.record.id, dayOff: type, date };
-  if (note) entry.note = note;
-  newState.timeClock.push(entry);
+  const entryId = uid("tc"); // fixed up front -- see toggleTimeClock's comment on why
+  function applyDayOff(base) {
+    const ns = JSON.parse(JSON.stringify(base));
+    ns.timeClock = ns.timeClock || [];
+    const entry = { id: entryId, staffId: session.record.id, dayOff: type, date };
+    if (note) entry.note = note;
+    ns.timeClock.push(entry);
+    return ns;
+  }
   timeClockShowDayOffForm = false;
-  const res = await saveState(newState);
+  const res = await saveState(applyDayOff(state), { retry: applyDayOff });
   if (res.ok || res.local) {
     toast((type === "Sick" ? "Sick" : "Personal") + " day logged for " + fmtDateShort(date) + ".", "good");
     renderAll();
@@ -7220,15 +7233,24 @@ function renderAdminTimeClock(root, session) {
     const staffId = document.getElementById("tc-add-staff").value;
     if (!staffId) { toast("Choose a staff member.", "warn"); return; }
     const note = document.getElementById("tc-add-note").value.trim();
-    const newState = JSON.parse(JSON.stringify(state));
-    newState.timeClock = newState.timeClock || [];
+    // A fixed id, generated once up front, plus every other field read from the form ONCE here
+    // -- applyAdd below is then just "push this exact entry," safe to recompute against fresher
+    // server data (see opts.retry / saveState's comment) without creating a duplicate or losing
+    // what was typed to a conflict that would otherwise require re-filling the whole form.
+    const entryId = uid("tc");
+    let applyAdd;
     if (addKindSelect.value === "dayoff") {
       const type = document.getElementById("tc-add-dayoff-type").value;
       const date = document.getElementById("tc-add-dayoff-date").value;
       if (!date) { toast("Choose a date.", "warn"); return; }
-      const entry = { id: uid("tc"), staffId, dayOff: type, date };
-      if (note) entry.note = note;
-      newState.timeClock.push(entry);
+      applyAdd = (base) => {
+        const ns = JSON.parse(JSON.stringify(base));
+        ns.timeClock = ns.timeClock || [];
+        const entry = { id: entryId, staffId, dayOff: type, date };
+        if (note) entry.note = note;
+        ns.timeClock.push(entry);
+        return ns;
+      };
     } else {
       const inVal = document.getElementById("tc-add-in").value;
       const outVal = document.getElementById("tc-add-out").value;
@@ -7238,11 +7260,16 @@ function renderAdminTimeClock(root, session) {
       const outMs = outVal ? localInputValueToMs(outVal) : null;
       if (outMs != null && outMs < inMs) { toast("Clock-out can't be before clock-in.", "warn"); return; }
       if (!category) { toast("Choose what this time is for.", "warn"); return; }
-      const entry = { id: uid("tc"), staffId, clockInAt: inMs, clockOutAt: outMs, category };
-      if (note) entry.note = note;
-      newState.timeClock.push(entry);
+      applyAdd = (base) => {
+        const ns = JSON.parse(JSON.stringify(base));
+        ns.timeClock = ns.timeClock || [];
+        const entry = { id: entryId, staffId, clockInAt: inMs, clockOutAt: outMs, category };
+        if (note) entry.note = note;
+        ns.timeClock.push(entry);
+        return ns;
+      };
     }
-    const res = await saveState(newState);
+    const res = await saveState(applyAdd(state), { retry: applyAdd });
     if (res.ok || res.local) { toast("Entry added.", "good"); renderAll(); } else { renderAdminTimeClock(root, session); }
   });
   root.querySelectorAll("[data-edit-tc]").forEach((btn) => btn.addEventListener("click", () => {
@@ -7263,13 +7290,20 @@ function renderAdminTimeClock(root, session) {
       const date = document.getElementById("tc-edit-dayoff-date-" + id).value;
       const note = document.getElementById("tc-edit-dayoff-note-" + id).value.trim();
       if (!date) { toast("Choose a date.", "warn"); return; }
-      const newState = JSON.parse(JSON.stringify(state));
-      const rec = (newState.timeClock || []).find((x) => x.id === id);
-      rec.dayOff = type;
-      rec.date = date;
-      if (note) rec.note = note; else delete rec.note;
+      // Find-by-id-and-set is naturally safe to recompute against fresher server data (see
+      // opts.retry / saveState's comment) -- if the entry is gone by the time this actually
+      // commits (someone else deleted it in between), there's simply nothing left to update.
+      const applyEdit = (base) => {
+        const ns = JSON.parse(JSON.stringify(base));
+        const rec = (ns.timeClock || []).find((x) => x.id === id);
+        if (!rec) return ns;
+        rec.dayOff = type;
+        rec.date = date;
+        if (note) rec.note = note; else delete rec.note;
+        return ns;
+      };
       editingTimeClockId = null;
-      const res = await saveState(newState);
+      const res = await saveState(applyEdit(state), { retry: applyEdit });
       if (res.ok || res.local) { toast("Time clock entry updated.", "good"); renderAll(); } else { renderAdminTimeClock(root, session); }
       return;
     }
@@ -7281,15 +7315,18 @@ function renderAdminTimeClock(root, session) {
     if (inMs == null) { toast("Enter a valid clock-in time.", "warn"); return; }
     const outMs = outVal ? localInputValueToMs(outVal) : null;
     if (outMs != null && outMs < inMs) { toast("Clock-out can't be before clock-in.", "warn"); return; }
-    const newState = JSON.parse(JSON.stringify(state));
-    const rec = (newState.timeClock || []).find((x) => x.id === id);
-    if (!rec) { editingTimeClockId = null; renderAdminTimeClock(root, session); return; }
-    rec.clockInAt = inMs;
-    rec.clockOutAt = outMs;
-    if (category) rec.category = category; else delete rec.category;
-    if (note) rec.note = note; else delete rec.note;
+    const applyEdit = (base) => {
+      const ns = JSON.parse(JSON.stringify(base));
+      const rec = (ns.timeClock || []).find((x) => x.id === id);
+      if (!rec) return ns;
+      rec.clockInAt = inMs;
+      rec.clockOutAt = outMs;
+      if (category) rec.category = category; else delete rec.category;
+      if (note) rec.note = note; else delete rec.note;
+      return ns;
+    };
     editingTimeClockId = null;
-    const res = await saveState(newState);
+    const res = await saveState(applyEdit(state), { retry: applyEdit });
     if (res.ok || res.local) { toast("Time clock entry updated.", "good"); renderAll(); } else { renderAdminTimeClock(root, session); }
   }));
   root.querySelectorAll("[data-delete-tc]").forEach((btn) => btn.addEventListener("click", () => {
@@ -7303,10 +7340,15 @@ function renderAdminTimeClock(root, session) {
   }));
   root.querySelectorAll("[data-confirm-delete-tc]").forEach((btn) => btn.addEventListener("click", async () => {
     const id = btn.getAttribute("data-confirm-delete-tc");
-    const newState = JSON.parse(JSON.stringify(state));
-    newState.timeClock = (newState.timeClock || []).filter((x) => x.id !== id);
+    // Filter-by-id is naturally safe to recompute against fresher server data too (see
+    // opts.retry / saveState's comment) -- deleting the same id from whatever is currently there.
+    const applyDelete = (base) => {
+      const ns = JSON.parse(JSON.stringify(base));
+      ns.timeClock = (ns.timeClock || []).filter((x) => x.id !== id);
+      return ns;
+    };
     confirmDeleteTimeClockId = null;
-    const res = await saveState(newState);
+    const res = await saveState(applyDelete(state), { retry: applyDelete });
     if (res.ok || res.local) { toast("Time clock entry deleted.", "good"); renderAll(); } else { renderAdminTimeClock(root, session); }
   }));
 }
