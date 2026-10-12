@@ -879,7 +879,32 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
 .modal {
   background: var(--surface); border-radius: 14px; width: 100%; max-width: 380px;
   padding: 26px 24px; box-shadow: 0 20px 60px rgba(0,0,0,0.25); border: 1px solid var(--line);
+  /* A modal taller than the screen (e.g. the Time Clock's history on a phone) used to just run off
+     the top and bottom of the fixed backdrop with no way to scroll -- cap it to the viewport and
+     let its own contents scroll instead. */
+  max-height: calc(100vh - 40px); max-height: calc(100dvh - 40px); overflow-y: auto; -webkit-overflow-scrolling: touch;
 }
+/* Time Clock calendar (see renderTimeClockModal): a month grid with one small dot per staff member
+   who clocked in that day, each person in their own color. */
+.tc-cal-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 8px; }
+.tc-cal-title { font-weight: 800; font-size: 1rem; }
+.tc-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.tc-cal-dow { text-align: center; font-size: 0.68rem; font-weight: 700; color: var(--muted); padding: 2px 0; }
+.tc-cal-day {
+  position: relative; aspect-ratio: 1; min-height: 40px; padding: 3px 2px 2px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface); color: inherit; font: inherit; font-size: 0.8rem; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+}
+.tc-cal-day.is-blank { border-color: transparent; background: none; cursor: default; }
+.tc-cal-day.is-today { border-color: var(--brand); font-weight: 800; }
+.tc-cal-day.is-selected { background: var(--surface-2); border-color: var(--brand); box-shadow: inset 0 0 0 1px var(--brand); }
+.tc-cal-dots { display: flex; flex-wrap: wrap; gap: 2px; justify-content: center; min-height: 8px; }
+.tc-cal-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.tc-cal-dot.is-dayoff { background: transparent !important; border: 2px solid currentColor; box-sizing: border-box; }
+.tc-cal-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 10px 0 4px; font-size: 0.78rem; }
+.tc-cal-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.tc-cal-detail { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); font-size: 0.85rem; }
+.tc-cal-detail-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
 .modal h2 { margin-bottom: 4px; }
 .modal .sub { font-size: 0.83rem; color: var(--muted); margin-bottom: 18px; }
 .pin-dots { display: flex; gap: 8px; justify-content: center; margin: 14px 0; }
@@ -3570,6 +3595,104 @@ function localInputValueToMs(v) {
   return isNaN(t) ? null : t;
 }
 let timeClockShowDayOffForm = false;
+// Time Clock calendar (the modal's history view): one small dot per staff member who clocked in
+// (solid) or took a personal/sick day (hollow ring) on a given day, each person in their own color,
+// instead of the long scrolling list this modal used to show -- see renderTimeClockModal.
+const TIME_CLOCK_DOT_COLORS = ["#2f7fe0", "#e0562f", "#2fa86b", "#9b51e0", "#e0a82f", "#d6368f", "#17a2b8", "#7a8a99"];
+let timeClockCalMonth = null;    // "YYYY-MM" of the month being shown (null = the current month)
+let timeClockCalSelected = null; // "YYYY-MM-DD" of the tapped day, whose entries show underneath
+// A stable color per staff member: their position in the staff list (not alphabetical, so adding
+// someone new never reshuffles everybody else's color), limited to people who use the Time Clock or
+// who already have entries in it.
+function timeClockStaffColors() {
+  const withEntries = new Set((state.timeClock || []).map((e) => e.staffId));
+  const map = new Map();
+  state.staff.filter((s) => s.canClockInOut || withEntries.has(s.id)).forEach((s, i) => map.set(s.id, TIME_CLOCK_DOT_COLORS[i % TIME_CLOCK_DOT_COLORS.length]));
+  return map;
+}
+// date -> array of that day's entries (a worked session lands on the school day it started on, see
+// schoolDateForMs; a day-off entry on its own date).
+function timeClockEntriesByDate() {
+  const byDate = new Map();
+  (state.timeClock || []).forEach((e) => {
+    const d = e.dayOff ? e.date : schoolDateForMs(e.clockInAt);
+    if (!d) return;
+    if (!byDate.has(d)) byDate.set(d, []);
+    byDate.get(d).push(e);
+  });
+  return byDate;
+}
+function timeClockCalendarHtml() {
+  const colors = timeClockStaffColors();
+  const byDate = timeClockEntriesByDate();
+  const todayStr = todayISO();
+  const monthKey = timeClockCalMonth || todayStr.slice(0, 7);
+  const y = Number(monthKey.slice(0, 4)), m = Number(monthKey.slice(5, 7));
+  const startDow = new Date(y, m - 1, 1).getDay();
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const monthTitle = new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  let html = '<div class="tc-cal" id="tc-cal">' +
+    '<div class="tc-cal-head">' +
+    '<button type="button" class="btn btn-ghost btn-sm" id="tc-cal-prev" aria-label="Previous month">&larr;</button>' +
+    '<span class="tc-cal-title">' + escapeHtml(monthTitle) + "</span>" +
+    '<span style="display:flex;gap:6px;"><button type="button" class="btn btn-ghost btn-sm" id="tc-cal-today">Today</button>' +
+    '<button type="button" class="btn btn-ghost btn-sm" id="tc-cal-next" aria-label="Next month">&rarr;</button></span></div>' +
+    '<div class="tc-cal-grid">' + DAY_NAMES.map((n) => '<div class="tc-cal-dow">' + escapeHtml(n.slice(0, 2)) + "</div>").join("");
+  for (let i = 0; i < startDow; i++) html += '<div class="tc-cal-day is-blank"></div>';
+  for (let day = 1; day <= daysInMonth; day++) {
+    const iso = monthKey + "-" + String(day).padStart(2, "0");
+    const dayEntries = byDate.get(iso) || [];
+    // One dot per person per day, however many sessions they logged; a ring instead of a filled dot
+    // when their only entry that day is a personal/sick day.
+    const perStaff = new Map();
+    dayEntries.forEach((e) => { const prev = perStaff.get(e.staffId); if (prev !== "worked") perStaff.set(e.staffId, e.dayOff ? "dayoff" : "worked"); });
+    const dots = Array.from(perStaff.entries()).map(([sid, kind]) =>
+      '<span class="tc-cal-dot' + (kind === "dayoff" ? " is-dayoff" : "") + '" style="background:' + (colors.get(sid) || "#7a8a99") + ';color:' + (colors.get(sid) || "#7a8a99") + ';"></span>').join("");
+    html += '<button type="button" class="tc-cal-day' + (iso === todayStr ? " is-today" : "") + (iso === timeClockCalSelected ? " is-selected" : "") + '" data-tc-cal-day="' + iso + '">' +
+      "<span>" + day + '</span><span class="tc-cal-dots">' + dots + "</span></button>";
+  }
+  html += "</div>";
+  html += '<div class="tc-cal-legend">' + Array.from(colors.entries()).map(([sid, c]) => {
+    const rec = staffById(sid);
+    return '<span><span class="tc-cal-dot" style="background:' + c + ';"></span>' + escapeHtml(rec ? rec.name : "(removed staff)") + "</span>";
+  }).join("") + '<span style="color:var(--muted);"><span class="tc-cal-dot is-dayoff" style="color:var(--muted);"></span>personal/sick day</span></div>';
+  if (timeClockCalSelected) {
+    const list = (byDate.get(timeClockCalSelected) || []).slice().sort((a, b) => entrySortKeyMs(a) - entrySortKeyMs(b));
+    html += '<div class="tc-cal-detail" id="tc-cal-detail"><div style="font-weight:700;margin-bottom:4px;">' + escapeHtml(fmtDateShort(timeClockCalSelected)) + "</div>" +
+      (list.length ? list.map((e) => {
+        const rec = staffById(e.staffId);
+        const c = colors.get(e.staffId) || "#7a8a99";
+        const what = e.dayOff
+          ? e.dayOff + " day"
+          : new Date(e.clockInAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) + " – " +
+            (e.clockOutAt ? new Date(e.clockOutAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) + " (" + fmtDurationMs(e.clockOutAt - e.clockInAt) + ")" : "still clocked in");
+        return '<div class="tc-cal-detail-row"><span class="tc-cal-dot' + (e.dayOff ? " is-dayoff" : "") + '" style="background:' + c + ';color:' + c + ';"></span><span><strong>' +
+          escapeHtml(rec ? rec.name : "(removed staff)") + "</strong> — " + escapeHtml(what) + (e.category ? ' <span class="pill pill-muted">' + escapeHtml(e.category) + "</span>" : "") + "</span></div>";
+      }).join("") : '<div class="help-text">Nobody clocked in this day.</div>') + "</div>";
+  }
+  return html + "</div>";
+}
+function wireTimeClockCalendar(session) {
+  const rerender = () => renderTimeClockModal(session);
+  const shiftMonth = (delta) => {
+    const key = timeClockCalMonth || todayISO().slice(0, 7);
+    const d = new Date(Number(key.slice(0, 4)), Number(key.slice(5, 7)) - 1 + delta, 1);
+    timeClockCalMonth = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+    timeClockCalSelected = null;
+    rerender();
+  };
+  const prev = document.getElementById("tc-cal-prev");
+  if (prev) prev.addEventListener("click", () => shiftMonth(-1));
+  const next = document.getElementById("tc-cal-next");
+  if (next) next.addEventListener("click", () => shiftMonth(1));
+  const today = document.getElementById("tc-cal-today");
+  if (today) today.addEventListener("click", () => { timeClockCalMonth = null; timeClockCalSelected = todayISO(); rerender(); });
+  document.querySelectorAll("[data-tc-cal-day]").forEach((btn) => btn.addEventListener("click", () => {
+    const d = btn.getAttribute("data-tc-cal-day");
+    timeClockCalSelected = timeClockCalSelected === d ? null : d;
+    rerender();
+  }));
+}
 function renderTimeClockModal(session) {
   const root = document.getElementById("time-clock-root");
   if (!root) return;
@@ -3580,7 +3703,9 @@ function renderTimeClockModal(session) {
   // entry and the toggle button would try to "clock it out".
   const open = entries.find((e) => !e.dayOff && !e.clockOutAt);
   const needsReason = !open && timeClockIsAfterHoursAt(appNow());
-  const rows = entries.slice(0, 50).map((e) => "<tr>" + timeClockRowCellsHtml(e) + "</tr>").join("");
+  // Keep the modal's scroll position across the re-renders a calendar tap triggers.
+  const prevModal = root.querySelector(".modal");
+  const prevScroll = prevModal ? prevModal.scrollTop : 0;
   const dayOffCounts = dayOffCountsFor(session.record.id);
   const actionHtml = (!open && needsReason && timeClockShowReasonForm)
     ? '<div class="field" style="margin-bottom:8px;"><label for="tc-reason-category">What\'s this time for?</label>' +
@@ -3607,12 +3732,20 @@ function renderTimeClockModal(session) {
     '<p class="sub">' + (open ? "Clocked in since " + fmtClockTime(open.clockInAt) + "." : needsReason ? "It's after hours — let us know what this time is for." : timeClockShowDayOffForm ? "Log a personal or sick day." : "You’re not clocked in right now.") + "</p>" +
     '<p class="help-text" style="margin-top:-4px;margin-bottom:14px;">Personal days used: ' + dayOffCounts.Personal + " · Sick days used: " + dayOffCounts.Sick + "</p>" +
     actionHtml +
-    (entries.length
-      ? '<div class="table-wrap"><table><thead><tr><th>Clocked in</th><th>Clocked out</th><th>Duration</th><th>For</th></tr></thead><tbody>' + rows + "</tbody></table></div>"
-      : '<p class="help-text">No time logged yet.</p>') +
-    '<div style="display:flex;justify-content:flex-end;margin-top:14px;">' +
+    timeClockCalendarHtml() +
+    '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:14px;">' +
+    '<button type="button" class="btn btn-ghost btn-sm" id="time-clock-full-log-btn">Open full log</button>' +
     '<button type="button" class="btn btn-ghost btn-sm" id="time-clock-close-btn">Close</button>' +
     "</div></div></div>";
+  const newModal = root.querySelector(".modal");
+  if (newModal && prevScroll) newModal.scrollTop = prevScroll;
+  wireTimeClockCalendar(session);
+  const fullLogBtn = document.getElementById("time-clock-full-log-btn");
+  if (fullLogBtn) fullLogBtn.addEventListener("click", () => {
+    closeTimeClock(session);
+    goToRoute("timeclock");
+    renderAll();
+  });
   document.getElementById("time-clock-backdrop").addEventListener("click", (evt) => {
     if (evt.target.id === "time-clock-backdrop") { closeTimeClock(session); }
   });
@@ -3650,6 +3783,8 @@ function renderTimeClockModal(session) {
 }
 function closeTimeClock(session) {
   timeClockOpen = false;
+  timeClockCalSelected = null;
+  timeClockCalMonth = null;
   timeClockShowReasonForm = false;
   timeClockShowDayOffForm = false;
   renderTimeClockModal(session);
