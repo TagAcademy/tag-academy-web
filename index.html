@@ -3423,7 +3423,7 @@ async function sheetSyncFlush(force) {
       const chunk = keys.slice(i, i + 150);
       await sheetPost(cfg, { marks: chunk.map((k) => sheetMarkPayload(cfg, q.marks[k])) });
       const fresh = readSheetQueue(); chunk.forEach((k) => { if (JSON.stringify(fresh.marks[k]) === JSON.stringify(q.marks[k])) delete fresh.marks[k]; });
-      writeSheetQueue(fresh); writeSheetStatus({ lastOkAt: Date.now(), lastError: "" });
+      writeSheetQueue(fresh); writeSheetStatus({ lastOkAt: Date.now(), lastError: "" }); refreshSheetPanel();
     }
     // 2. weekly grids
     q = readSheetQueue();
@@ -3432,7 +3432,7 @@ async function sheetSyncFlush(force) {
       const grp = wks.slice(i, i + 3);
       await sheetPost(cfg, { weeks: grp.map((n) => sheetBuildWeek(cfg, n)) });
       const fresh = readSheetQueue(); grp.forEach((n) => delete fresh.weeks[n]); writeSheetQueue(fresh);
-      writeSheetStatus({ lastOkAt: Date.now(), lastError: "" });
+      writeSheetStatus({ lastOkAt: Date.now(), lastError: "" }); refreshSheetPanel();
     }
     // 3. summary tabs
     // The summary tabs need every student's totals for every week recalculated (a few hundred ms on
