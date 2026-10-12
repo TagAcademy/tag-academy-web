@@ -3107,10 +3107,25 @@ function openDiagnostics() {
   });
 }
 
-async function saveState(newState, opts) {
+// Saves from this device run one at a time. Each save is a transaction that reads and rewrites the
+// WHOLE shared document, so two of them in flight at once (e.g. tapping several students in quick
+// succession on Today) contend with each other: Firestore re-runs each one with a fresh read, every
+// re-run downloads and uploads the full document again, and on a phone connection that snowballed
+// into 10-20 s saves and finally "failed-precondition ... does not match the required base version"
+// once Firestore ran out of attempts. Queued, each save gets the document to itself (and,
+// because ourRev is captured at call time, a save queued behind another one from this same device
+// simply goes through its retry/conflict path against the newer data, same as for anyone else's).
+let saveQueue = Promise.resolve();
+function saveState(newState, opts) {
   opts = opts || {};
-  const saveStartedAt = performance.now();
   if (opts.stashKey) stashDraft(opts.stashKey, opts.stashData);
+  const ourRev = (state && state._rev) || 0;
+  const run = saveQueue.then(() => saveStateNow(newState, opts, ourRev));
+  saveQueue = run.catch(() => {});
+  return run;
+}
+async function saveStateNow(newState, opts, ourRev) {
+  const saveStartedAt = performance.now();
   // opts.retry(freshState) -> newState: when given, a conflict doesn't stop and ask the person
   // to press Save again -- it recomputes just this one edit against whatever the fresh server
   // data turned out to be, and writes that instead. This is what makes autosave actually
@@ -3137,7 +3152,6 @@ async function saveState(newState, opts) {
   // Deliberately only recomputes via opts.retry when serverRev actually disagrees with ourRev --
   // NOT unconditionally -- so a call with no real conflict still writes exactly the `newState`
   // the caller built, same as before this was a transaction.
-  const ourRev = (state && state._rev) || 0;
   try {
     let conflicted = false, conflictState = null;
     const written = await db.runTransaction(async (tx) => {
@@ -3187,7 +3201,7 @@ async function saveState(newState, opts) {
 /* Convenience for "change this one thing" saves: `mutate(draft)` edits a deep copy it is handed
    and returns it. It runs once against our copy of the data and -- if someone else saved at the
    same moment -- again against their newer data, so two people saving different things never
-   cancel each other out (the same retry idea as autosaveStudent). Mutators must only set the
+   cancel each other out (the same retry idea as autosaveCards). Mutators must only set the
    specific thing the person changed (not copy values computed from the older data). */
 function saveEdit(mutate, opts) {
   const run = (base) => mutate(JSON.parse(JSON.stringify(base)));
@@ -4563,13 +4577,12 @@ let todayGlanceWeekAnchor = todayISO();
 // this (undefined means "didn't exist yet"). Cleared whenever a new save happens (on any
 // date/period) since only the very last save is undoable.
 let lastSaveUndo = null;
-// Per-student autosave bookkeeping for the Today grid -- module-level (not local to one
-// wireTodayGrid call) because a successful autosave triggers its own re-render, which tears
-// down and rebuilds that closure; keeping these here means an autosave still in flight for one
-// student survives a re-render triggered by a different student's autosave finishing a beat
-// earlier, instead of losing track of it.
-const todayAutosaveInFlight = new Map(); // studentId -> in-flight save promise
-const todayAutosavePending = new Map(); // studentId -> latest .student-card element to re-save once current save finishes
+// Autosave bookkeeping for the Today grid -- module-level (not local to one wireTodayGrid call)
+// because a successful autosave triggers its own re-render, which tears down and rebuilds that
+// closure; keeping these here means a batch still in flight, and the rows queued behind it,
+// survive that re-render instead of being lost track of.
+const todayAutosaveInFlight = new Map(); // "batch" -> the one in-flight autosave promise (see scheduleAutosave)
+const todayAutosavePending = new Map(); // "<id>:student|staff" -> latest .student-card element, saved together once the current save finishes
 // Which rows on the CURRENT date+period have actually been edited in this browser tab -- keyed
 // "<id>:student" or "<id>:staff" so a student id and a staff id can never collide. The bulk Save
 // button (and the note-popover "Done" button, and Fill All) only ever write rows in this set;
@@ -5833,7 +5846,7 @@ function wireTodayGrid(root, teacherName) {
     const newState = JSON.parse(JSON.stringify(base));
     const draftForStash = {};
     const undoSnapshot = {};
-    const cards = onlyCard ? [onlyCard] : Array.from(body.querySelectorAll(".student-card")).filter((c) => todayTouchedCards.has(c.getAttribute("data-student") + ":" + (c.dataset.staff === "1" ? "staff" : "student")));
+    const cards = Array.isArray(onlyCard) ? onlyCard : onlyCard ? [onlyCard] : Array.from(body.querySelectorAll(".student-card")).filter((c) => todayTouchedCards.has(c.getAttribute("data-student") + ":" + (c.dataset.staff === "1" ? "staff" : "student")));
     cards.forEach((card) => {
       const entityId = card.getAttribute("data-student"); // attribute name kept as-is for staff rows too, see renderToday's rosterEntities
       const isStaff = card.dataset.staff === "1";
@@ -5881,20 +5894,21 @@ function wireTodayGrid(root, teacherName) {
     return { newState, draftForStash, undoSnapshot };
   }
 
-  // Only one save per student in flight at a time -- if more taps land on the same student
-  // while a save is already on the wire, don't fire a second overlapping request (that's its
-  // own way to trip the _rev conflict check against yourself); just remember to run once more
-  // when the current one finishes, which re-reads the card's now-current DOM values anyway.
+  // One autosave in flight per device, covering every row touched since the last one. Taps that
+  // land while a save is on the wire are collected (latest card per row) and go out together as
+  // the next save, so marking a whole class quickly costs two or three whole-document writes
+  // instead of one per student running in parallel -- which is what made saves crawl and then
+  // fail on phones (see saveState's queue). Each card's DOM is re-read when its batch is built, so
+  // the batch always carries the row's current values.
   // (todayAutosaveInFlight/todayAutosavePending live at module scope, not as locals here --
   // see their declaration for why.)
-  async function autosaveStudent(card) {
-    const first = buildTodayPatch(state, card);
-    const studentId = card.getAttribute("data-student");
+  async function autosaveCards(cards) {
+    const first = buildTodayPatch(state, cards);
     const dateAtStart = todayDate, periodAtStart = selectedPeriod;
     const res = await saveState(first.newState, {
-      stashKey: "today:" + todayDate + ":" + selectedPeriod + ":" + studentId,
+      stashKey: "today:" + todayDate + ":" + selectedPeriod + ":autosave",
       stashData: first.draftForStash,
-      retry: (fresh) => buildTodayPatch(fresh, card).newState,
+      retry: (fresh) => buildTodayPatch(fresh, cards).newState,
     });
     if (res.ok || res.local) {
       forgetFailedDrafts(dateAtStart, periodAtStart, first.draftForStash);
@@ -5902,11 +5916,11 @@ function wireTodayGrid(root, teacherName) {
       // Deliberately no per-tap toast -- with several people marking at once a toast for
       // every single check/x would be constant noise; the status line above the grid (and the
       // "marked by" initials that show up on re-render) is enough confirmation. Deferred
-      // (not an immediate renderAll()) so finishing this student's save doesn't yank the page
-      // out from under someone still mid-interaction with a different student's row.
+      // (not an immediate renderAll()) so finishing this save doesn't yank the page out from
+      // under someone still mid-interaction with a different student's row.
       refreshViewOrDefer();
     } else {
-      // Remember the mark so it survives the next re-render, and keep the warning up (the
+      // Remember the marks so they survive the next re-render, and keep the warning up (the
       // .finally() in scheduleAutosave re-runs updateTodaySaveStatus, which now reports it).
       rememberFailedDrafts(dateAtStart, periodAtStart, first.draftForStash);
       updateTodaySaveStatus();
@@ -5914,21 +5928,20 @@ function wireTodayGrid(root, teacherName) {
   }
   function scheduleAutosave(card) {
     markTouched(card);
-    const studentId = card.getAttribute("data-student");
-    if (todayAutosaveInFlight.has(studentId)) { todayAutosavePending.set(studentId, card); updateTodaySaveStatus(); return; }
-    const run = (c) => {
-      updateTodaySaveStatus();
-      const p = autosaveStudent(c).finally(() => {
-        todayAutosaveInFlight.delete(studentId);
-        if (todayAutosavePending.has(studentId)) {
-          const next = todayAutosavePending.get(studentId);
-          todayAutosavePending.delete(studentId);
-          run(next);
-        } else updateTodaySaveStatus();
+    todayAutosavePending.set(card.getAttribute("data-student") + ":" + (card.dataset.staff === "1" ? "staff" : "student"), card);
+    if (todayAutosaveInFlight.size > 0) { updateTodaySaveStatus(); return; }
+    const run = () => {
+      const cards = Array.from(todayAutosavePending.values());
+      todayAutosavePending.clear();
+      const p = autosaveCards(cards).finally(() => {
+        todayAutosaveInFlight.delete("batch");
+        if (todayAutosavePending.size) run();
+        else updateTodaySaveStatus();
       });
-      todayAutosaveInFlight.set(studentId, p);
+      todayAutosaveInFlight.set("batch", p);
+      updateTodaySaveStatus();
     };
-    run(card);
+    run();
   }
 
   const saveBtn = document.getElementById("save-today");
