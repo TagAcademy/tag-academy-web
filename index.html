@@ -929,6 +929,12 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
 .avatar-picker-opt.selected { border-color: var(--brand); }
 
 /* ===================== toast ===================== */
+.problem-pill {
+  position: fixed; left: 12px; bottom: 12px; z-index: 90; border: 0; border-radius: 999px; padding: 9px 14px;
+  background: var(--warn, #c0392b); color: #fff; font: inherit; font-size: 0.82rem; font-weight: 700; cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.3); max-width: calc(100vw - 24px);
+}
+.diag-link { align-self: flex-start; background: none; border: 0; padding: 4px 0 0; font: inherit; font-size: 0.7rem; color: var(--muted); text-decoration: underline; cursor: pointer; }
 .toast-wrap { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 80; display: flex; flex-direction: column; gap: 8px; align-items: center; }
 .toast {
   background: var(--ink); color: var(--paper); padding: 11px 18px; border-radius: 99px;
@@ -1390,6 +1396,7 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
   <div id="preview-banner"></div>
   <div id="avatar-picker-root"></div>
   <div id="time-clock-root"></div>
+  <div id="diagnostics-root"></div>
   <div id="app">
     <aside class="sidebar" id="sidebar"></aside>
     <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
@@ -2969,8 +2976,130 @@ function popDraft(key) {
 }
 function clearDraft(key) { try { sessionStorage.removeItem("draft:" + key); } catch (e) {} }
 
+/* ---------- Diagnostics: a persistent record of what went wrong on THIS device, plus a few
+   numbers (how big the shared document has gotten, how long loads/saves take) -- because a
+   toast disappears after a few seconds, so "I got an error but it went away before I could
+   screenshot it" left nothing to look at. Every failed/conflicted/slow save, live-sync error and
+   unexpected script error is appended to a small localStorage log (the last 40), and a red pill
+   stays pinned to the screen until someone taps it to open the Diagnostics screen (avatar menu,
+   or the "Diagnostics" link in the sidebar). None of this ever touches Firestore. ---------- */
+const PROBLEM_LOG_KEY = "tag_problem_log";
+const PROBLEM_LOG_MAX = 40;
+const FIRESTORE_DOC_LIMIT_BYTES = 1048576; // Firestore's hard cap on a single document (1 MiB)
+const diagStats = { loadMs: null, saves: [], snapshots: 0, lastSnapshotAt: null };
+function readProblemLog() {
+  try { const a = JSON.parse(localStorage.getItem(PROBLEM_LOG_KEY) || "[]"); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+}
+// An estimate (JSON length, not Firestore's exact accounting -- which counts every number as 8
+// bytes and every field name/string a little differently), but close enough to see how near the
+// 1 MiB wall the shared document is.
+function jsonBytes(v) {
+  try { return new TextEncoder().encode(JSON.stringify(v)).length; } catch (e) { return null; }
+}
+// quiet = record it, but don't raise the pinned red pill (e.g. an automatic live-sync retry).
+function logProblem(kind, detail, quiet) {
+  try {
+    let who = "";
+    try { const sess = currentSession(); who = sess ? (sess.type === "staff" ? sess.record.name : sess.record.first + " " + sess.record.last) : ""; } catch (e) {}
+    let route = "";
+    try { route = currentRouteId || ""; } catch (e) {}
+    const entry = { t: Date.now(), kind, detail: String(detail == null ? "" : detail).slice(0, 400), who, route, online: navigator.onLine, bytes: state ? jsonBytes(state) : null };
+    const log = readProblemLog();
+    log.push(entry);
+    localStorage.setItem(PROBLEM_LOG_KEY, JSON.stringify(log.slice(-PROBLEM_LOG_MAX)));
+    if (!quiet) showProblemPill();
+  } catch (e) {}
+}
+function showProblemPill() {
+  try {
+    if (!document.body) return;
+    let pill = document.getElementById("problem-pill");
+    if (!pill) {
+      pill = document.createElement("button");
+      pill.id = "problem-pill";
+      pill.type = "button";
+      pill.className = "problem-pill";
+      pill.addEventListener("click", () => openDiagnostics());
+      document.body.appendChild(pill);
+    }
+    pill.textContent = "⚠ Something didn’t work — tap for details";
+  } catch (e) {}
+}
+window.addEventListener("error", (evt) => { logProblem("script-error", (evt && evt.message ? evt.message : "error") + (evt && evt.lineno ? " (line " + evt.lineno + ")" : "")); });
+window.addEventListener("unhandledrejection", (evt) => { const r = evt && evt.reason; logProblem("script-error", "Unhandled: " + (r && r.message ? r.message : String(r))); });
+function recordSaveTiming(ms, ok) {
+  diagStats.saves.push({ ms: Math.round(ms), ok, at: Date.now() });
+  if (diagStats.saves.length > 20) diagStats.saves.shift();
+  if (ms > 4000) logProblem("slow-save", Math.round(ms) + " ms to " + (ok ? "save" : "fail to save"), true);
+}
+function diagnosticsReportText() {
+  const lines = [];
+  const bytes = state ? jsonBytes(state) : null;
+  lines.push("TAG Academy diagnostics — " + new Date().toLocaleString());
+  lines.push("Device: " + navigator.userAgent);
+  lines.push("Online: " + navigator.onLine + (navigator.connection && navigator.connection.effectiveType ? " (" + navigator.connection.effectiveType + ")" : ""));
+  if (bytes != null) lines.push("Shared data size: ~" + Math.round(bytes / 1024) + " KB of " + Math.round(FIRESTORE_DOC_LIMIT_BYTES / 1024) + " KB (" + Math.round(bytes / FIRESTORE_DOC_LIMIT_BYTES * 100) + "%)");
+  if (state) Object.keys(state).forEach((k) => { const b = jsonBytes(state[k]); lines.push("  " + k + ": ~" + Math.round((b || 0) / 1024) + " KB" + (Array.isArray(state[k]) ? " (" + state[k].length + " items)" : "")); });
+  lines.push("Load time: " + (diagStats.loadMs != null ? Math.round(diagStats.loadMs) + " ms" : "n/a"));
+  const times = diagStats.saves.map((x) => x.ms);
+  if (times.length) lines.push("Recent saves (" + times.length + "): avg " + Math.round(times.reduce((a, b) => a + b, 0) / times.length) + " ms, slowest " + Math.max.apply(null, times) + " ms, failed " + diagStats.saves.filter((x) => !x.ok).length);
+  lines.push("Problems on this device:");
+  const log = readProblemLog().slice().reverse();
+  if (!log.length) lines.push("  (none recorded)");
+  log.forEach((p) => lines.push("  " + new Date(p.t).toLocaleString() + " | " + p.kind + " | " + p.detail + " | " + (p.who || "?") + " on " + (p.route || "?") + " | online=" + p.online + (p.bytes ? " | data " + Math.round(p.bytes / 1024) + " KB" : "")));
+  return lines.join("\n");
+}
+function openDiagnostics() {
+  const root = document.getElementById("diagnostics-root");
+  if (!root) return;
+  const pill = document.getElementById("problem-pill");
+  if (pill) pill.remove();
+  const bytes = state ? jsonBytes(state) : null;
+  const pct = bytes != null ? bytes / FIRESTORE_DOC_LIMIT_BYTES * 100 : null;
+  const tone = pct == null ? "var(--muted)" : pct >= 85 ? "var(--warn)" : pct >= 60 ? "var(--caution, #c98a00)" : "var(--good)";
+  const parts = state ? Object.keys(state).map((k) => ({ k, b: jsonBytes(state[k]) || 0, n: Array.isArray(state[k]) ? state[k].length : null })).sort((a, b) => b.b - a.b).slice(0, 8) : [];
+  const times = diagStats.saves.map((x) => x.ms);
+  const log = readProblemLog().slice().reverse();
+  const kb = (b) => (b / 1024 >= 10 ? Math.round(b / 1024) : (b / 1024).toFixed(1)) + " KB";
+  root.innerHTML = '<div class="modal-backdrop" id="diag-backdrop"><div class="modal modal-wide">' +
+    "<h2>Diagnostics</h2>" +
+    '<p class="sub">Numbers that help explain slow loading or saves that don’t stick. Tap “Copy report” and send it over, or take a screenshot.</p>' +
+    '<div class="section-title" style="font-size:0.95rem;">Size of the shared data</div>' +
+    (bytes != null
+      ? '<div style="display:flex;justify-content:space-between;font-size:0.85rem;margin-bottom:4px;"><span><strong>' + kb(bytes) + "</strong> of " + kb(FIRESTORE_DOC_LIMIT_BYTES) + " limit</span><strong style=\"color:" + tone + ';">' + Math.round(pct) + "%</strong></div>" +
+        '<div style="height:10px;border-radius:6px;background:var(--surface-2);overflow:hidden;margin-bottom:8px;"><div style="height:100%;width:' + Math.min(100, pct).toFixed(1) + "%;background:" + tone + ';"></div></div>' +
+        '<div style="font-size:0.8rem;color:var(--muted);margin-bottom:6px;">' + (pct >= 85 ? "This is close to the limit — saves can start failing and everything loads slowly." : pct >= 60 ? "Getting large — worth keeping an eye on." : "Comfortably under the limit.") + "</div>" +
+        '<table style="width:100%;font-size:0.8rem;border-collapse:collapse;">' + parts.map((x) => '<tr><td style="padding:2px 0;">' + escapeHtml(x.k) + (x.n != null ? ' <span style="color:var(--muted);">(' + x.n + ")</span>" : "") + '</td><td style="text-align:right;">' + kb(x.b) + "</td></tr>").join("") + "</table>"
+      : '<p class="help-text">Not loaded yet.</p>') +
+    '<div class="section-title" style="font-size:0.95rem;margin-top:16px;">Speed</div>' +
+    '<p class="help-text" style="margin:0;">Page data loaded in ' + (diagStats.loadMs != null ? (diagStats.loadMs / 1000).toFixed(1) + " s" : "n/a") +
+    (times.length ? ". Last " + times.length + " saves: average " + Math.round(times.reduce((a, b) => a + b, 0) / times.length) + " ms, slowest " + Math.max.apply(null, times) + " ms" + (diagStats.saves.some((x) => !x.ok) ? ", " + diagStats.saves.filter((x) => !x.ok).length + " failed" : "") : ". No saves yet on this visit.") +
+    " Connection: " + (navigator.onLine ? "online" : "OFFLINE") + (navigator.connection && navigator.connection.effectiveType ? " (" + escapeHtml(navigator.connection.effectiveType) + ")" : "") + ".</p>" +
+    '<div class="section-title" style="font-size:0.95rem;margin-top:16px;">Problems on this device</div>' +
+    (log.length
+      ? '<div style="max-height:200px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:0.78rem;">' + log.map((p) =>
+          '<div style="padding:5px 0;border-bottom:1px solid var(--line);"><strong>' + escapeHtml(p.kind) + "</strong> — " + escapeHtml(p.detail) +
+          '<div style="color:var(--muted);">' + escapeHtml(new Date(p.t).toLocaleString()) + (p.who ? " · " + escapeHtml(p.who) : "") + (p.route ? " · " + escapeHtml(p.route) : "") + (p.online === false ? " · offline" : "") + "</div></div>").join("") + "</div>"
+      : '<p class="help-text">Nothing has gone wrong on this device recently.</p>') +
+    '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:16px;">' +
+    '<span style="display:flex;gap:8px;"><button type="button" class="btn btn-primary btn-sm" id="diag-copy">Copy report</button>' +
+    '<button type="button" class="btn btn-ghost btn-sm" id="diag-clear"' + (log.length ? "" : " disabled") + ">Clear problems</button></span>" +
+    '<button type="button" class="btn btn-ghost btn-sm" id="diag-close">Close</button></div></div></div>';
+  const close = () => { root.innerHTML = ""; };
+  document.getElementById("diag-close").addEventListener("click", close);
+  document.getElementById("diag-backdrop").addEventListener("click", (e) => { if (e.target.id === "diag-backdrop") close(); });
+  document.getElementById("diag-clear").addEventListener("click", () => { try { localStorage.removeItem(PROBLEM_LOG_KEY); } catch (e) {} openDiagnostics(); });
+  document.getElementById("diag-copy").addEventListener("click", () => {
+    const text = diagnosticsReportText();
+    const done = () => toast("Report copied.", "good");
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, () => { window.prompt("Copy this report:", text); });
+    else window.prompt("Copy this report:", text);
+  });
+}
+
 async function saveState(newState, opts) {
   opts = opts || {};
+  const saveStartedAt = performance.now();
   if (opts.stashKey) stashDraft(opts.stashKey, opts.stashData);
   // opts.retry(freshState) -> newState: when given, a conflict doesn't stop and ask the person
   // to press Save again -- it recomputes just this one edit against whatever the fresh server
@@ -3025,6 +3154,8 @@ async function saveState(newState, opts) {
     });
     if (conflicted) {
       state = conflictState;
+      recordSaveTiming(performance.now() - saveStartedAt, false);
+      logProblem("conflict", "A save was skipped because someone else saved first, and this kind of change can't be re-applied automatically.");
       toast("Someone else just saved changes, so we didn't overwrite them — we've pulled in the latest data. Please try your save again.", "warn");
       renderAll();
       return { ok: false, code: "conflict" };
@@ -3034,13 +3165,16 @@ async function saveState(newState, opts) {
     // whatever this save just changed.
     state = written;
     clearDraft(opts.stashKey);
+    recordSaveTiming(performance.now() - saveStartedAt, true);
     return { ok: true };
   } catch (err) {
+    recordSaveTiming(performance.now() - saveStartedAt, false);
     return saveStateError(err);
   }
 }
 function saveStateError(err) {
   const code = err && err.code;
+  logProblem("save-failed", (code || "error") + ": " + (err && err.message ? err.message : "unknown error"));
   if (code === "permission-denied") {
     canWrite = false;
     toast("This copy can't save right now -- check your connection, or ask an admin for help.", "warn");
@@ -3339,7 +3473,7 @@ function renderShell(session, previewing) {
   const sidebarHtml =
     '<div class="brand-block"><img src="' + LOGO_DATA_URI + '" alt=""><div class="word">TAG Academy<small>' + escapeHtml(state.meta.schoolYear) + "</small></div></div>" +
     '<nav class="nav">' + navHtml + "</nav>" +
-    '<div class="sidebar-foot">' + modePill + staffBlock + "</div>";
+    '<div class="sidebar-foot">' + modePill + staffBlock + '<button type="button" class="diag-link" data-open-diagnostics="1">Diagnostics</button></div>';
   const sidebar = document.getElementById("sidebar");
   if (sidebar) sidebar.innerHTML = sidebarHtml;
   const mobileTabs = document.getElementById("tab-bar");
@@ -3366,6 +3500,7 @@ function renderShell(session, previewing) {
     renderAll();
   }));
   document.querySelectorAll(".btn-logout-action").forEach((btn) => btn.addEventListener("click", logout));
+  document.querySelectorAll("[data-open-diagnostics]").forEach((btn) => btn.addEventListener("click", () => openDiagnostics()));
   document.querySelectorAll("[data-open-avatar-picker]").forEach((btn) => btn.addEventListener("click", () => { avatarPickerOpen = true; renderAvatarPickerModal(session); }));
   renderAvatarPickerModal(session);
   document.querySelectorAll("[data-open-time-clock]").forEach((btn) => btn.addEventListener("click", () => { timeClockOpen = true; renderTimeClockModal(session); }));
@@ -3394,6 +3529,7 @@ function renderAvatarPickerModal(session) {
     body +
     '<div style="display:flex;justify-content:space-between;gap:10px;">' +
     '<button type="button" class="btn btn-ghost btn-sm" id="avatar-clear-btn"' + (session.record.photoUrl ? "" : " disabled") + ">Reset to default</button>" +
+    '<button type="button" class="btn btn-ghost btn-sm" id="avatar-diagnostics-btn" title="Data size, speed, and recent problems on this device">Diagnostics</button>' +
     '<div style="display:flex;gap:10px;">' +
     '<button type="button" class="btn btn-ghost btn-sm" id="avatar-cancel-btn">Cancel</button>' +
     "</div></div></div></div>";
@@ -3403,6 +3539,8 @@ function renderAvatarPickerModal(session) {
   document.getElementById("avatar-cancel-btn").addEventListener("click", () => closeAvatarPicker(session));
   const clearBtn = document.getElementById("avatar-clear-btn");
   if (clearBtn) clearBtn.addEventListener("click", () => setMyAvatar(session, null));
+  const avatarDiagBtn = document.getElementById("avatar-diagnostics-btn");
+  if (avatarDiagBtn) avatarDiagBtn.addEventListener("click", () => { closeAvatarPicker(session); openDiagnostics(); });
   root.querySelectorAll("[data-avatar-choice]").forEach((btn) => btn.addEventListener("click", () => {
     setMyAvatar(session, AVATAR_GALLERY[Number(btn.getAttribute("data-avatar-choice"))]);
   }));
@@ -4074,10 +4212,45 @@ let todayTouchedCards = new Set();
 function markTouched(card) {
   todayTouchedCards.add(card.getAttribute("data-student") + ":" + (card.dataset.staff === "1" ? "staff" : "student"));
 }
+// Marks that were typed/tapped on THIS device but whose save did not go through (server error,
+// dropped connection, document too large...). Kept in memory, keyed "<date>|<period>" ->
+// { draftKey: pair }, so that a re-render (another student's autosave finishing, a live-sync
+// refresh, a poll) shows the mark again instead of silently reverting it to what the server has.
+// Before this existed a failed save left the mark on screen only until the next re-render --
+// which looked exactly like "I marked them and it just went away."
+const todayFailedDrafts = new Map();
+function failedDraftBucket(date, period) { return todayFailedDrafts.get(date + "|" + period) || null; }
+function rememberFailedDrafts(date, period, draft) {
+  const k = date + "|" + period;
+  const b = todayFailedDrafts.get(k) || {};
+  Object.keys(draft || {}).forEach((dk) => { b[dk] = draft[dk]; });
+  todayFailedDrafts.set(k, b);
+}
+function forgetFailedDrafts(date, period, draft) {
+  const k = date + "|" + period;
+  const b = todayFailedDrafts.get(k);
+  if (!b) return;
+  Object.keys(draft || {}).forEach((dk) => { delete b[dk]; });
+  if (!Object.keys(b).length) todayFailedDrafts.delete(k);
+}
+function failedDraftCount() {
+  let n = 0;
+  todayFailedDrafts.forEach((b) => { n += Object.keys(b).length; });
+  return n;
+}
+function todaySaveStatusText() {
+  if (todayAutosaveInFlight.size > 0) return "Saving…";
+  const n = failedDraftCount();
+  if (n > 0) return n + (n === 1 ? " change" : " changes") + " NOT saved yet — tap Save to retry";
+  return "All changes saved";
+}
 function updateTodaySaveStatus() {
   const el = document.getElementById("today-save-status");
   if (!el) return;
-  el.textContent = todayAutosaveInFlight.size > 0 ? "Saving…" : "All changes saved";
+  const bad = todayAutosaveInFlight.size === 0 && failedDraftCount() > 0;
+  el.textContent = todaySaveStatusText();
+  el.style.color = bad ? "var(--warn, #c0392b)" : "var(--muted)";
+  el.style.fontWeight = bad ? "700" : "";
 }
 
 function periodMarkedCount(date, period, roster) {
@@ -4106,7 +4279,16 @@ function renderToday(root, session) {
   const roster = activeRoster();
   const teacherName = session.record.name;
   if (!periods.includes(selectedPeriod)) selectedPeriod = periods[0] || "";
-  const restored = selectedPeriod ? popDraft("today:" + todayDate + ":" + selectedPeriod) : null;
+  let restored = selectedPeriod ? popDraft("today:" + todayDate + ":" + selectedPeriod) : null;
+  // Marks from this device whose save failed win over what the server has, and count as
+  // "touched" so the Save button will retry them.
+  const failedHere = selectedPeriod ? failedDraftBucket(todayDate, selectedPeriod) : null;
+  if (failedHere) {
+    restored = Object.assign({}, restored || {}, failedHere);
+    Object.keys(failedHere).forEach((dk) => {
+      todayTouchedCards.add(dk.startsWith("staff:") ? dk.slice(6) + ":staff" : dk + ":student");
+    });
+  }
 
   const hdayOptions = hebrewDayOptionsFor(todayDate);
   const parshaHebLabel = parshaHebrewFor(todayDate);
@@ -4213,7 +4395,7 @@ function renderToday(root, session) {
   if (parshaHebLabel) html += '<div class="today-parsha-line" dir="rtl">' + escapeHtml(parshaHebLabel) + "</div>";
 
   if (!canWrite) html += '<div class="banner banner-warn">Read-only view — changes here won’t be saved.</div>';
-  if (restored) html += '<div class="banner banner-warn">Your last save may not have gone through (someone else saved first). We’ve restored what you typed below — check it and save again.</div>';
+  if (restored) html += '<div class="banner banner-warn">Some of your marks have not been saved yet (the save didn’t go through). They’re shown below — tap Save to try again.</div>';
 
   // "+ Add a class" has two shapes: a single button that sits inline with the other quick
   // actions below, or -- once clicked -- a wider field-row (select, name input, Add/Cancel)
@@ -4482,7 +4664,7 @@ function renderToday(root, session) {
   html += '<div style="margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">' +
     '<button class="btn btn-primary" id="save-today"' + (canWrite ? "" : " disabled") + '>Save ' + escapeHtml(selectedPeriod) + "</button>" +
     (canUndo ? '<button class="btn btn-ghost btn-sm" id="undo-last-save" type="button">Undo last save</button>' : "") +
-    '<span id="today-save-status" style="font-size:0.8rem;color:var(--muted);"></span></div>';
+    '<span id="today-save-status" style="font-size:0.8rem;color:var(--muted);">' + escapeHtml(failedDraftCount() > 0 ? todaySaveStatusText() : "") + '</span></div>';
 
   // NOTE: there used to be a stray extra `html += "</div>";` right here that closed
   // .today-wrap one statement too early (both roster-view branches above already close their
@@ -5326,12 +5508,14 @@ function wireTodayGrid(root, teacherName) {
   async function autosaveStudent(card) {
     const first = buildTodayPatch(state, card);
     const studentId = card.getAttribute("data-student");
+    const dateAtStart = todayDate, periodAtStart = selectedPeriod;
     const res = await saveState(first.newState, {
       stashKey: "today:" + todayDate + ":" + selectedPeriod + ":" + studentId,
       stashData: first.draftForStash,
       retry: (fresh) => buildTodayPatch(fresh, card).newState,
     });
     if (res.ok || res.local) {
+      forgetFailedDrafts(dateAtStart, periodAtStart, first.draftForStash);
       lastSaveUndo = { date: todayDate, period: selectedPeriod, snapshot: first.undoSnapshot };
       // Deliberately no per-tap toast -- with several people marking at once a toast for
       // every single check/x would be constant noise; the status line above the grid (and the
@@ -5340,8 +5524,10 @@ function wireTodayGrid(root, teacherName) {
       // out from under someone still mid-interaction with a different student's row.
       refreshViewOrDefer();
     } else {
-      const el = document.getElementById("today-save-status");
-      if (el) el.textContent = "Couldn't save that change — check your connection.";
+      // Remember the mark so it survives the next re-render, and keep the warning up (the
+      // .finally() in scheduleAutosave re-runs updateTodaySaveStatus, which now reports it).
+      rememberFailedDrafts(dateAtStart, periodAtStart, first.draftForStash);
+      updateTodaySaveStatus();
     }
   }
   function scheduleAutosave(card) {
@@ -5378,6 +5564,7 @@ function wireTodayGrid(root, teacherName) {
     // button safe to click as a "just in case" habit.
     if (!todayTouchedCards.size) { toast("Nothing to save — every mark here is already saved.", "good"); return; }
     saveBtn.disabled = true;
+    const dateAtStart = todayDate, periodAtStart = selectedPeriod;
     const statusElNow = document.getElementById("today-save-status");
     if (statusElNow) statusElNow.textContent = "Saving…";
     const first = buildTodayPatch(state);
@@ -5387,6 +5574,7 @@ function wireTodayGrid(root, teacherName) {
       retry: (fresh) => buildTodayPatch(fresh).newState,
     });
     if (res.ok || res.local) {
+      forgetFailedDrafts(dateAtStart, periodAtStart, first.draftForStash);
       // Without this, the button stayed disabled and the status text stuck on "Saving…"
       // until some unrelated click forced a re-render -- a real save had gone through, it
       // just never told you. Re-rendering immediately shows the updated "x/y marked" count,
@@ -5396,8 +5584,8 @@ function wireTodayGrid(root, teacherName) {
       renderAll();
     } else {
       saveBtn.disabled = false;
-      const el = document.getElementById("today-save-status");
-      if (el) el.textContent = "Not saved — see message above.";
+      rememberFailedDrafts(dateAtStart, periodAtStart, first.draftForStash);
+      updateTodaySaveStatus();
     }
   }
 
@@ -9268,9 +9456,13 @@ async function migrateGcBonusLedgerEntries() {
 async function init() {
   renderAll(); // shows the "Loading..." screen (state is still null at this point)
   try {
+    const loadStartedAt = performance.now();
     await loadState();
+    diagStats.loadMs = performance.now() - loadStartedAt;
+    if (diagStats.loadMs > 5000) logProblem("slow-load", "Loading the shared data took " + (diagStats.loadMs / 1000).toFixed(1) + " s", true);
   } catch (e) {
     console.error("Could not connect to Firebase:", e);
+    logProblem("load-failed", (e && e.code ? e.code + ": " : "") + (e && e.message ? e.message : "unknown"));
     canWrite = false;
     state = seedState(); // so the page can still render something rather than staying blank
     const loginEl = document.getElementById("login-root");
@@ -9313,6 +9505,7 @@ function listenForLiveUpdates() {
       applyIncomingState(snap.data());
     }, (err) => {
       console.error("Live sync error:", err);
+      logProblem("live-sync-error", (err && err.code ? err.code + ": " : "") + (err && err.message ? err.message : "unknown"), true);
       setTimeout(subscribe, retryDelay);
       retryDelay = Math.min(retryDelay * 2, 30000);
     });
@@ -9329,12 +9522,15 @@ function listenForLiveUpdates() {
   // And a final safety net that needs no trigger at all: every 20 seconds, just check --
   // so even a stall none of the above catches can never leave a screen more than about 20
   // seconds out of date.
-  setInterval(syncNow, 20000);
+  // (Skipped while the tab/app is in the background: each catch-up downloads the WHOLE shared
+  // document, and the visibilitychange listener above already does one the moment it's looked
+  // at again, so there's nothing to gain from a phone in a pocket refetching it every 20s.)
+  setInterval(() => { if (document.visibilityState === "visible") syncNow(); }, 20000);
 }
 function syncNow() {
   STATE_DOC.get().then((snap) => {
     if (snap.exists) applyIncomingState(snap.data());
-  }).catch((err) => console.error("Live sync catch-up failed:", err));
+  }).catch((err) => { console.error("Live sync catch-up failed:", err); logProblem("sync-failed", (err && err.code ? err.code + ": " : "") + (err && err.message ? err.message : "unknown"), true); });
 }
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
 else init();
