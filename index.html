@@ -3435,11 +3435,21 @@ async function sheetSyncFlush(force) {
       writeSheetStatus({ lastOkAt: Date.now(), lastError: "" });
     }
     // 3. summary tabs
+    // The summary tabs need every student's totals for every week recalculated (a few hundred ms on
+    // a full year of data, noticeably more on an older phone), so they're rebuilt at most once every
+    // 5 minutes rather than after every save -- the Log and the weekly tabs above stay up to the
+    // second. "Send everything now" (force) always rebuilds them immediately.
     q = readSheetQueue();
     if (q.summary) {
-      await sheetPost(cfg, { summary: sheetBuildSummary(cfg) });
-      const fresh = readSheetQueue(); fresh.summary = false; writeSheetQueue(fresh);
-      writeSheetStatus({ lastOkAt: Date.now(), lastError: "" });
+      const since = Date.now() - (readSheetStatus().lastSummaryAt || 0);
+      if (force || since > 300000) {
+        await new Promise((r) => setTimeout(r, 0)); // let the screen settle before the heavy part
+        await sheetPost(cfg, { summary: sheetBuildSummary(cfg) });
+        const fresh = readSheetQueue(); fresh.summary = false; writeSheetQueue(fresh);
+        writeSheetStatus({ lastOkAt: Date.now(), lastError: "", lastSummaryAt: Date.now() });
+      } else {
+        scheduleSheetFlush(Math.max(5000, 300000 - since + 1000));
+      }
     }
     writeSheetStatus({ lastOkAt: Date.now(), lastError: "" });
   } catch (err) {
