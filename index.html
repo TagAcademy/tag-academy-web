@@ -3043,6 +3043,8 @@ function diagnosticsReportText() {
   lines.push("Load time: " + (diagStats.loadMs != null ? Math.round(diagStats.loadMs) + " ms" : "n/a"));
   const times = diagStats.saves.map((x) => x.ms);
   if (times.length) lines.push("Recent saves (" + times.length + "): avg " + Math.round(times.reduce((a, b) => a + b, 0) / times.length) + " ms, slowest " + Math.max.apply(null, times) + " ms, failed " + diagStats.saves.filter((x) => !x.ok).length);
+  const sq = readSheetQueue(), sst = readSheetStatus();
+  lines.push("Google Sheet backup: " + (sheetCfg() ? "on" : "off") + ", " + sheetQueueSize(sq) + " item(s) waiting" + (sst.lastOkAt ? ", last ok " + new Date(sst.lastOkAt).toLocaleString() : "") + (sst.lastError ? ", last error: " + sst.lastError : ""));
   lines.push("Problems on this device:");
   const log = readProblemLog().slice().reverse();
   if (!log.length) lines.push("  (none recorded)");
@@ -3163,9 +3165,11 @@ async function saveState(newState, opts) {
     // Keep our in-memory copy in sync with what we just saved -- otherwise the next
     // edit in this session would clone the old (pre-save) state and silently undo
     // whatever this save just changed.
+    try { sheetNoteChanges(state, written); } catch (e) { logProblem("sheet-backup", "change detection: " + (e && e.message), true); }
     state = written;
     clearDraft(opts.stashKey);
     recordSaveTiming(performance.now() - saveStartedAt, true);
+    scheduleSheetFlush();
     return { ok: true };
   } catch (err) {
     recordSaveTiming(performance.now() - saveStartedAt, false);
@@ -3187,6 +3191,343 @@ function saveStateError(err) {
   }
   toast("Couldn't save (" + (err && err.message ? err.message : "unknown error") + "). Your entries are still on screen -- try again.", "warn");
   return { ok: false, code: code || "error" };
+}
+
+/* ================================================================
+   GOOGLE SHEET BACKUP (one-way: app -> Google Sheet)
+   Every attendance/participation mark that gets saved is also copied into a Google Sheet through
+   a small Apps Script the school owns (see Admin > Google Sheet for setup). The sheet gets a Log
+   tab (one row per mark, the safest copy), weekly tabs laid out like the old sheet, and
+   Present / Percentage / TAG Coins / Report summary tabs. Nothing is ever read back from the sheet.
+   If the sheet can't be reached the changes simply wait in a small queue on this device (and are
+   retried) -- saving in the app never waits on it. All of the points math below reuses the app's
+   own functions (computeStats etc.) so the sheet always agrees with what the app shows.
+   ================================================================ */
+const SHEET_QUEUE_KEY = "tag_sheet_queue_v1";
+const SHEET_STATUS_KEY = "tag_sheet_status_v1";
+let sheetSyncBusy = false;
+let sheetSyncTimer = null;
+
+function sheetCfg() {
+  const c = state && state.settings && state.settings.sheetSync;
+  return c && c.enabled && c.url && c.secret ? c : null;
+}
+function readSheetQueue() {
+  try {
+    const q = JSON.parse(localStorage.getItem(SHEET_QUEUE_KEY) || "null");
+    if (q && typeof q === "object") return { marks: q.marks || {}, weeks: q.weeks || {}, summary: !!q.summary };
+  } catch (e) {}
+  return { marks: {}, weeks: {}, summary: false };
+}
+function writeSheetQueue(q) { try { localStorage.setItem(SHEET_QUEUE_KEY, JSON.stringify(q)); } catch (e) {} }
+function sheetQueueSize(q) { q = q || readSheetQueue(); return Object.keys(q.marks).length + Object.keys(q.weeks).length + (q.summary ? 1 : 0); }
+function readSheetStatus() { try { return JSON.parse(localStorage.getItem(SHEET_STATUS_KEY) || "{}") || {}; } catch (e) { return {}; } }
+function writeSheetStatus(patch) { try { localStorage.setItem(SHEET_STATUS_KEY, JSON.stringify(Object.assign(readSheetStatus(), patch))); } catch (e) {} }
+
+function sundayOnOrBefore(dateStr) { return shiftDate(dateStr, -jsDateFor(dateStr).getDay()); }
+function daysBetweenISO(a, b) { return Math.round((jsDateFor(b) - jsDateFor(a)) / 86400000); }
+// Week 1 = the week (Sunday-Shabbos) the admin picked in Admin > Google Sheet; if none is set yet,
+// the week of the earliest attendance record.
+function sheetWeekOne(cfg) {
+  if (cfg && cfg.weekOne) return sundayOnOrBefore(cfg.weekOne);
+  let min = null;
+  (state.attendance || []).concat(state.staffAttendance || []).forEach((r) => { if (r.date && (!min || r.date < min)) min = r.date; });
+  return sundayOnOrBefore(min || todayISO());
+}
+function sheetWeekNo(cfg, dateStr) { return Math.floor(daysBetweenISO(sheetWeekOne(cfg), sundayOnOrBefore(dateStr)) / 7) + 1; }
+function sheetStamp(ms) {
+  if (!ms) return "";
+  const d = new Date(ms); const p = (n) => (n < 10 ? "0" : "") + n;
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+}
+
+// Compare the attendance arrays of two versions of the state and remember which (person, date,
+// class) marks differ. Called right after every successful save (see saveState).
+function sheetNoteChanges(prev, next) {
+  const cfg = next && next.settings && next.settings.sheetSync;
+  if (!cfg || !cfg.enabled || !cfg.url || !cfg.secret || !prev) return;
+  const q = readSheetQueue();
+  let touched = 0;
+  const wkOf = (d) => sheetWeekNo(cfg, d);
+  [["attendance", "studentId", "Student"], ["staffAttendance", "staffId", "Staff"]].forEach(([arr, idField, type]) => {
+    const before = new Map();
+    (prev[arr] || []).forEach((r) => before.set(r.date + "|" + r[idField], r));
+    const seen = new Set();
+    (next[arr] || []).forEach((r) => {
+      const k = r.date + "|" + r[idField];
+      seen.add(k);
+      const b = before.get(k);
+      const ns = r.scores || {}, bs = (b && b.scores) || {};
+      if (b && JSON.stringify(ns) === JSON.stringify(bs)) return;
+      new Set(Object.keys(ns).concat(Object.keys(bs))).forEach((p) => {
+        if (JSON.stringify(ns[p]) === JSON.stringify(bs[p])) return;
+        q.marks[type + "|" + r.date + "|" + p + "|" + r[idField]] = { type, date: r.date, period: p, id: r[idField] };
+        const w = wkOf(r.date); if (w >= 1) q.weeks[w] = true;
+        touched++;
+      });
+    });
+    before.forEach((b, k) => {
+      if (seen.has(k)) return;
+      Object.keys(b.scores || {}).forEach((p) => {
+        q.marks[type + "|" + b.date + "|" + p + "|" + b[idField]] = { type, date: b.date, period: p, id: b[idField] };
+        const w = wkOf(b.date); if (w >= 1) q.weeks[w] = true;
+        touched++;
+      });
+    });
+  });
+  // Roster/staff/schedule/coin changes don't touch marks but do change the grids and totals.
+  const other = JSON.stringify([prev.roster, prev.staff, prev.settings && prev.settings.periods, prev.settings && prev.settings.schedule, prev.settings && prev.settings.periodMax, prev.settings && prev.settings.periodMaxByDay, prev.settings && prev.settings.bonusPeriods, prev.settings && prev.settings.extraPeriods, prev.settings && prev.settings.canceledPeriods, (prev.ledger || []).length, prev.gcBonusCredits]) !==
+    JSON.stringify([next.roster, next.staff, next.settings && next.settings.periods, next.settings && next.settings.schedule, next.settings && next.settings.periodMax, next.settings && next.settings.periodMaxByDay, next.settings && next.settings.bonusPeriods, next.settings && next.settings.extraPeriods, next.settings && next.settings.canceledPeriods, (next.ledger || []).length, next.gcBonusCredits]);
+  if (other) { const w = wkOf(todayISO()); if (w >= 1) q.weeks[w] = true; touched++; }
+  if (touched) { q.summary = true; writeSheetQueue(q); }
+}
+
+function sheetMarkPayload(cfg, item) {
+  const isStaff = item.type === "Staff";
+  const rec = isStaff ? staffSelfRecord(item.date, item.id) : attendanceRecord(item.date, item.id);
+  const pair = rec && rec.scores && rec.scores[item.period];
+  const ent = isStaff ? staffById(item.id) : studentById(item.id);
+  const blankish = (v) => v === null || v === undefined || v === "";
+  const w = sheetWeekNo(cfg, item.date);
+  return {
+    key: item.type + "|" + item.date + "|" + item.period + "|" + item.id,
+    type: item.type, date: item.date, day: dayNameFor(item.date), week: w >= 1 ? w : "",
+    period: item.period, id: item.id,
+    last: ent ? (isStaff ? ent.name : ent.last) : "(removed)", first: ent ? (isStaff ? "" : ent.first) : "",
+    att: pair && !blankish(pair[0]) ? Number(pair[0]) : null,
+    part: pair && !blankish(pair[1]) ? Number(pair[1]) : null,
+    excused: !!(pair && pair[4]), note: (pair && pair[2]) || "", by: (pair && pair[3]) || (rec && rec.enteredBy) || "",
+    at: rec ? sheetStamp(rec.enteredAt) : "",
+  };
+}
+
+function sheetCellFor(rec, period) {
+  const pair = rec && rec.scores && rec.scores[period];
+  if (!pair) return "";
+  if (pair[4]) return "E";
+  const a = pair[0];
+  return a === null || a === undefined || a === "" ? "" : Number(a);
+}
+const sheetRound = (v) => Math.round(v * 100) / 100;
+
+function sheetBuildWeek(cfg, n) {
+  const start = shiftDate(sheetWeekOne(cfg), (n - 1) * 7);
+  const end = shiftDate(start, 6);
+  const dates = []; for (let i = 0; i < 7; i++) dates.push(shiftDate(start, i));
+  const cols = [];
+  dates.forEach((d) => periodsForDate(d).forEach((p) => cols.push({ date: d, day: dayNameFor(d), heb: stripHebrewPunct(hebrewDateFor(d)).replace(/[\u0591-\u05C7]/g, ""), period: p, max: periodMaxFor(p, d), bonus: isBonusPeriod(d, p) })));
+  const inWeek = (r) => r.date >= start && r.date <= end;
+  const hasMarks = (list, idField, id) => list.some((r) => r[idField] === id && inWeek(r) && Object.keys(r.scores || {}).length);
+  const studs = state.roster.filter((s) => s.active !== false || hasMarks(state.attendance || [], "studentId", s.id))
+    .sort((a, b) => (a.last + a.first).localeCompare(b.last + b.first));
+  const row = (num, last, first, st, recFor) => ({
+    num, last, first, total: sheetRound(st.attPts), percent: st.attPoss ? st.attPts / st.attPoss : null,
+    cells: cols.map((c) => sheetCellFor(recFor(c.date), c.period)),
+  });
+  const students = studs.map((s, i) => row(i + 1, s.last, s.first, computeStats(s.id, { from: start, to: end }), (d) => attendanceRecord(d, s.id)));
+  const staffList = (state.staff || []).filter((s) => hasMarks(state.staffAttendance || [], "staffId", s.id))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const staff = staffList.map((s, i) => row(i + 1, s.name, "", computeStaffStats(s.id, { from: start, to: end }), (d) => staffSelfRecord(d, s.id)));
+  return {
+    n, title: "Week " + n + " — " + start + " to " + end,
+    cols, students, staff,
+    perfect: { cells: cols.map((c) => c.max), total: sheetRound(cols.reduce((t, c) => t + (c.bonus ? 0 : c.max), 0)) },
+  };
+}
+
+function sheetBuildSummary(cfg) {
+  const one = sheetWeekOne(cfg);
+  const today = todayISO();
+  let last = sheetWeekNo(cfg, today);
+  (state.attendance || []).concat(state.staffAttendance || []).forEach((r) => { const w = sheetWeekNo(cfg, r.date); if (w > last) last = w; });
+  last = Math.max(last, 1);
+  const weeks = []; for (let n = 1; n <= last; n++) weeks.push({ n });
+  const wRange = (n) => { const s = shiftDate(one, (n - 1) * 7); return { from: s, to: shiftDate(s, 6) }; };
+  const perfect = weeks.map((w) => {
+    const r = wRange(w.n); let t = 0;
+    for (let i = 0; i < 7; i++) { const d = shiftDate(r.from, i); periodsForDate(d).forEach((p) => { if (!isBonusPeriod(d, p)) t += periodMaxFor(p, d); }); }
+    return sheetRound(t);
+  });
+  const classes = (state.settings.periods || []).slice();
+  // "Times present / times held" per class, computed with one pass over the data (the app's own
+  // periodSessionCounts re-scans every record for every question, far too slow for a whole year).
+  const held = new Set();
+  const recByKey = new Map();
+  (state.attendance || []).forEach((r) => {
+    recByKey.set(r.studentId + "|" + r.date, r);
+    Object.keys(r.scores || {}).forEach((p) => { const pr = r.scores[p]; if (pr && ((pr[0] !== null && pr[0] !== undefined && pr[0] !== "") || pr[4])) held.add(r.date + "|" + p); });
+  });
+  const dayPeriods = {};
+  const lastDate = shiftDate(one, last * 7 - 1);
+  for (let d = one; d <= lastDate && d <= today; d = shiftDate(d, 1)) dayPeriods[d] = periodsForDate(d).filter((p) => !isBonusPeriod(d, p) && held.has(d + "|" + p));
+  const classCounts = (id) => classes.map((p) => {
+    let scheduled = 0, attended = 0;
+    Object.keys(dayPeriods).forEach((d) => {
+      if (!dayPeriods[d].includes(p)) return;
+      scheduled++;
+      const rec = recByKey.get(id + "|" + d); const pr = rec && rec.scores && rec.scores[p];
+      if (pr && !pr[4] && pr[0] !== null && pr[0] !== undefined && pr[0] !== "" && Number(pr[0]) > 0) attended++;
+    });
+    return { attended, scheduled };
+  });
+  const hasAny = (list, idField, id) => list.some((r) => r[idField] === id && Object.keys(r.scores || {}).length);
+  const studs = state.roster.filter((s) => s.active !== false || hasAny(state.attendance || [], "studentId", s.id))
+    .sort((a, b) => (a.last + a.first).localeCompare(b.last + b.first));
+  const mk = (num, last, first, id, isStaff) => {
+    const stat = isStaff ? computeStaffStats : computeStats;
+    const weekStats = weeks.map((w) => stat(id, wRange(w.n)));
+    const all = stat(id, { from: one });
+    const whole = stat(id, {});
+    return {
+      num, last, first,
+      weekPts: weekStats.map((s) => sheetRound(s.attPts)),
+      weekPct: weekStats.map((s) => (s.attPoss ? s.attPts / s.attPoss : null)),
+      total: sheetRound(all.attPts), percent: all.attPoss ? all.attPts / all.attPoss : null,
+      coins: { earned: whole.coinsEarned, ledger: isStaff ? 0 : whole.ledgerNet, balance: whole.balance },
+      classes: isStaff ? classes.map(() => ({ attended: 0, scheduled: 0 })) : classCounts(id),
+    };
+  };
+  const students = studs.map((s, i) => mk(i + 1, s.last, s.first, s.id, false));
+  const staff = (state.staff || []).filter((s) => hasAny(state.staffAttendance || [], "staffId", s.id))
+    .sort((a, b) => a.name.localeCompare(b.name)).map((s, i) => mk(i + 1, s.name, "", s.id, true));
+  return { weeks, perfect, classes, students, staff, updatedAt: sheetStamp(Date.now()) };
+}
+
+async function sheetPost(cfg, payload) {
+  const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), 60000) : null;
+  try {
+    const res = await fetch(cfg.url, {
+      method: "POST", redirect: "follow", signal: ctrl ? ctrl.signal : undefined,
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(Object.assign({ secret: cfg.secret }, payload)),
+    });
+    let data = null;
+    try { data = await res.json(); } catch (e) { throw new Error("The sheet script didn't answer properly (check the Web app URL, and that access is set to Anyone)."); }
+    if (!data || !data.ok) throw new Error((data && data.error) || "The sheet script reported a problem.");
+    return data;
+  } finally { if (timer) clearTimeout(timer); }
+}
+
+async function sheetSyncFlush(force) {
+  const cfg = sheetCfg();
+  if (!cfg || sheetSyncBusy) return;
+  if (!navigator.onLine) return;
+  let q = readSheetQueue();
+  if (!sheetQueueSize(q) && !force) return;
+  sheetSyncBusy = true;
+  try {
+    // 1. marks (the durable Log), in chunks
+    let keys = Object.keys(q.marks);
+    for (let i = 0; i < keys.length; i += 150) {
+      const chunk = keys.slice(i, i + 150);
+      await sheetPost(cfg, { marks: chunk.map((k) => sheetMarkPayload(cfg, q.marks[k])) });
+      const fresh = readSheetQueue(); chunk.forEach((k) => { if (JSON.stringify(fresh.marks[k]) === JSON.stringify(q.marks[k])) delete fresh.marks[k]; });
+      writeSheetQueue(fresh); writeSheetStatus({ lastOkAt: Date.now(), lastError: "" });
+    }
+    // 2. weekly grids
+    q = readSheetQueue();
+    const wks = Object.keys(q.weeks).map(Number).filter((n) => n >= 1).sort((a, b) => a - b);
+    for (let i = 0; i < wks.length; i += 3) {
+      const grp = wks.slice(i, i + 3);
+      await sheetPost(cfg, { weeks: grp.map((n) => sheetBuildWeek(cfg, n)) });
+      const fresh = readSheetQueue(); grp.forEach((n) => delete fresh.weeks[n]); writeSheetQueue(fresh);
+      writeSheetStatus({ lastOkAt: Date.now(), lastError: "" });
+    }
+    // 3. summary tabs
+    q = readSheetQueue();
+    if (q.summary) {
+      await sheetPost(cfg, { summary: sheetBuildSummary(cfg) });
+      const fresh = readSheetQueue(); fresh.summary = false; writeSheetQueue(fresh);
+      writeSheetStatus({ lastOkAt: Date.now(), lastError: "" });
+    }
+    writeSheetStatus({ lastOkAt: Date.now(), lastError: "" });
+  } catch (err) {
+    const msg = (err && err.message) || "unknown error";
+    writeSheetStatus({ lastError: msg, lastErrorAt: Date.now() });
+    logProblem("sheet-backup", msg, true);
+    scheduleSheetFlush(60000);
+  } finally {
+    sheetSyncBusy = false;
+    refreshSheetPanel();
+  }
+}
+function scheduleSheetFlush(ms) {
+  if (!sheetCfg()) return;
+  clearTimeout(sheetSyncTimer);
+  sheetSyncTimer = setTimeout(() => sheetSyncFlush(), ms == null ? 4000 : ms);
+}
+// Queue EVERYTHING currently in the app (used by "Send everything now").
+function sheetQueueEverything() {
+  const cfg = state.settings.sheetSync;
+  const q = readSheetQueue();
+  [["attendance", "studentId", "Student"], ["staffAttendance", "staffId", "Staff"]].forEach(([arr, idField, type]) => {
+    (state[arr] || []).forEach((r) => Object.keys(r.scores || {}).forEach((p) => {
+      q.marks[type + "|" + r.date + "|" + p + "|" + r[idField]] = { type, date: r.date, period: p, id: r[idField] };
+      const w = sheetWeekNo(cfg, r.date); if (w >= 1) q.weeks[w] = true;
+    }));
+  });
+  const cur = sheetWeekNo(cfg, todayISO()); if (cur >= 1) q.weeks[cur] = true;
+  q.summary = true;
+  writeSheetQueue(q);
+}
+function refreshSheetPanel() {
+  const el = document.getElementById("sheet-sync-status");
+  if (el) el.innerHTML = sheetStatusHtml();
+}
+function sheetStatusHtml() {
+  const st = readSheetStatus();
+  const waiting = sheetQueueSize();
+  const parts = [];
+  parts.push(waiting ? "<strong>" + waiting + "</strong> item" + (waiting === 1 ? "" : "s") + " waiting to be sent from this device" + (sheetSyncBusy ? " (sending now…)" : "") : "Nothing waiting — this device is caught up.");
+  if (st.lastOkAt) parts.push("Last successful send from this device: " + new Date(st.lastOkAt).toLocaleString() + ".");
+  if (st.lastError) parts.push('<span style="color:var(--warn);">Last problem: ' + escapeHtml(st.lastError) + "</span>");
+  return parts.join("<br>");
+}
+
+function renderAdminSheet(root) {
+  const c = (state.settings && state.settings.sheetSync) || {};
+  const suggested = c.weekOne || sheetWeekOne(c);
+  root.innerHTML =
+    '<div class="card card-pad"><div class="section-title">Google Sheet backup</div>' +
+    '<p class="help-text" style="margin-top:0;">Every attendance mark saved in the app is also copied into a Google Sheet you own — a second copy outside the app, laid out like your old sheet. One-way: changes made in the sheet do not come back into the app.</p>' +
+    '<div class="field"><label for="gs-url">Web app URL (from Apps Script &gt; Deploy)</label><input type="text" id="gs-url" autocomplete="off" value="' + escapeHtml(c.url || "") + '" placeholder="https://script.google.com/macros/s/…/exec"></div>' +
+    '<div class="field"><label for="gs-secret">Secret (the same phrase you put at the top of the script)</label><input type="password" id="gs-secret" autocomplete="off" value="' + escapeHtml(c.secret || "") + '"></div>' +
+    '<div class="field" style="max-width:260px;"><label for="gs-week1">First day of Week 1 (a Sunday)</label><input type="date" id="gs-week1" value="' + escapeHtml(suggested) + '"></div>' +
+    '<label style="display:flex;align-items:center;gap:8px;font-weight:600;margin:8px 0 12px;"><input type="checkbox" id="gs-enabled"' + (c.enabled ? " checked" : "") + ' style="width:auto;"> Send marks to the sheet</label>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-primary btn-sm" id="gs-save">Save</button>' +
+    '<button class="btn btn-ghost btn-sm" id="gs-test">Test connection</button>' +
+    '<button class="btn btn-ghost btn-sm" id="gs-all">Send everything now</button></div>' +
+    '<div id="sheet-sync-msg" class="help-text" style="margin-top:10px;"></div>' +
+    '<div id="sheet-sync-status" class="help-text" style="margin-top:10px;">' + sheetStatusHtml() + "</div></div>";
+  const val = (id) => document.getElementById(id).value.trim();
+  const msg = (t, bad) => { const m = document.getElementById("sheet-sync-msg"); if (m) { m.textContent = t; m.style.color = bad ? "var(--warn)" : "var(--good)"; } };
+  const readForm = () => ({ url: val("gs-url"), secret: val("gs-secret"), weekOne: val("gs-week1") ? sundayOnOrBefore(val("gs-week1")) : "", enabled: document.getElementById("gs-enabled").checked });
+  document.getElementById("gs-save").addEventListener("click", async () => {
+    const f = readForm();
+    if (f.enabled && (!f.url || !f.secret)) { msg("Enter the Web app URL and the secret first.", true); return; }
+    if (f.url && !/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(f.url)) { msg("That doesn’t look like an Apps Script Web app URL (it should end in /exec).", true); return; }
+    const newState = JSON.parse(JSON.stringify(state));
+    newState.settings.sheetSync = f;
+    const res = await saveState(newState);
+    if (res.ok || res.local) { toast("Sheet settings saved.", "good"); renderAll(); }
+  });
+  document.getElementById("gs-test").addEventListener("click", async () => {
+    const f = readForm();
+    if (!f.url || !f.secret) { msg("Enter the URL and secret first.", true); return; }
+    msg("Testing…");
+    try { const r = await sheetPost(f, { action: "ping" }); msg("Connected to the sheet “" + (r.sheet || "?") + "”. Now press Save, then “Send everything now”."); }
+    catch (e) { msg("Couldn’t connect: " + e.message, true); }
+  });
+  document.getElementById("gs-all").addEventListener("click", async () => {
+    if (!sheetCfg()) { msg("Turn on “Send marks to the sheet” and press Save first.", true); return; }
+    sheetQueueEverything();
+    msg("Sending everything — this can take a minute or two for a full year of data. You can leave this page.");
+    refreshSheetPanel();
+    await sheetSyncFlush(true);
+    const st = readSheetStatus();
+    msg(sheetQueueSize() ? "Not finished: " + (st.lastError || "will retry automatically.") : "Done — everything is in the sheet.", !!sheetQueueSize());
+  });
 }
 
 /* ================================================================
@@ -6984,7 +7325,7 @@ function renderLeaderboard(root, session) {
    ================================================================ */
 let adminTab = "students";
 function renderAdmin(root) {
-  const tabs = [["students", "Students"], ["staff", "Staff Accounts"], ["privileges", "Coins & Privileges"], ["schedule", "Schedule"]];
+  const tabs = [["students", "Students"], ["staff", "Staff Accounts"], ["privileges", "Coins & Privileges"], ["schedule", "Schedule"], ["sheet", "Google Sheet"]];
   let html = '<div class="page-head"><div><span class="eyebrow">Set everything up</span><h1>Admin</h1>' +
     '<p>The weekly schedule, the coin rule, and every login — staff and student. Everything else in the app reads from here.</p></div></div>';
   html += '<div class="admin-tabs">' + tabs.map((t) => '<button class="admin-tab' + (adminTab === t[0] ? " active" : "") + '" data-admintab="' + t[0] + '">' + t[1] + "</button>").join("") + "</div>";
@@ -6995,6 +7336,7 @@ function renderAdmin(root) {
   if (adminTab === "schedule") renderAdminSchedule(content);
   else if (adminTab === "staff") renderAdminStaff(content);
   else if (adminTab === "students") renderAdminStudents(content);
+  else if (adminTab === "sheet") renderAdminSheet(content);
   else renderAdminPrivileges(content);
 }
 
@@ -9526,6 +9868,11 @@ function listenForLiveUpdates() {
   // document, and the visibilitychange listener above already does one the moment it's looked
   // at again, so there's nothing to gain from a phone in a pocket refetching it every 20s.)
   setInterval(() => { if (document.visibilityState === "visible") syncNow(); }, 20000);
+  // Google Sheet backup: drain whatever was left waiting from an earlier session, and keep
+  // retrying anything that couldn't be sent (offline, script down) every half minute.
+  scheduleSheetFlush(8000);
+  setInterval(() => { sheetSyncFlush(); }, 30000);
+  window.addEventListener("online", () => scheduleSheetFlush(1500));
 }
 function syncNow() {
   STATE_DOC.get().then((snap) => {
