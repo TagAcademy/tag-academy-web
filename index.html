@@ -2385,30 +2385,38 @@ function periodFromChazzanLedgerId(id) {
 async function applyChazzanChoice(dateStr, period, studentIds, enteredByName) {
   const ids = (studentIds || []).filter(Boolean).slice(0, 2);
   const realIds = ids.filter((id) => id !== CHAZZAN_OTHER);
-  const newState = JSON.parse(JSON.stringify(state));
-  newState.settings.chazzan = newState.settings.chazzan || {};
-  newState.settings.chazzan[dateStr] = newState.settings.chazzan[dateStr] || {};
-  newState.ledger = newState.ledger || [];
-  const prefix = chazzanLedgerPrefix(dateStr, period);
-  // Always drop every prior entry under this exact date+period prefix first -- whether we're
-  // about to replace it with new slot(s), or clear it back to "none".
-  newState.ledger = newState.ledger.filter((tx) => !String(tx.id).startsWith(prefix));
-  if (ids.length) {
-    newState.settings.chazzan[dateStr][period] = { studentIds: ids };
-    const share = chazzanShareFor(period, dateStr, ids.length);
-    const hasOther = ids.includes(CHAZZAN_OTHER);
-    const noteBase = "Chazzan — " + period + (ids.length === 2 ? (hasOther ? " (half, with a non-student)" : " (split)") : "");
-    realIds.forEach((studentId) => {
-      newState.ledger.push({
-        id: chazzanLedgerId(dateStr, period, studentId), date: dateStr, studentId, type: "Chazzan Bonus",
-        amount: share, period, note: noteBase,
-        enteredBy: enteredByName, enteredAt: Date.now(),
+  const enteredAt = Date.now();
+  // Written as a function of "the current data" so that if someone else saves at the same moment
+  // (two people on the Chazzan page / Today), saveState can simply re-apply this same pick on top
+  // of their change instead of throwing it away -- it only touches this one date+period.
+  const applyPick = (base) => {
+    const newState = JSON.parse(JSON.stringify(base));
+    newState.settings = newState.settings || {};
+    newState.settings.chazzan = newState.settings.chazzan || {};
+    newState.settings.chazzan[dateStr] = newState.settings.chazzan[dateStr] || {};
+    newState.ledger = newState.ledger || [];
+    const prefix = chazzanLedgerPrefix(dateStr, period);
+    // Always drop every prior entry under this exact date+period prefix first -- whether we're
+    // about to replace it with new slot(s), or clear it back to "none".
+    newState.ledger = newState.ledger.filter((tx) => !String(tx.id).startsWith(prefix));
+    if (ids.length) {
+      newState.settings.chazzan[dateStr][period] = { studentIds: ids };
+      const share = chazzanShareFor(period, dateStr, ids.length);
+      const hasOther = ids.includes(CHAZZAN_OTHER);
+      const noteBase = "Chazzan — " + period + (ids.length === 2 ? (hasOther ? " (half, with a non-student)" : " (split)") : "");
+      realIds.forEach((studentId) => {
+        newState.ledger.push({
+          id: chazzanLedgerId(dateStr, period, studentId), date: dateStr, studentId, type: "Chazzan Bonus",
+          amount: share, period, note: noteBase,
+          enteredBy: enteredByName, enteredAt,
+        });
       });
-    });
-  } else {
-    delete newState.settings.chazzan[dateStr][period];
-  }
-  return saveState(newState);
+    } else {
+      delete newState.settings.chazzan[dateStr][period];
+    }
+    return newState;
+  };
+  return saveState(applyPick(state), { retry: applyPick });
 }
 function attendanceRecord(dateStr, studentId) {
   return state.attendance.find((r) => r.date === dateStr && r.studentId === studentId);
@@ -3176,6 +3184,15 @@ async function saveState(newState, opts) {
     return saveStateError(err);
   }
 }
+/* Convenience for "change this one thing" saves: `mutate(draft)` edits a deep copy it is handed
+   and returns it. It runs once against our copy of the data and -- if someone else saved at the
+   same moment -- again against their newer data, so two people saving different things never
+   cancel each other out (the same retry idea as autosaveStudent). Mutators must only set the
+   specific thing the person changed (not copy values computed from the older data). */
+function saveEdit(mutate, opts) {
+  const run = (base) => mutate(JSON.parse(JSON.stringify(base)));
+  return saveState(run(state), Object.assign({}, opts || {}, { retry: run }));
+}
 function saveStateError(err) {
   const code = err && err.code;
   logProblem("save-failed", (code || "error") + ": " + (err && err.message ? err.message : "unknown error"));
@@ -3828,7 +3845,7 @@ function renderShell(session, previewing) {
   const sidebar = document.getElementById("sidebar");
   if (sidebar) sidebar.innerHTML = sidebarHtml;
   const mobileTabs = document.getElementById("tab-bar");
-  if (mobileTabs) mobileTabs.innerHTML = navHtml;
+  if (mobileTabs) mobileTabs.innerHTML = navHtml + '<button type="button" class="nav-item" data-open-diagnostics="1" title="Data size, speed, and recent problems on this device">Diagnostics</button>';
   const topbarUser = document.getElementById("topbar-user");
   if (topbarUser) topbarUser.innerHTML = mobileUserHtml;
 
@@ -3876,7 +3893,7 @@ function renderAvatarPickerModal(session) {
   root.innerHTML = '<div class="modal-backdrop" id="avatar-picker-backdrop">' +
     '<div class="modal modal-wide">' +
     "<h2>Choose your avatar</h2>" +
-    '<p class="sub">Pick a face from the gallery.</p>' +
+    '<p class="sub">Pick a face from the gallery. <button type="button" class="diag-link" id="avatar-diagnostics-top" style="display:inline;font-size:0.8rem;">Open Diagnostics</button></p>' +
     body +
     '<div style="display:flex;justify-content:space-between;gap:10px;">' +
     '<button type="button" class="btn btn-ghost btn-sm" id="avatar-clear-btn"' + (session.record.photoUrl ? "" : " disabled") + ">Reset to default</button>" +
@@ -3892,6 +3909,8 @@ function renderAvatarPickerModal(session) {
   if (clearBtn) clearBtn.addEventListener("click", () => setMyAvatar(session, null));
   const avatarDiagBtn = document.getElementById("avatar-diagnostics-btn");
   if (avatarDiagBtn) avatarDiagBtn.addEventListener("click", () => { closeAvatarPicker(session); openDiagnostics(); });
+  const avatarDiagTop = document.getElementById("avatar-diagnostics-top");
+  if (avatarDiagTop) avatarDiagTop.addEventListener("click", () => { closeAvatarPicker(session); openDiagnostics(); });
   root.querySelectorAll("[data-avatar-choice]").forEach((btn) => btn.addEventListener("click", () => {
     setMyAvatar(session, AVATAR_GALLERY[Number(btn.getAttribute("data-avatar-choice"))]);
   }));
@@ -5325,11 +5344,12 @@ function wireBonusToggle(root) {
   btn.addEventListener("click", async () => {
     const period = selectedPeriod, date = todayDate;
     const wasOn = isBonusPeriod(date, period);
-    const newState = JSON.parse(JSON.stringify(state));
-    newState.settings.bonusPeriods = newState.settings.bonusPeriods || {};
-    const list = newState.settings.bonusPeriods[date] || [];
-    newState.settings.bonusPeriods[date] = wasOn ? list.filter((p) => p !== period) : list.concat([period]);
-    const res = await saveState(newState);
+    const res = await saveEdit((newState) => {
+      newState.settings.bonusPeriods = newState.settings.bonusPeriods || {};
+      const list = newState.settings.bonusPeriods[date] || [];
+      newState.settings.bonusPeriods[date] = wasOn ? list.filter((p) => p !== period) : (list.includes(period) ? list : list.concat([period]));
+      return newState;
+    });
     if (res.ok || res.local) {
       toast(wasOn ? "Removed bonus for " + period + " today." : period + " marked as bonus for today — it'll only ever help students' averages.", "good");
       renderAll();
@@ -5392,16 +5412,18 @@ function wireSelfMark(root, session) {
     const date = todayDate, period = selectedPeriod, staffId = session.record.id;
     const a = clampScore(attInp ? attInp.value : "", periodMax);
     const p = clampScore(partInp ? partInp.value : "", periodMax);
-    const newState = JSON.parse(JSON.stringify(state));
-    newState.staffAttendance = newState.staffAttendance || [];
-    let rec = newState.staffAttendance.find((r) => r.date === date && r.staffId === staffId);
-    if (a === null && p === null) {
-      if (rec) delete rec.scores[period];
-    } else {
-      if (!rec) { rec = { id: uid("sa"), date, staffId, scores: {} }; newState.staffAttendance.push(rec); }
-      rec.scores[period] = [a, p];
-    }
-    await saveState(newState);
+    const newRecId = uid("sa");
+    await saveEdit((newState) => {
+      newState.staffAttendance = newState.staffAttendance || [];
+      let rec = newState.staffAttendance.find((r) => r.date === date && r.staffId === staffId);
+      if (a === null && p === null) {
+        if (rec) delete rec.scores[period];
+      } else {
+        if (!rec) { rec = { id: newRecId, date, staffId, scores: {} }; newState.staffAttendance.push(rec); }
+        rec.scores[period] = [a, p];
+      }
+      return newState;
+    });
   }
   if (attInp && partInp) {
     const syncPart = () => {
@@ -5466,25 +5488,27 @@ function wireExtraPeriod(root) {
       name = selVal;
     }
     if (!name) { toast("Pick or type a class name first.", "warn"); return; }
-    const newState = JSON.parse(JSON.stringify(state));
-    if (!newState.settings.periods.includes(name)) {
-      newState.settings.periods.push(name);
-      newState.settings.schedule[name] = newState.settings.schedule[name] || [];
-    }
-    if (!newState.settings.extraPeriods) newState.settings.extraPeriods = {};
-    if (!newState.settings.extraPeriods[todayDate]) newState.settings.extraPeriods[todayDate] = [];
-    if (!newState.settings.extraPeriods[todayDate].includes(name)) newState.settings.extraPeriods[todayDate].push(name);
-    const res = await saveState(newState);
+    const res = await saveEdit((newState) => {
+      if (!newState.settings.periods.includes(name)) {
+        newState.settings.periods.push(name);
+        newState.settings.schedule[name] = newState.settings.schedule[name] || [];
+      }
+      if (!newState.settings.extraPeriods) newState.settings.extraPeriods = {};
+      if (!newState.settings.extraPeriods[todayDate]) newState.settings.extraPeriods[todayDate] = [];
+      if (!newState.settings.extraPeriods[todayDate].includes(name)) newState.settings.extraPeriods[todayDate].push(name);
+      return newState;
+    });
     if (res.ok || res.local) { selectedPeriod = name; showAddExtraPeriod = false; showEditPeriodMax = false; todayTouchedCards = new Set(); toast("Added " + name + " for today.", "good"); renderAll(); }
   });
   const removeBtn = document.getElementById("remove-extra-period");
   if (removeBtn) removeBtn.addEventListener("click", async () => {
     const name = selectedPeriod;
-    const newState = JSON.parse(JSON.stringify(state));
-    if (newState.settings.extraPeriods && newState.settings.extraPeriods[todayDate]) {
-      newState.settings.extraPeriods[todayDate] = newState.settings.extraPeriods[todayDate].filter((p) => p !== name);
-    }
-    const res = await saveState(newState);
+    const res = await saveEdit((newState) => {
+      if (newState.settings.extraPeriods && newState.settings.extraPeriods[todayDate]) {
+        newState.settings.extraPeriods[todayDate] = newState.settings.extraPeriods[todayDate].filter((p) => p !== name);
+      }
+      return newState;
+    });
     if (res.ok || res.local) { selectedPeriod = ""; showEditPeriodMax = false; todayTouchedCards = new Set(); toast("Removed " + name + " from today.", "good"); renderAll(); }
   });
 }
@@ -5502,20 +5526,22 @@ function wirePeriodMaxEdit(root) {
     const n = Number(inp ? inp.value : "");
     if (!inp || inp.value === "" || isNaN(n) || n <= 0 || n > 1) { toast("Enter a number greater than 0 and up to 1.", "warn"); return; }
     const period = selectedPeriod, day = dayNameFor(todayDate);
-    const newState = JSON.parse(JSON.stringify(state));
-    newState.settings.periodMaxByDay = newState.settings.periodMaxByDay || {};
-    newState.settings.periodMaxByDay[period] = Object.assign({}, newState.settings.periodMaxByDay[period], { [day]: n });
-    const res = await saveState(newState);
+    const res = await saveEdit((newState) => {
+      newState.settings.periodMaxByDay = newState.settings.periodMaxByDay || {};
+      newState.settings.periodMaxByDay[period] = Object.assign({}, newState.settings.periodMaxByDay[period], { [day]: n });
+      return newState;
+    });
     if (res.ok || res.local) { showEditPeriodMax = false; toast(period + " on " + day + " is now worth up to " + num2(n) + ".", "good"); renderAll(); }
   });
   const resetBtn = document.getElementById("edit-period-max-reset");
   if (resetBtn) resetBtn.addEventListener("click", async () => {
     const period = selectedPeriod, day = dayNameFor(todayDate);
-    const newState = JSON.parse(JSON.stringify(state));
-    if (newState.settings.periodMaxByDay && newState.settings.periodMaxByDay[period]) {
-      delete newState.settings.periodMaxByDay[period][day];
-    }
-    const res = await saveState(newState);
+    const res = await saveEdit((newState) => {
+      if (newState.settings.periodMaxByDay && newState.settings.periodMaxByDay[period]) {
+        delete newState.settings.periodMaxByDay[period][day];
+      }
+      return newState;
+    });
     if (res.ok || res.local) { showEditPeriodMax = false; toast(period + " on " + day + " now follows the class's normal max again.", "good"); renderAll(); }
   });
 }
@@ -5527,20 +5553,22 @@ function wireCancelPeriod(root) {
   const cancelBtn = document.getElementById("cancel-period-today");
   if (cancelBtn) cancelBtn.addEventListener("click", async () => {
     const name = selectedPeriod;
-    const newState = JSON.parse(JSON.stringify(state));
-    newState.settings.canceledPeriods = newState.settings.canceledPeriods || {};
-    const list = newState.settings.canceledPeriods[todayDate] || [];
-    if (!list.includes(name)) newState.settings.canceledPeriods[todayDate] = list.concat([name]);
-    const res = await saveState(newState);
+    const res = await saveEdit((newState) => {
+      newState.settings.canceledPeriods = newState.settings.canceledPeriods || {};
+      const list = newState.settings.canceledPeriods[todayDate] || [];
+      if (!list.includes(name)) newState.settings.canceledPeriods[todayDate] = list.concat([name]);
+      return newState;
+    });
     if (res.ok || res.local) { selectedPeriod = ""; showEditPeriodMax = false; todayTouchedCards = new Set(); toast(name + " marked as not held on " + fmtDateShort(todayDate) + ".", "good"); renderAll(); }
   });
   root.querySelectorAll("[data-restore-period]").forEach((btn) => btn.addEventListener("click", async () => {
     const name = btn.getAttribute("data-restore-period");
-    const newState = JSON.parse(JSON.stringify(state));
-    if (newState.settings.canceledPeriods && newState.settings.canceledPeriods[todayDate]) {
-      newState.settings.canceledPeriods[todayDate] = newState.settings.canceledPeriods[todayDate].filter((p) => p !== name);
-    }
-    const res = await saveState(newState);
+    const res = await saveEdit((newState) => {
+      if (newState.settings.canceledPeriods && newState.settings.canceledPeriods[todayDate]) {
+        newState.settings.canceledPeriods[todayDate] = newState.settings.canceledPeriods[todayDate].filter((p) => p !== name);
+      }
+      return newState;
+    });
     if (res.ok || res.local) { toast("Restored " + name + " for " + fmtDateShort(todayDate) + ".", "good"); renderAll(); }
   }));
 }
@@ -5598,10 +5626,12 @@ function wireGcGrant(root, session) {
     if (!studentId) { toast("Pick a student.", "warn"); return; }
     if (!date || !amount || amount <= 0) { toast("Pick a date and a positive amount.", "warn"); return; }
     submitBtn.disabled = true;
-    const newState = JSON.parse(JSON.stringify(state));
-    newState.gcBonusCredits = newState.gcBonusCredits || [];
-    newState.gcBonusCredits.push({ id: uid("gcb"), date, studentId, amount, note, enteredBy: session.record.name, enteredAt: Date.now() });
-    const res = await saveState(newState);
+    const credit = { id: uid("gcb"), date, studentId, amount, note, enteredBy: session.record.name, enteredAt: Date.now() };
+    const res = await saveEdit((newState) => {
+      newState.gcBonusCredits = (newState.gcBonusCredits || []).filter((c) => c.id !== credit.id);
+      newState.gcBonusCredits.push(credit);
+      return newState;
+    });
     if (res.ok || res.local) {
       const s = studentById(studentId);
       gcGrantOpen = false;
@@ -5613,9 +5643,10 @@ function wireGcGrant(root, session) {
   });
   root.querySelectorAll("[data-delete-gc-credit]").forEach((btn) => btn.addEventListener("click", async () => {
     const id = btn.getAttribute("data-delete-gc-credit");
-    const newState = JSON.parse(JSON.stringify(state));
-    newState.gcBonusCredits = (newState.gcBonusCredits || []).filter((c) => c.id !== id);
-    const res = await saveState(newState);
+    const res = await saveEdit((newState) => {
+      newState.gcBonusCredits = (newState.gcBonusCredits || []).filter((c) => c.id !== id);
+      return newState;
+    });
     if (res.ok || res.local) { toast("Bonus credit deleted.", "good"); renderAll(); }
   }));
 }
@@ -5945,7 +5976,7 @@ function wireTodayGrid(root, teacherName) {
     if (!lastSaveUndo) return;
     undoBtn.disabled = true;
     const { date, period, snapshot } = lastSaveUndo;
-    const newState = JSON.parse(JSON.stringify(state));
+    const res = await saveEdit((newState) => {
     newState.staffAttendance = newState.staffAttendance || [];
     // Keys are "<id>" for a student or "staff:<id>" for a staff/teacher row (see buildTodayPatch's
     // draftKey) -- Eagle can mix both in one save, so Undo has to route each one back to the
@@ -5964,7 +5995,8 @@ function wireTodayGrid(root, teacherName) {
         rec.scores[period] = prior;
       }
     });
-    const res = await saveState(newState);
+    return newState;
+    });
     if (res.ok || res.local) {
       lastSaveUndo = null;
       toast("Undid the last save for " + period + ".", "good");
