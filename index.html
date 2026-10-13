@@ -1426,7 +1426,15 @@ html.tv-mode #tv-root { display: block; }
 .tv-layout-all .tv-zone { padding: 1.1rem 1.5rem; }
 .tv-layout-all .tv-zone-head { margin-bottom: .6rem; }
 .tv-layout-all .tv-zone-head h2 { font-size: 2.5rem; }
-.tv-layout-all .tv-col-right { grid-template-rows: 1.55fr 1fr; }
+.tv-layout-all .tv-col-right { grid-template-rows: 1fr; }
+.tv-layout-all .tv-col-right .tv-zone-announce { display: none; }
+.tv-layout-all .tv-col-right.has-announce { grid-template-rows: 1.55fr 1fr; }
+.tv-layout-all .tv-col-right.has-announce .tv-zone-announce { display: flex; }
+.tv-zone-announce { gap: .6rem; background: linear-gradient(135deg, var(--tv-info), #1b2f6e); border-color: transparent; }
+.tv-zone-announce.is-celebration { background: linear-gradient(135deg, var(--tv-celebrate), #6e4c08); }
+.tv-zone-announce.is-urgent { background: linear-gradient(135deg, var(--tv-urgent), #6e1a12); }
+.tv-ann-label { font-size: 1.5rem; letter-spacing: .14em; text-transform: uppercase; font-weight: 800; color: rgba(255,255,255,.75); }
+.tv-ann-text { flex: 1; min-height: 0; display: flex; align-items: center; font-family: var(--font-display, Arial, sans-serif); font-weight: 800; line-height: 1.15; color: #fff; overflow: hidden; overflow-wrap: anywhere; }
 .tv-layout-attendance .tv-att-pct { font-size: 10rem; } .tv-layout-attendance .tv-att-pct small { font-size: 1.8rem; }
 .tv-layout-attendance .tv-tile b { font-size: 5.2rem; } .tv-layout-attendance .tv-tile span { font-size: 1.7rem; } .tv-layout-attendance .tv-tile { padding: 1.2rem 1.6rem; }
 .tv-layout-attendance .tv-zone-head h2 { font-size: 4.4rem; }
@@ -10388,6 +10396,7 @@ function tvTick() {
     else tvUpdateCountdown(now);
   }
   tvUpdateTicker(now);
+  tvUpdateAnnouncePanel(now);
   if (TV.dirty) TV.dirty = false;
   if (now - S.hb >= 60000) { S.hb = now; tvHeartbeat(); }
   if (now - S.shift >= 240000) { S.shift = now; tvShiftCanvas(); }
@@ -10427,7 +10436,9 @@ function tvBuildLayout(layout) {
   const z = (name, extra) => '<section class="tv-zone tv-zone-' + name + (extra || "") + '" data-zone="' + name + '"></section>';
   let main = "", bottom = "";
   if (layout === "all") {
-    main = z("photos") + '<div class="tv-col-right">' + z("leaderboard") + z("attendance") + "</div>";
+    // Announcements take the spot under the leaderboard; with nothing posted the leaderboard gets the
+    // whole column (see tvUpdateAnnouncePanel). Live attendance has its own full-screen layout.
+    main = z("photos") + '<div class="tv-col-right" id="tv-col-right">' + z("leaderboard") + z("announce") + "</div>";
     bottom = z("calendar") + z("clock");
   } else if (layout === "split") {
     main = z("photos") + z("leaderboard"); bottom = z("clock", " tv-clock-small");
@@ -10443,6 +10454,7 @@ function tvBuildLayout(layout) {
   if (TV.zones.attendance) { tvUpdateAttendance(); tvRefreshLive(); }
   if (TV.zones.leaderboard) tvUpdateLeaderboard();
   TV.tickerKey = null;
+  if (TV.zones.announce) { TV.zones.announce.key = null; tvUpdateAnnouncePanel(Date.now()); }
 }
 
 /* ---------- clock ---------- */
@@ -10506,8 +10518,10 @@ function tvUpdateLeaderboard() {
   const list = cats.length ? cats : LEADERBOARD_CATEGORIES;
   const cat = list[((TV.lbIdx % list.length) + list.length) % list.length];
   const range = lbRangeFor(lbCfg.scope, todayISO(), null, null);
-  // The combined "Everything" layout only has room for the top 5; full-screen boards honor the setting.
-  const places = Math.min(TV.layout === "all" ? 5 : 10, Math.max(3, Number(lbCfg.places) || 8));
+  // The combined "Everything" layout only has room for the top 5 while an announcement shares its
+  // column; otherwise (and on full-screen boards) the setting is honored.
+  const squeezed = TV.layout === "all" && !!tvLiveAnnouncement(Date.now());
+  const places = Math.min(squeezed ? 5 : 10, Math.max(3, Number(lbCfg.places) || 8));
   const entries = activeRoster().map((s) => Object.assign({ student: s }, leaderboardEntryFor(s.id, cat.id, range)));
   const ranked = entries.filter((e) => e.value !== null && e.value !== undefined).sort((a, b) => b.value - a.value);
   const ranks = competitionRanks(ranked);
@@ -10710,10 +10724,44 @@ function tvUpdateCalendar() {
 }
 
 /* ---------- ticker (announcement) ---------- */
+function tvLiveAnnouncement(now) {
+  const a = TV.cfg.announcement;
+  return a && a.text && String(a.text).trim() && (a.until === null || a.until === undefined || Number(a.until) > now) ? a : null;
+}
+// The main ("all") layout shows the announcement in its own panel under the leaderboard instead of
+// the scrolling ticker; every other layout keeps the ticker.
+function tvUpdateAnnouncePanel(now) {
+  const zone = TV.zones.announce; if (!zone) return;
+  const a = tvLiveAnnouncement(now);
+  const key = a ? (a.style || "info") + "|" + a.text : "";
+  if (zone.key === key) return;
+  zone.key = key;
+  const col = document.getElementById("tv-col-right");
+  if (col) col.classList.toggle("has-announce", !!a);
+  if (TV.zones.leaderboard) tvUpdateLeaderboard(); // its room (and so how many places fit) just changed
+  if (!a) { zone.el.innerHTML = ""; return; }
+  const style = ["celebration", "urgent"].includes(a.style) ? a.style : "info";
+  const text = String(a.text).trim();
+  zone.el.className = "tv-zone tv-zone-announce is-" + style;
+  zone.el.innerHTML = '<div class="tv-ann-label">' + ({ celebration: "Mazal tov", urgent: "Important" }[style] || "Announcement") + "</div>" +
+    '<div class="tv-ann-text"><span>' + escapeHtml(text) + "</span></div>";
+  tvFitAnnouncement(zone.el);
+  // Fitting measures the text, so redo it once the web fonts have actually arrived.
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => tvFitAnnouncement(zone.el));
+}
+// As big as it can be while still fitting the panel: start large and step down until the text's
+// own height fits the box.
+function tvFitAnnouncement(root) {
+  const box = root.querySelector(".tv-ann-text"), span = box && box.firstChild;
+  if (!span) return;
+  let size = 4.6;
+  box.style.fontSize = size + "rem";
+  while (size > 1.4 && span.offsetHeight > box.clientHeight) { size -= 0.2; box.style.fontSize = size.toFixed(1) + "rem"; }
+}
 function tvUpdateTicker(now) {
   const el = document.getElementById("tv-ticker"); if (!el) return;
-  const a = TV.cfg.announcement;
-  const live = a && a.text && String(a.text).trim() && (a.until === null || a.until === undefined || Number(a.until) > now);
+  const a = TV.zones.announce ? null : tvLiveAnnouncement(now);
+  const live = !!a;
   const key = live ? (a.style || "info") + "|" + a.text : "";
   if (TV.tickerKey === key) return;
   TV.tickerKey = key;
@@ -10838,7 +10886,7 @@ function renderTvControl(root, session) {
   // Announcement
   const annText = TVC.annText !== null ? TVC.annText : (ann ? ann.text : "");
   html += '<div class="card card-pad tvc-card"><div class="section-title">Announcement</div>' +
-    (ann ? '<p class="tvc-live-ann tvc-ann-' + escapeHtml(ann.style || "info") + '">On screen now: ' + escapeHtml(ann.text) + "</p>" : '<p class="help-text">Nothing posted. It scrolls along the bottom of the TV.</p>') +
+    (ann ? '<p class="tvc-live-ann tvc-ann-' + escapeHtml(ann.style || "info") + '">On screen now: ' + escapeHtml(ann.text) + "</p>" : '<p class="help-text">Nothing posted. It shows under the leaderboard on the main screen, and scrolls along the bottom of the other layouts.</p>') +
     '<textarea id="tvc-ann-text" class="tvc-textarea" rows="2" maxlength="240" placeholder="e.g. Mazal tov to Sruly on his bar mitzvah!">' + escapeHtml(annText) + "</textarea>" +
     '<div class="tvc-sub">Style</div><div class="tvc-chips">' + TVC_ANN_STYLES.map(([v, l]) => '<button type="button" class="tvc-chip' + (TVC.annStyle === v ? " active" : "") + '" data-tvc-annstyle="' + v + '">' + l + "</button>").join("") + "</div>" +
     '<div class="tvc-sub">Show for</div><div class="tvc-chips">' + TVC_ANN_EXPIRY.map(([ms, l]) => '<button type="button" class="tvc-chip' + (TVC.annExpiry === ms ? " active" : "") + '" data-tvc-annexp="' + ms + '">' + l + "</button>").join("") + "</div>" +
