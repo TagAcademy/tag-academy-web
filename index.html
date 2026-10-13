@@ -1524,7 +1524,9 @@ html.tv-mode #tv-root { display: block; }
 .tv-cd-time.has-hours { font-size: 3.6rem; }
 .tv-day-list { list-style: none; margin: 0; padding: 0; flex: 1; min-width: 0; min-height: 0; display: grid; grid-auto-flow: column; grid-template-rows: repeat(var(--rows, 6), minmax(0, 1fr)); grid-auto-columns: minmax(0, 1fr); gap: .35rem 1.2rem; container-type: size; }
 .tv-day-ev { display: flex; align-items: center; gap: 1rem; min-height: 0; padding: 0 .9rem; border-radius: .6rem; font-size: min(1.9rem, calc(100cqh / var(--rows, 6) * .55)); border-left: .35rem solid transparent; }
-.tv-day-ev time { flex: none; width: 4.6em; color: var(--tv-muted); font-variant-numeric: tabular-nums; font-weight: 600; }
+.tv-day-ev time { flex: none; width: 4.6em; color: var(--tv-muted); font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.tv-day-ev time.is-since { display: flex; flex-direction: column; line-height: 1; }
+.tv-day-ev time.is-since small { font-size: .55em; text-transform: uppercase; letter-spacing: .08em; }
 .tv-day-ev span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
 .tv-day-ev.is-past { opacity: .4; }
 .tv-day-ev.is-past span { font-weight: 500; }
@@ -1532,15 +1534,17 @@ html.tv-mode #tv-root { display: block; }
 .tv-day-ev.is-now time { color: var(--tv-good); }
 .tv-day-ev.is-next { background: var(--tv-panel-2); border-left-color: var(--tv-brand); }
 .tv-layout-calendar .tv-cal-body { gap: 2.2rem; }
-.tv-layout-calendar .tv-cd { width: 34%; padding: 2rem 2.4rem; gap: .6rem; }
+.tv-layout-calendar .tv-cd { width: 30%; padding: 2rem 2.4rem; gap: .6rem; }
 .tv-layout-calendar .tv-cd-now { font-size: 2.2rem; white-space: normal; line-height: 1.25; }
 .tv-layout-calendar .tv-cd-label { font-size: 2rem; }
 .tv-layout-calendar .tv-cd-title { font-size: 4.4rem; }
-.tv-layout-calendar .tv-cd-time { font-size: 9rem; }
+.tv-layout-calendar .tv-cd-time { font-size: 8rem; }
+/* Rows are tall here, so a long class name gets a second line instead of being cut off. */
+.tv-layout-calendar .tv-day-ev span { white-space: normal; line-height: 1.1; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .tv-layout-calendar .tv-cd-time small { font-size: 2.2rem; }
 .tv-layout-calendar .tv-cd-time.has-hours { font-size: 6.4rem; }
 .tv-layout-calendar .tv-cd-time.is-later { font-size: 5rem; }
-.tv-layout-calendar .tv-day-ev { font-size: min(2.8rem, calc(100cqh / var(--rows, 8) * .55)); }
+.tv-layout-calendar .tv-day-ev { font-size: min(2.5rem, calc(100cqh / var(--rows, 8) * .5)); }
 .tv-cd > * { flex: none; }
 /* No room for the "Now" line in the combined layout's short strip -- the list's green row shows it. */
 .tv-layout-all .tv-cd-now { display: none; }
@@ -10685,10 +10689,17 @@ function tvUpdateCalendar() {
 
   const row = (e) => {
     const kind = e.end <= now ? " is-past" : e.start <= now ? " is-now" : e === next ? " is-next" : "";
-    return '<li class="tv-day-ev' + kind + '"><time>' + tvTimeStr(e.start) + "</time><span>" + escapeHtml(e.title) + "</span></li>";
+    // Something that began yesterday (e.g. last night's Lights out, still running) would otherwise
+    // sit at the top of today's list with a "10:45 PM" that reads like tonight.
+    const when = e.start < todayStart ? '<time class="is-since"><small>since</small>' + tvTimeStr(e.start) + "</time>" : "<time>" + tvTimeStr(e.start) + "</time>";
+    return '<li class="tv-day-ev' + kind + '">' + when + "<span>" + escapeHtml(e.title) + "</span></li>";
   };
+  // Two columns whenever the day allows, so class names have room to be read; a third column only
+  // on a very full day. The rows shrink to fit (see .tv-day-ev's font-size).
+  const cols = today.length <= (full ? 18 : 12) ? 2 : 3;
+  const rows = Math.max(full ? 6 : 4, Math.ceil(today.length / cols));
   const list = today.length
-    ? '<ol class="tv-day-list" style="--rows:' + (full ? Math.max(8, Math.ceil(today.length / 2)) : Math.max(4, Math.ceil(today.length / 3))) + ';">' + today.map(row).join("") + "</ol>"
+    ? '<ol class="tv-day-list" style="--rows:' + rows + ';">' + today.map(row).join("") + "</ol>"
     : '<div class="tv-cal-note">Nothing on the calendar today</div>';
 
   let html = '<div class="tv-zone-head"><div class="tv-head-l"><span class="tv-eyebrow">Schedule</span><h2>Today</h2></div>' +
