@@ -1435,17 +1435,9 @@ html.tv-mode #tv-root { display: block; }
 .tv-zone-announce.is-urgent { background: linear-gradient(135deg, var(--tv-urgent), #6e1a12); }
 .tv-ann-label { font-size: 1.5rem; letter-spacing: .14em; text-transform: uppercase; font-weight: 800; color: rgba(255,255,255,.75); }
 .tv-ann-text { flex: 1; min-height: 0; display: flex; align-items: center; font-family: var(--font-display, Arial, sans-serif); font-weight: 800; line-height: 1.15; color: #fff; overflow: hidden; overflow-wrap: anywhere; }
-.tv-layout-attendance .tv-att-pct { font-size: 10rem; } .tv-layout-attendance .tv-att-pct small { font-size: 1.8rem; }
-.tv-layout-attendance .tv-tile b { font-size: 5.2rem; } .tv-layout-attendance .tv-tile span { font-size: 1.7rem; } .tv-layout-attendance .tv-tile { padding: 1.2rem 1.6rem; }
-.tv-layout-attendance .tv-zone-head h2 { font-size: 4.4rem; }
-.tv-layout-attendance .tv-class-chip { font-size: 2.2rem; }
-.tv-att-inline { margin-left: auto; text-align: right; font-family: var(--font-display, Arial, sans-serif); font-size: 3.6rem; line-height: 1; font-weight: 800; color: var(--tv-good); font-variant-numeric: tabular-nums; }
-.tv-att-inline small { display: block; font-size: 1.05rem; letter-spacing: .1em; text-transform: uppercase; color: var(--tv-muted); font-weight: 700; margin-top: .2rem; }
-.tv-layout-all .tv-att-tiles { margin-top: .2rem; }
-.tv-layout-all .tv-tile b { white-space: nowrap; }
 .tv-layout-split .tv-main { grid-template-columns: 1fr 1fr; }
-.tv-layout-photos .tv-main, .tv-layout-leaderboard .tv-main, .tv-layout-attendance .tv-main, .tv-layout-calendar .tv-main { grid-template-columns: 1fr; }
-.tv-layout-photos .tv-bottom, .tv-layout-leaderboard .tv-bottom, .tv-layout-attendance .tv-bottom, .tv-layout-calendar .tv-bottom, .tv-layout-split .tv-bottom { flex: none; height: 7.2rem; }
+.tv-layout-photos .tv-main, .tv-layout-leaderboard .tv-main, .tv-layout-calendar .tv-main { grid-template-columns: 1fr; }
+.tv-layout-photos .tv-bottom, .tv-layout-leaderboard .tv-bottom, .tv-layout-calendar .tv-bottom, .tv-layout-split .tv-bottom { flex: none; height: 7.2rem; }
 /* clock */
 .tv-zone-clock { flex: none; justify-content: center; }
 .tv-layout-all .tv-zone-clock { width: 31%; align-items: flex-end; text-align: right; padding: .8rem 1.6rem; }
@@ -1453,10 +1445,6 @@ html.tv-mode #tv-root { display: block; }
 .tv-layout-all .tv-clock-date { font-size: 1.8rem; margin-top: .2rem; line-height: 1.15; }
 .tv-layout-all .tv-clock-heb { font-size: 1.8rem; margin-top: 0; line-height: 1.2; }
 .tv-layout-all .tv-clock-parsha { font-size: 1.45rem; margin-top: 0; line-height: 1.15; }
-.tv-layout-all .tv-att-tiles { grid-template-columns: repeat(4, 1fr); gap: .6rem; }
-.tv-layout-all .tv-av-grid { flex-wrap: nowrap; flex: none; align-items: center; }
-.tv-layout-all .tv-av-grid .lb-avatar { flex: none; }
-.tv-av-more { flex: none; font-size: 1.7rem; font-weight: 800; color: var(--tv-muted); padding: 0 .6rem; }
 .tv-clock-time { font-family: var(--font-display, Arial, sans-serif); font-size: 6.4rem; font-weight: 800; line-height: 1; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
 .tv-clock-date { font-size: 2.1rem; color: var(--tv-ink); margin-top: .5rem; font-weight: 600; }
 .tv-clock-heb { font-size: 2rem; color: var(--tv-gold); margin-top: .25rem; font-weight: 600; }
@@ -1476,8 +1464,8 @@ html.tv-mode #tv-root { display: block; }
 .tv-photo-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.4rem; color: var(--tv-muted); font-size: 2.2rem; background: radial-gradient(circle at 50% 40%, #16224a, #070b16 70%); }
 .tv-photo-empty img { width: 14rem; height: 14rem; object-fit: contain; opacity: .9; }
 /* leaderboard */
-.tv-lb { list-style: none; margin: 0; padding: 0; flex: 1; min-height: 0; container-type: size; display: grid; grid-template-rows: repeat(var(--n, 8), 1fr); gap: .5rem; }
-.tv-lb-row { display: flex; align-items: center; gap: 1.2rem; min-height: 0; padding: 0 1.2rem; border-radius: .9rem; background: var(--tv-panel-2); font-size: min(2.8rem, calc(100cqh / var(--n, 8) * .5)); }
+.tv-lb { list-style: none; margin: 0; padding: 0; flex: 1; min-height: 0; min-width: 0; container-type: size; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: repeat(var(--n, 8), 1fr); gap: .5rem; }
+.tv-lb-row { display: flex; align-items: center; gap: 1.2rem; min-height: 0; min-width: 0; padding: 0 1.2rem; border-radius: .9rem; background: var(--tv-panel-2); font-size: min(2.8rem, calc(100cqh / var(--n, 8) * .5)); }
 .tv-lb-rank { flex: none; width: 2.1em; text-align: center; font-family: var(--font-display, Arial, sans-serif); font-weight: 800; color: var(--tv-muted); }
 .tv-lb-row.r1 { background: linear-gradient(90deg, rgba(243,203,107,.28), var(--tv-panel-2)); } .tv-lb-row.r1 .tv-lb-rank { color: var(--tv-gold); }
 .tv-lb-row.r2 { background: linear-gradient(90deg, rgba(195,204,226,.20), var(--tv-panel-2)); } .tv-lb-row.r2 .tv-lb-rank { color: var(--tv-silver); }
@@ -1492,30 +1480,10 @@ html.tv-mode #tv-root { display: block; }
 .tv-dot { width: 1rem; height: 1rem; border-radius: 50%; background: var(--tv-line); } .tv-dot.on { background: var(--tv-gold); }
 .tv-lb-head-right { margin-left: auto; display: flex; align-items: center; gap: 1.6rem; }
 .tv-lb-head-right .tv-scope { margin-left: 0; }
-/* attendance */
-.tv-att-top { display: flex; gap: 2rem; align-items: center; flex: none; }
-.tv-layout-all .tv-att-top { gap: 1.2rem; }
 
-.tv-layout-all .tv-att-pct small { font-size: 1.1rem; }
-.tv-layout-all .tv-tile { padding: .4rem .9rem; } .tv-layout-all .tv-tile b { font-size: 2.4rem; } .tv-layout-all .tv-tile span { font-size: 1.1rem; }
-.tv-layout-all .tv-av-grid { margin-top: .7rem; gap: .6rem; }
-.tv-att-pct { font-family: var(--font-display, Arial, sans-serif); font-size: 7rem; line-height: 1; font-weight: 800; color: var(--tv-good); font-variant-numeric: tabular-nums; }
-.tv-att-pct small { display: block; font-size: 1.5rem; letter-spacing: .1em; text-transform: uppercase; color: var(--tv-muted); font-weight: 700; margin-top: .4rem; }
-.tv-att-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 1rem; flex: 1; }
-.tv-tile { background: var(--tv-panel-2); border-radius: .9rem; padding: .9rem 1.2rem; }
-.tv-tile b { display: block; font-family: var(--font-display, Arial, sans-serif); font-size: 3.4rem; line-height: 1.05; font-variant-numeric: tabular-nums; }
-.tv-tile span { font-size: 1.4rem; color: var(--tv-muted); text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }
-.tv-tile.present b { color: var(--tv-good); } .tv-tile.absent b { color: var(--tv-warn); }
 .tv-head-l .tv-idle-badge { align-self: flex-start; font-size: 1.15rem; padding: .15rem .8rem; }
 @keyframes tvPulse { 50% { opacity: .25; } }
 .tv-idle-badge { font-size: 1.5rem; font-weight: 800; color: var(--tv-muted); border: 1px solid var(--tv-line); border-radius: 99rem; padding: .25rem 1rem; text-transform: uppercase; letter-spacing: .08em; }
-.tv-av-grid { flex: 1; min-height: 0; display: flex; flex-wrap: wrap; align-content: flex-start; gap: .9rem; margin-top: 1.2rem; overflow: hidden; }
-.tv-root .tv-av-grid .lb-avatar { width: var(--av, 5rem); height: var(--av, 5rem); border-radius: 50%; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 0 .25rem rgba(79,209,154,.55); }
-.tv-root .tv-av-grid .lb-avatar img { width: 100%; height: 100%; object-fit: cover; }
-.tv-classes { margin-top: 1.2rem; display: grid; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); gap: .8rem; }
-.tv-class-chip { background: var(--tv-panel-2); border-radius: .8rem; padding: .7rem 1.1rem; font-size: 1.7rem; display: flex; justify-content: space-between; gap: 1rem; }
-.tv-class-chip b { font-family: var(--font-display, Arial, sans-serif); font-variant-numeric: tabular-nums; color: var(--tv-good); }
-.tv-class-chip.cur { outline: .2rem solid var(--tv-brand); }
 /* calendar */
 /* calendar: the whole day as a list, with a live countdown to the next class beside it */
 .tv-cal-body { flex: 1; min-height: 0; display: flex; gap: 1.6rem; }
@@ -10192,9 +10160,8 @@ function syncNow() {
       of it means a TV change can never cause a save conflict for someone marking attendance.
    2. TV mode is read-only for app/state. Its only write anywhere is the heartbeat. saveState()
       itself refuses to run in TV mode as a second line of defense.
-   3. TV mode shows aggregates only: counts and percentages for attendance (plus avatars of
-      present students), the same leaderboard students already see in the app, calendar events.
-      Never absent students' names, notes, passwords, per-student scores, ledger or staff data.
+   3. TV mode shows only what students already see: the leaderboard, calendar events, photos and
+      announcements. Never notes, passwords, per-student scores, ledger or staff data.
    ================================================================ */
 const TV_FLAG_KEY = "tag_tv_mode_v1";
 const TV_EXIT_SEEN_KEY = "tag_tv_exit_seen_v1";
@@ -10204,11 +10171,10 @@ const DISPLAY_DOC = db.collection("app").doc("display");
 const DISPLAY_STATUS_DOC = db.collection("app").doc("displayStatus");
 const DISPLAY_PHOTOS = db.collection("displayPhotos");
 const TV_LAYOUTS = [
-  { id: "all", label: "Everything", hint: "Photos, leaderboard, attendance, calendar, clock" },
+  { id: "all", label: "Everything", hint: "Photos, leaderboard, announcements, calendar, clock" },
   { id: "photos", label: "Photos", hint: "Photo slideshow full screen" },
   { id: "leaderboard", label: "Leaderboard", hint: "Rankings full screen" },
-  { id: "attendance", label: "Live attendance", hint: "Current class, counts and %" },
-  { id: "calendar", label: "Calendar", hint: "Now / next and the week ahead" },
+  { id: "calendar", label: "Calendar", hint: "Today's schedule with a countdown" },
   { id: "split", label: "Photos + Leaderboard", hint: "Half and half" },
 ];
 const TV_LAYOUT_IDS = TV_LAYOUTS.map((l) => l.id);
@@ -10242,7 +10208,6 @@ function tvDefaults() {
     override: null, announcement: null,
     photos: { intervalSecs: 12, kenBurns: true },
     leaderboard: { categories: LEADERBOARD_CATEGORIES.map((c) => c.id), scope: "week", places: 8, secsPerCategory: 12 },
-    attendance: { showPresentGrid: true },
     exitTvNonce: null,
   };
 }
@@ -10250,7 +10215,7 @@ function tvMergeCfg(raw) {
   const d = tvDefaults();
   if (!raw || typeof raw !== "object") return d;
   const out = Object.assign({}, d, raw);
-  ["photos", "leaderboard", "attendance"].forEach((k) => { out[k] = Object.assign({}, d[k], raw[k] || {}); });
+  ["photos", "leaderboard"].forEach((k) => { out[k] = Object.assign({}, d[k], raw[k] || {}); });
   if (!Array.isArray(out.rotate)) out.rotate = d.rotate;
   if (!Array.isArray(out.schedule)) out.schedule = [];
   if (!Array.isArray(out.leaderboard.categories) || !out.leaderboard.categories.length) out.leaderboard.categories = d.leaderboard.categories;
@@ -10297,8 +10262,8 @@ function tvLayoutLabel(id) { const l = TV_LAYOUTS.find((x) => x.id === id); retu
 const TV = {
   cfg: tvDefaults(), photos: [], layout: null, lastLayoutCheck: 0,
   photoIdx: -1, photoSlide: 0, lbIdx: 0, lbStamp: 0,
-  cal: { events: [], fetchedAt: 0, ok: null }, live: { res: null, fetchedAt: 0 },
-  stamps: { photo: 0, lb: 0, cal: 0, live: 0, hb: 0, shift: 0, nightly: 0 },
+  cal: { events: [], fetchedAt: 0, ok: null },
+  stamps: { photo: 0, lb: 0, cal: 0, hb: 0, shift: 0, nightly: 0 },
   exitHandled: false, started: false, dirty: true,
 };
 
@@ -10386,10 +10351,6 @@ function tvTick() {
     if (now - S.lb >= Math.max(5, Number(TV.cfg.leaderboard.secsPerCategory) || 12) * 1000) { S.lb = now; TV.lbIdx++; tvUpdateLeaderboard(); }
     else if (TV.dirty) tvUpdateLeaderboard();
   }
-  if (TV.zones.attendance) {
-    if (now - S.live >= 60000) { S.live = now; tvRefreshLive(); }
-    else if (TV.dirty) tvUpdateAttendance();
-  }
   if (TV.zones.calendar) {
     if (now - S.cal >= 300000) { S.cal = now; tvRefreshCalendar(); }
     else if (TV.dirty || (TV.zones.calendar.lastMin !== Math.floor(now / 60000))) tvUpdateCalendar();
@@ -10437,7 +10398,7 @@ function tvBuildLayout(layout) {
   let main = "", bottom = "";
   if (layout === "all") {
     // Announcements take the spot under the leaderboard; with nothing posted the leaderboard gets the
-    // whole column (see tvUpdateAnnouncePanel). Live attendance has its own full-screen layout.
+    // whole column (see tvUpdateAnnouncePanel).
     main = z("photos") + '<div class="tv-col-right" id="tv-col-right">' + z("leaderboard") + z("announce") + "</div>";
     bottom = z("calendar") + z("clock");
   } else if (layout === "split") {
@@ -10449,9 +10410,8 @@ function tvBuildLayout(layout) {
   canvas.querySelectorAll("[data-zone]").forEach((el) => { TV.zones[el.getAttribute("data-zone")] = { el }; });
   if (TV.zones.photos) tvInitPhotos();
   TV.dirty = true;
-  TV.stamps.lb = Date.now(); TV.stamps.live = Date.now(); TV.stamps.cal = Date.now();
+  TV.stamps.lb = Date.now(); TV.stamps.cal = Date.now();
   if (TV.zones.calendar) { tvUpdateCalendar(); tvRefreshCalendar(); }
-  if (TV.zones.attendance) { tvUpdateAttendance(); tvRefreshLive(); }
   if (TV.zones.leaderboard) tvUpdateLeaderboard();
   TV.tickerKey = null;
   if (TV.zones.announce) { TV.zones.announce.key = null; tvUpdateAnnouncePanel(Date.now()); }
@@ -10534,76 +10494,6 @@ function tvUpdateLeaderboard() {
   const dots = list.length > 1 ? '<span class="tv-dots">' + list.map((c) => '<i class="tv-dot' + (c.id === cat.id ? " on" : "") + '"></i>').join("") + "</span>" : "";
   const html = '<div class="tv-zone-head"><div class="tv-head-l"><span class="tv-eyebrow">Leaderboard</span><h2>' + escapeHtml(cat.label) + '</h2></div><span class="tv-lb-head-right"><span class="tv-scope">' + escapeHtml(range.title) + "</span>" + dots + "</span></div>" +
     (rows.length ? '<ol class="tv-lb" style="--n:' + Math.max(rows.length, Math.min(places, 5)) + ';">' + rows.join("") + "</ol>" : '<div class="tv-lb-empty">No scores yet for ' + escapeHtml(cat.label) + "</div>");
-  if (zone.html !== html) { zone.html = html; zone.el.innerHTML = html; }
-}
-
-/* ---------- live attendance (counts and percentages only) ---------- */
-async function tvRefreshLive() {
-  if (!state) return;
-  todayDate = todayISO(); // fetchLiveCalendarPeriod matches against periodsForDate(todayDate)
-  try { TV.live.res = await fetchLiveCalendarPeriod(); } catch (e) { TV.live.res = { ok: false, reason: "error" }; }
-  TV.live.fetchedAt = Date.now();
-  tvUpdateAttendance();
-}
-// "Present" = any attendance credit above zero. Anyone with an excused mark is counted as
-// excused, not absent. Only totals ever leave this function -- no names for anyone but the
-// avatars of students who are present.
-function tvAttendanceFor(period, date, roster) {
-  let marked = 0, present = 0, absent = 0, excused = 0;
-  const presentStudents = [];
-  roster.forEach((s) => {
-    const rec = attendanceRecord(date, s.id);
-    const pair = rec && rec.scores && rec.scores[period];
-    if (!pair) return;
-    const a = pair[0];
-    const hasA = a !== null && a !== undefined && a !== "";
-    if (pair[4] && !hasA) { excused++; return; }
-    if (!hasA) return;
-    marked++;
-    if (Number(a) > 0) { present++; presentStudents.push(s); } else absent++;
-  });
-  const cs = classStats(period, roster, { from: date, to: date });
-  return { marked, present, absent, excused, notMarked: roster.length - marked - excused, total: roster.length, pct: cs.attPct, presentStudents };
-}
-function tvUpdateAttendance() {
-  const zone = TV.zones.attendance; if (!zone || !state) return;
-  const date = todayISO();
-  const roster = activeRoster();
-  const periods = periodsForDate(date);
-  const res = TV.live.res;
-  const livePeriod = res && res.ok && res.matched && periods.includes(res.matched) ? res.matched : null;
-  const fmtPct = (p) => (p === null || p === undefined ? "—" : Math.round(p * 100) + "%");
-  const compact = TV.layout === "all";
-  const liveA = livePeriod ? tvAttendanceFor(livePeriod, date, roster) : null;
-  // Only a calendar problem gets a badge -- "Between classes" in the heading says the rest.
-  const badge = !livePeriod && res && res.ok === false ? '<span class="tv-idle-badge">' + (res.reason === "not-configured" ? "calendar not set up" : "calendar offline") + "</span>" : "";
-  let html = '<div class="tv-zone-head"><div class="tv-head-l"><span class="tv-eyebrow">Attendance</span><h2>' + escapeHtml(livePeriod || "Between classes") + "</h2></div>" +
-    badge +
-    (compact && liveA ? '<span class="tv-att-inline">' + fmtPct(liveA.pct) + "<small>Class attendance</small></span>" : '<span class="tv-scope">' + escapeHtml(dayNameFor(date)) + "</span>") + "</div>";
-  if (livePeriod) {
-    const a = liveA;
-    html += '<div class="tv-att-top">' + (compact ? "" : '<div class="tv-att-pct">' + fmtPct(a.pct) + "<small>Class attendance</small></div>") +
-      '<div class="tv-att-tiles">' +
-      '<div class="tv-tile"><b>' + a.marked + '<span style="font-size:.5em;color:var(--tv-muted);"> / ' + a.total + "</span></b><span>Marked</span></div>" +
-      '<div class="tv-tile present"><b>' + a.present + "</b><span>Present</span></div>" +
-      '<div class="tv-tile absent"><b>' + a.absent + "</b><span>Absent</span></div>" +
-      (a.excused ? '<div class="tv-tile"><b>' + a.excused + "</b><span>Excused</span></div>" : "") +
-      "</div></div>";
-    if (TV.cfg.attendance.showPresentGrid && a.presentStudents.length) {
-      const n = a.presentStudents.length;
-      if (TV.layout === "all") {
-        // No room for a picture grid in the combined layout -- it lives in the full "Live attendance" layout.
-      } else {
-        const size = n <= 12 ? 6.5 : n <= 24 ? 5 : n <= 40 ? 4 : 3.2;
-        html += '<div class="tv-av-grid" style="--av:' + size + 'rem;">' + a.presentStudents.map((s) => avatarHtml(s)).join("") + "</div>";
-      }
-    }
-  } else {
-    // Between classes: just the classes that already have marks today, with their class %.
-    const chips = periods.map((p) => ({ p, a: tvAttendanceFor(p, date, roster) })).filter((x) => x.a.marked)
-      .map((x) => '<div class="tv-class-chip"><span>' + escapeHtml(x.p) + "</span><b>" + fmtPct(x.a.pct) + "</b></div>");
-    html += chips.length ? '<div class="tv-classes">' + chips.join("") + "</div>" : '<div class="tv-cal-note">No attendance marked yet today</div>';
-  }
   if (zone.html !== html) { zone.html = html; zone.el.innerHTML = html; }
 }
 
@@ -10839,10 +10729,9 @@ async function tvcWrite(patch, okMsg) {
 function tvcMiniPreview(layout) {
   const b = (cls, label) => '<i class="' + cls + '">' + label + "</i>";
   const bodies = {
-    all: '<div class="mp mp-all">' + b("p", "Photos") + b("l", "Leaderboard") + b("a", "Attendance") + b("c", "Calendar") + b("k", "Clock") + "</div>",
+    all: '<div class="mp mp-all">' + b("p", "Photos") + b("l", "Leaderboard") + b("a", "Announcements") + b("c", "Calendar") + b("k", "Clock") + "</div>",
     photos: '<div class="mp mp-one">' + b("p", "Photos") + b("k s", "Clock") + "</div>",
     leaderboard: '<div class="mp mp-one">' + b("l", "Leaderboard") + b("k s", "Clock") + "</div>",
-    attendance: '<div class="mp mp-one">' + b("a", "Attendance") + b("k s", "Clock") + "</div>",
     calendar: '<div class="mp mp-one">' + b("c", "Calendar") + b("k s", "Clock") + "</div>",
     split: '<div class="mp mp-split">' + b("p", "Photos") + b("l", "Leaderboard") + b("k s", "Clock") + "</div>",
   };
@@ -10898,10 +10787,6 @@ function renderTvControl(root, session) {
   html += collapsibleSectionHtml("tvNormal", "Normal mode", { fixed: "Fixed layout", rotate: "Rotation", schedule: "Schedule" }[cfg.mode] || "", tvcNormalHtml());
   // Leaderboard settings
   html += collapsibleSectionHtml("tvLb", "Leaderboard settings", cfg.leaderboard.categories.length + " categories · " + ({ week: "this week", hmonth: "Hebrew month", all: "all time" }[cfg.leaderboard.scope] || ""), tvcLeaderboardHtml());
-  // Attendance settings
-  html += collapsibleSectionHtml("tvAtt", "Live attendance settings", cfg.attendance.showPresentGrid ? "Avatar grid on" : "Avatar grid off",
-    '<label class="tvc-check"><input type="checkbox" id="tvc-grid"' + (cfg.attendance.showPresentGrid ? " checked" : "") + '> Show a grid of present students’ pictures (no names)</label>' +
-    '<p class="help-text">The TV only ever shows counts and percentages for the class in session — never who is absent, notes or scores.</p>');
   // Exit
   html += collapsibleSectionHtml("tvExit", "Exit TV mode", "Return the screen to the normal app",
     '<p class="help-text">Sends the TV back to the normal app login. To put it back in TV mode, open the TV link again.</p><button type="button" class="btn btn-ghost" data-tvc-act="exit-tv">Exit TV mode on screen</button>');
@@ -11023,7 +10908,7 @@ function tvcWire(root) {
     } else if (act === "clear-ann") { TVC.annText = null; tvcWrite({ announcement: null }, "Announcement cleared."); }
     else if (act === "exit-tv") tvcWrite({ exitTvNonce: String(Date.now()) + "-" + Math.random().toString(36).slice(2, 6) }, "Told the TV to exit TV mode.");
     else if (act === "rot-add") tvcWrite({ rotate: cfg.rotate.concat([{ layout: "all", secs: 30 }]) });
-    else if (act === "sch-add") tvcWrite({ schedule: cfg.schedule.concat([{ days: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday"], start: "08:00", end: "09:00", layout: "attendance" }]) });
+    else if (act === "sch-add") tvcWrite({ schedule: cfg.schedule.concat([{ days: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday"], start: "08:00", end: "09:00", layout: "leaderboard" }]) });
   });
   const ta = document.getElementById("tvc-ann-text");
   if (ta) ta.addEventListener("input", () => { TVC.annText = ta.value; });
@@ -11046,7 +10931,7 @@ function tvcWire(root) {
   on("[data-tvc-sch-end]", "change", (el) => { const a = sch(); a[Number(el.getAttribute("data-tvc-sch-end"))].end = el.value; tvcWrite({ schedule: a }); });
   on("[data-tvc-sch-layout]", "change", (el) => { const a = sch(); a[Number(el.getAttribute("data-tvc-sch-layout"))].layout = el.value; tvcWrite({ schedule: a }); });
   on("[data-tvc-sch-del]", "click", (el) => { const a = sch(); a.splice(Number(el.getAttribute("data-tvc-sch-del")), 1); tvcWrite({ schedule: a }); });
-  // leaderboard + attendance settings
+  // leaderboard settings
   on("[data-tvc-cat]", "click", (el) => {
     const id = el.getAttribute("data-tvc-cat"); const cur = cfg.leaderboard.categories.slice();
     const next = cur.includes(id) ? cur.filter((x) => x !== id) : LEADERBOARD_CATEGORIES.map((c) => c.id).filter((x) => cur.includes(x) || x === id);
@@ -11056,8 +10941,6 @@ function tvcWire(root) {
   on("[data-tvc-scope]", "click", (el) => tvcWrite({ leaderboard: { scope: el.getAttribute("data-tvc-scope") } }));
   on("[data-tvc-places]", "click", (el) => tvcWrite({ leaderboard: { places: Number(el.getAttribute("data-tvc-places")) } }));
   on("[data-tvc-secs]", "click", (el) => tvcWrite({ leaderboard: { secsPerCategory: Number(el.getAttribute("data-tvc-secs")) } }));
-  const grid = document.getElementById("tvc-grid");
-  if (grid) grid.addEventListener("change", () => tvcWrite({ attendance: { showPresentGrid: grid.checked } }));
   // photos
   on("[data-tvc-interval]", "click", (el) => tvcWrite({ photos: { intervalSecs: Number(el.getAttribute("data-tvc-interval")) } }));
   const kb = document.getElementById("tvc-kb");
