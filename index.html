@@ -1387,11 +1387,219 @@ tr.dragging-row { opacity: 0.55; background: var(--surface-2); }
   body.printing-generated-report .report-card-print * { visibility: hidden; }
 }
 
+
+/* ================================================================
+   TV DISPLAY MODE (#tv / ?tv=1) -- everything below is scoped to html.tv-mode / .tv-root so it
+   can't touch the normal app. Sizes are in rem, and the root font-size on a TV is tied to the
+   screen's width (1rem = 1% of width), so the same layout is proportionally identical on a
+   1920x1080 and a 3840x2160 screen.
+   ================================================================ */
+html.tv-mode { font-size: min(1vw, 1.7778vh); background: #070b16; }
+html.tv-mode body { background: #070b16; overflow: hidden; margin: 0; cursor: none; }
+html.tv-mode #shell, html.tv-mode #login-root { display: none !important; }
+#tv-root { display: none; }
+html.tv-mode #tv-root { display: block; }
+.tv-shift { position: fixed; inset: 0; transition: transform 4s ease-in-out; will-change: transform; }
+.tv-root {
+  --tv-bg: #070b16; --tv-panel: #101831; --tv-panel-2: #16203f; --tv-line: #26335c;
+  --tv-ink: #f3f6ff; --tv-muted: #9fb0d8; --tv-brand: #6b93ff; --tv-gold: #f3cb6b; --tv-silver: #c3cce2;
+  --tv-bronze: #d99a68; --tv-good: #4fd19a; --tv-warn: #ff9477; --tv-info: #2b4fb8; --tv-urgent: #c53a2c; --tv-celebrate: #b7861a;
+  position: absolute; inset: 1.2rem; color: var(--tv-ink); font-family: var(--font-body, Arial, sans-serif);
+  display: flex; flex-direction: column; gap: 1.1rem; background: var(--tv-bg);
+}
+.tv-root * { box-sizing: border-box; }
+.tv-main { flex: 1; min-height: 0; display: grid; gap: 1.1rem; }
+.tv-bottom { display: flex; gap: 1.1rem; min-height: 0; }
+.tv-zone { background: var(--tv-panel); border: 1px solid var(--tv-line); border-radius: 1.2rem; padding: 1.6rem 1.8rem; min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; position: relative; }
+.tv-zone-head { display: flex; align-items: flex-end; gap: 1.2rem 1.6rem; flex-wrap: wrap; margin-bottom: 1rem; flex: none; }
+.tv-zone-head > div { min-width: 0; }
+.tv-eyebrow { font-size: 1.35rem; letter-spacing: .14em; text-transform: uppercase; color: var(--tv-muted); font-weight: 700; }
+.tv-root h2, .tv-root h3 { color: var(--tv-ink); letter-spacing: 0; text-transform: none; }
+.tv-zone-head h2 { margin: 0; font-family: var(--font-display, Arial, sans-serif); font-size: 3rem; line-height: 1.05; font-weight: 800; }
+.tv-head-l { display: flex; flex-direction: column; gap: .3rem; }
+.tv-head-l .tv-eyebrow { font-size: 1.2rem; }
+.tv-scope { margin-left: auto; font-size: 1.6rem; color: var(--tv-gold); font-weight: 700; }
+/* layouts */
+.tv-layout-all .tv-main { grid-template-columns: 1.45fr 1fr; grid-template-rows: 1fr; }
+.tv-layout-all .tv-col-right { display: grid; grid-template-rows: 1.15fr 1fr; gap: 1.1rem; min-height: 0; min-width: 0; }
+.tv-layout-all .tv-bottom { height: 24%; flex: none; }
+.tv-layout-all .tv-zone { padding: 1.1rem 1.5rem; }
+.tv-layout-all .tv-zone-head { margin-bottom: .6rem; }
+.tv-layout-all .tv-zone-head h2 { font-size: 2.5rem; }
+.tv-layout-all .tv-col-right { grid-template-rows: 1.55fr 1fr; }
+.tv-layout-attendance .tv-att-pct { font-size: 10rem; } .tv-layout-attendance .tv-att-pct small { font-size: 1.8rem; }
+.tv-layout-attendance .tv-tile b { font-size: 5.2rem; } .tv-layout-attendance .tv-tile span { font-size: 1.7rem; } .tv-layout-attendance .tv-tile { padding: 1.2rem 1.6rem; }
+.tv-layout-attendance .tv-zone-head h2 { font-size: 4.4rem; }
+.tv-layout-attendance .tv-class-chip { font-size: 2.2rem; }
+.tv-att-inline { margin-left: auto; text-align: right; font-family: var(--font-display, Arial, sans-serif); font-size: 3.6rem; line-height: 1; font-weight: 800; color: var(--tv-good); font-variant-numeric: tabular-nums; }
+.tv-att-inline small { display: block; font-size: 1.05rem; letter-spacing: .1em; text-transform: uppercase; color: var(--tv-muted); font-weight: 700; margin-top: .2rem; }
+.tv-layout-all .tv-att-tiles { margin-top: .2rem; }
+.tv-layout-all .tv-tile b { white-space: nowrap; }
+.tv-layout-split .tv-main { grid-template-columns: 1fr 1fr; }
+.tv-layout-photos .tv-main, .tv-layout-leaderboard .tv-main, .tv-layout-attendance .tv-main, .tv-layout-calendar .tv-main { grid-template-columns: 1fr; }
+.tv-layout-photos .tv-bottom, .tv-layout-leaderboard .tv-bottom, .tv-layout-attendance .tv-bottom, .tv-layout-calendar .tv-bottom, .tv-layout-split .tv-bottom { flex: none; height: 7.2rem; }
+/* clock */
+.tv-zone-clock { flex: none; justify-content: center; }
+.tv-layout-all .tv-zone-clock { width: 31%; align-items: flex-end; text-align: right; padding: .8rem 1.6rem; }
+.tv-layout-all .tv-clock-time { font-size: 4.4rem; line-height: 1.05; }
+.tv-layout-all .tv-clock-date { font-size: 1.8rem; margin-top: .2rem; line-height: 1.15; }
+.tv-layout-all .tv-clock-heb { font-size: 1.8rem; margin-top: 0; line-height: 1.2; }
+.tv-layout-all .tv-clock-parsha { font-size: 1.45rem; margin-top: 0; line-height: 1.15; }
+.tv-layout-all .tv-att-tiles { grid-template-columns: repeat(4, 1fr); gap: .6rem; }
+.tv-layout-all .tv-av-grid { flex-wrap: nowrap; flex: none; align-items: center; }
+.tv-layout-all .tv-av-grid .lb-avatar { flex: none; }
+.tv-av-more { flex: none; font-size: 1.7rem; font-weight: 800; color: var(--tv-muted); padding: 0 .6rem; }
+.tv-clock-time { font-family: var(--font-display, Arial, sans-serif); font-size: 6.4rem; font-weight: 800; line-height: 1; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+.tv-clock-date { font-size: 2.1rem; color: var(--tv-ink); margin-top: .5rem; font-weight: 600; }
+.tv-clock-heb { font-size: 2rem; color: var(--tv-gold); margin-top: .25rem; font-weight: 600; }
+.tv-clock-parsha { font-size: 1.7rem; color: var(--tv-muted); margin-top: .25rem; }
+.tv-clock-small { flex-direction: row; align-items: center; gap: 3rem; padding: .8rem 2rem; width: 100%; }
+.tv-clock-small .tv-clock-time { font-size: 4.2rem; }
+.tv-clock-small .tv-clock-date, .tv-clock-small .tv-clock-heb, .tv-clock-small .tv-clock-parsha { margin: 0; font-size: 2rem; }
+.tv-clock-small .tv-clock-heb { color: var(--tv-gold); }
+/* photos */
+.tv-zone-photos { padding: 0; background: #000; }
+.tv-slide { position: absolute; inset: 0; opacity: 0; transition: opacity 1.6s ease; }
+.tv-slide.show { opacity: 1; }
+.tv-slide img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.tv-slide.kb img { animation: tvKen var(--kb-dur, 14s) ease-out forwards; }
+@keyframes tvKen { from { transform: scale(1.0) translate(0,0); } to { transform: scale(1.09) translate(-1.2%, -1%); } }
+.tv-cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 3.4rem 2.2rem 1.6rem; font-size: 2.6rem; font-weight: 700; background: linear-gradient(to top, rgba(0,0,0,.78), rgba(0,0,0,0)); }
+.tv-photo-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.4rem; color: var(--tv-muted); font-size: 2.2rem; background: radial-gradient(circle at 50% 40%, #16224a, #070b16 70%); }
+.tv-photo-empty img { width: 14rem; height: 14rem; object-fit: contain; opacity: .9; }
+/* leaderboard */
+.tv-lb { list-style: none; margin: 0; padding: 0; flex: 1; min-height: 0; container-type: size; display: grid; grid-template-rows: repeat(var(--n, 8), 1fr); gap: .5rem; }
+.tv-lb-row { display: flex; align-items: center; gap: 1.2rem; min-height: 0; padding: 0 1.2rem; border-radius: .9rem; background: var(--tv-panel-2); font-size: min(2.8rem, calc(100cqh / var(--n, 8) * .5)); }
+.tv-lb-rank { flex: none; width: 2.1em; text-align: center; font-family: var(--font-display, Arial, sans-serif); font-weight: 800; color: var(--tv-muted); }
+.tv-lb-row.r1 { background: linear-gradient(90deg, rgba(243,203,107,.28), var(--tv-panel-2)); } .tv-lb-row.r1 .tv-lb-rank { color: var(--tv-gold); }
+.tv-lb-row.r2 { background: linear-gradient(90deg, rgba(195,204,226,.20), var(--tv-panel-2)); } .tv-lb-row.r2 .tv-lb-rank { color: var(--tv-silver); }
+.tv-lb-row.r3 { background: linear-gradient(90deg, rgba(217,154,104,.22), var(--tv-panel-2)); } .tv-lb-row.r3 .tv-lb-rank { color: var(--tv-bronze); }
+.tv-root .tv-lb-row .lb-avatar { width: 1.5em; height: 1.5em; flex: none; border-radius: 50%; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; }
+.tv-root .tv-lb-row .lb-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.tv-lb-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 700; }
+.tv-lb-val { flex: none; font-family: var(--font-display, Arial, sans-serif); font-weight: 800; font-variant-numeric: tabular-nums; display: inline-flex; align-items: center; gap: .4em; }
+.tv-lb-val .coin-badge { font-size: .55em; }
+.tv-lb-empty { margin: auto; color: var(--tv-muted); font-size: 2.2rem; text-align: center; }
+.tv-dots { display: flex; gap: .6rem; margin-left: auto; align-items: center; }
+.tv-dot { width: 1rem; height: 1rem; border-radius: 50%; background: var(--tv-line); } .tv-dot.on { background: var(--tv-gold); }
+.tv-lb-head-right { margin-left: auto; display: flex; align-items: center; gap: 1.6rem; }
+.tv-lb-head-right .tv-scope { margin-left: 0; }
+/* attendance */
+.tv-att-top { display: flex; gap: 2rem; align-items: center; flex: none; }
+.tv-layout-all .tv-att-top { gap: 1.2rem; }
+
+.tv-layout-all .tv-att-pct small { font-size: 1.1rem; }
+.tv-layout-all .tv-tile { padding: .4rem .9rem; } .tv-layout-all .tv-tile b { font-size: 2.4rem; } .tv-layout-all .tv-tile span { font-size: 1.1rem; }
+.tv-layout-all .tv-av-grid { margin-top: .7rem; gap: .6rem; }
+.tv-att-pct { font-family: var(--font-display, Arial, sans-serif); font-size: 7rem; line-height: 1; font-weight: 800; color: var(--tv-good); font-variant-numeric: tabular-nums; }
+.tv-att-pct small { display: block; font-size: 1.5rem; letter-spacing: .1em; text-transform: uppercase; color: var(--tv-muted); font-weight: 700; margin-top: .4rem; }
+.tv-att-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 1rem; flex: 1; }
+.tv-tile { background: var(--tv-panel-2); border-radius: .9rem; padding: .9rem 1.2rem; }
+.tv-tile b { display: block; font-family: var(--font-display, Arial, sans-serif); font-size: 3.4rem; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.tv-tile span { font-size: 1.4rem; color: var(--tv-muted); text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }
+.tv-tile.present b { color: var(--tv-good); } .tv-tile.absent b { color: var(--tv-warn); }
+.tv-head-l .tv-live-badge, .tv-head-l .tv-idle-badge { align-self: flex-start; font-size: 1.15rem; padding: .15rem .8rem; }
+.tv-live-badge { display: inline-flex; align-items: center; gap: .6rem; font-size: 1.5rem; font-weight: 800; color: #07351f; background: var(--tv-good); border-radius: 99rem; padding: .25rem 1rem; text-transform: uppercase; letter-spacing: .08em; }
+.tv-live-badge::before { content: ""; width: .8rem; height: .8rem; border-radius: 50%; background: #07351f; animation: tvPulse 1.6s infinite; }
+@keyframes tvPulse { 50% { opacity: .25; } }
+.tv-idle-badge { font-size: 1.5rem; font-weight: 800; color: var(--tv-muted); border: 1px solid var(--tv-line); border-radius: 99rem; padding: .25rem 1rem; text-transform: uppercase; letter-spacing: .08em; }
+.tv-av-grid { flex: 1; min-height: 0; display: flex; flex-wrap: wrap; align-content: flex-start; gap: .9rem; margin-top: 1.2rem; overflow: hidden; }
+.tv-root .tv-av-grid .lb-avatar { width: var(--av, 5rem); height: var(--av, 5rem); border-radius: 50%; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 0 .25rem rgba(79,209,154,.55); }
+.tv-root .tv-av-grid .lb-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.tv-classes { margin-top: 1.2rem; display: grid; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); gap: .8rem; }
+.tv-class-chip { background: var(--tv-panel-2); border-radius: .8rem; padding: .7rem 1.1rem; font-size: 1.7rem; display: flex; justify-content: space-between; gap: 1rem; }
+.tv-class-chip b { font-family: var(--font-display, Arial, sans-serif); font-variant-numeric: tabular-nums; color: var(--tv-good); }
+.tv-class-chip.cur { outline: .2rem solid var(--tv-brand); }
+/* calendar */
+.tv-cal-strip { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 1rem; flex: 1; min-height: 0; }
+.tv-cal-strip .tv-cal-card { display: flex; flex-direction: column; justify-content: center; }
+.tv-cal-strip .tv-cal-card { padding: .8rem 1rem; }
+.tv-cal-strip .tv-cal-when { font-size: 1.2rem; letter-spacing: 0; text-transform: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tv-cal-strip .tv-cal-title { font-size: 2.1rem; }
+.tv-cal-card { background: var(--tv-panel-2); border-radius: .9rem; padding: .9rem 1.3rem; min-width: 0; overflow: hidden; border-left: .5rem solid var(--tv-line); }
+.tv-cal-card.now { border-left-color: var(--tv-good); background: linear-gradient(90deg, rgba(79,209,154,.18), var(--tv-panel-2)); }
+.tv-cal-card.next { border-left-color: var(--tv-brand); }
+.tv-cal-when { font-size: 1.45rem; color: var(--tv-muted); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.tv-cal-card.now .tv-cal-when { color: var(--tv-good); }
+.tv-cal-title { font-size: 2.2rem; font-weight: 800; line-height: 1.12; margin-top: .25rem; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.tv-cal-hero { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; flex: none; margin-bottom: 1.2rem; }
+.tv-cal-hero .tv-cal-card { padding: 1.4rem 1.8rem; }
+.tv-cal-hero .tv-cal-title { font-size: 3.2rem; }
+.tv-cal-days { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr)); gap: 1rem; overflow: hidden; }
+.tv-cal-day { background: var(--tv-panel-2); border-radius: .9rem; padding: .9rem 1.2rem; overflow: hidden; }
+.tv-cal-day h3 { margin: 0 0 .5rem; font-size: 1.9rem; color: var(--tv-gold); }
+.tv-cal-ev { display: flex; gap: 1rem; font-size: 1.7rem; padding: .22rem 0; }
+.tv-cal-ev time { flex: none; width: 7.5rem; color: var(--tv-muted); font-variant-numeric: tabular-nums; }
+.tv-cal-ev span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.tv-cal-note { color: var(--tv-muted); font-size: 1.6rem; margin: auto; text-align: center; }
+.tv-layout-all .tv-zone-calendar { flex: 1; padding: 1rem 1.4rem; }
+.tv-layout-all .tv-zone-calendar .tv-zone-head { display: none; }
+/* ticker */
+.tv-ticker { flex: none; border-radius: 1rem; overflow: hidden; background: var(--tv-info); font-size: 2.6rem; font-weight: 800; padding: .7rem 2rem; white-space: nowrap; position: relative; }
+.tv-ticker.empty { display: none; }
+.tv-ticker.celebration { background: var(--tv-celebrate); } .tv-ticker.urgent { background: var(--tv-urgent); }
+.tv-ticker-inner { display: inline-block; }
+.tv-ticker.scroll .tv-ticker-inner { padding-left: 100%; animation: tvScroll var(--dur, 30s) linear infinite; }
+@keyframes tvScroll { to { transform: translateX(-100%); } }
+.tv-ticker:not(.scroll) { text-align: center; }
+.tv-boot { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 3rem; color: var(--tv-muted); }
+
+/* TV Display control tab (admin) -- mobile first */
+.tvc { max-width: 720px; margin: 0 auto; padding-bottom: 80px; }
+.tvc-card { margin-top: 14px; }
+.tvc-status { display: flex; align-items: center; gap: 10px; font-weight: 700; }
+.tvc-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--muted); flex: none; }
+.tvc-dot.on { background: var(--good); box-shadow: 0 0 0 4px var(--good-soft); } .tvc-dot.off { background: var(--warn); }
+.tvc-now { display: flex; gap: 14px; align-items: center; margin-top: 12px; }
+.tvc-now-label { font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 700; }
+.tvc-now-layout { font-family: var(--font-display); font-weight: 800; font-size: 1.25rem; }
+.tvc-now-src { font-size: .85rem; color: var(--ink-2); }
+.tvc-preview { width: 132px; flex: none; aspect-ratio: 16/9; background: #0b1020; border-radius: 6px; padding: 4px; }
+.mp { display: grid; gap: 3px; height: 100%; }
+.mp i { font-style: normal; font-size: 7px; color: #fff; display: flex; align-items: center; justify-content: center; border-radius: 2px; background: #26335c; overflow: hidden; }
+.mp i.p { background: #8a5a2b; } .mp i.l { background: #2b4fb8; } .mp i.a { background: #1f7a55; } .mp i.c { background: #6b3fa0; } .mp i.k { background: #4a5575; }
+.mp-all { grid-template-columns: 1.45fr 1fr; grid-template-rows: 1fr 1fr .6fr; } .mp-all .p { grid-row: 1 / 3; } .mp-all .l { grid-column: 2; grid-row: 1; } .mp-all .a { grid-column: 2; grid-row: 2; } .mp-all .c { grid-column: 1; grid-row: 3; } .mp-all .k { grid-column: 2; grid-row: 3; }
+.mp-one { grid-template-rows: 1fr .25fr; } .mp-one .s { font-size: 6px; }
+.mp-split { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr .25fr; } .mp-split .k { grid-column: 1 / 3; }
+.tvc-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.tvc-chip { border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); border-radius: 999px; padding: 10px 16px; font: inherit; font-weight: 600; min-height: 44px; cursor: pointer; }
+.tvc-chip.sm { padding: 8px 14px; min-height: 40px; }
+.tvc-chip.active { background: var(--brand); border-color: var(--brand); color: #fff; }
+.tvc-layouts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 6px 0 12px; }
+.tvc-layout-btn { text-align: left; border: 1px solid var(--line-strong); background: var(--surface-2); border-radius: 12px; padding: 14px; min-height: 76px; font: inherit; color: var(--ink); cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+.tvc-layout-btn b { font-size: 1rem; } .tvc-layout-btn span { font-size: .78rem; color: var(--muted); }
+.tvc-layout-btn.active { border-color: var(--brand); box-shadow: 0 0 0 2px var(--brand-soft) inset; }
+.tvc-wide { width: 100%; min-height: 48px; }
+.tvc-sub { font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 700; margin-top: 12px; }
+.tvc-textarea { width: 100%; font: inherit; padding: 12px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); color: var(--ink); resize: vertical; }
+.tvc-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+.tvc-row .btn { min-height: 46px; }
+.tvc-live-ann { margin: 0 0 10px; padding: 10px 12px; border-radius: 10px; font-weight: 700; background: var(--brand-soft); }
+.tvc-ann-celebration { background: var(--gold-soft); } .tvc-ann-urgent { background: var(--warn-soft); }
+.tvc-rowline { display: flex; gap: 8px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
+.tvc-sel, .tvc-num, .tvc-time { font: inherit; padding: 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); min-height: 44px; }
+.tvc-sel { flex: 1; min-width: 140px; } .tvc-num { width: 84px; } .tvc-unit { color: var(--muted); font-size: .85rem; }
+.tvc-sched { border: 1px solid var(--line); border-radius: 12px; padding: 10px; margin: 10px 0; }
+.tvc-sched .tvc-chips { margin: 0 0 6px; }
+.tvc-check { display: flex; gap: 10px; align-items: center; padding: 10px 0; font-weight: 600; min-height: 44px; }
+.tvc-check input { width: 22px; height: 22px; }
+.tvc-photos { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+.tvc-photo { border: 1px solid var(--line); border-radius: 12px; padding: 8px; background: var(--surface-2); }
+.tvc-photo.hidden { opacity: .6; }
+.tvc-thumb { position: relative; aspect-ratio: 16/10; border-radius: 8px; overflow: hidden; background: #000; }
+.tvc-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.tvc-hid { position: absolute; left: 6px; top: 6px; background: rgba(0,0,0,.7); color: #fff; font-size: .7rem; padding: 2px 8px; border-radius: 99px; }
+.tvc-cap-in { width: 100%; margin: 8px 0; font: inherit; padding: 8px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); }
+.tvc-photo-btns { display: flex; gap: 6px; flex-wrap: wrap; } .tvc-photo-btns .btn { min-height: 40px; }
+.tvc-del { background: var(--warn); color: #fff; }
+.tvc-upload { cursor: pointer; }
+@media (min-width: 700px) { .tvc-photos { grid-template-columns: repeat(3, 1fr); } .tvc-layouts { grid-template-columns: repeat(3, 1fr); } }
 </style>
 </head>
 <body>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-app-compat.js"></script><script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-auth-compat.js"></script><script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-firestore-compat.js"></script>
 <div id="login-root"></div>
+<div id="tv-root"></div>
 <div id="shell" style="display:none;">
   <div id="preview-banner"></div>
   <div id="avatar-picker-root"></div>
@@ -3118,6 +3326,8 @@ function openDiagnostics() {
 let saveQueue = Promise.resolve();
 function saveState(newState, opts) {
   opts = opts || {};
+  // Hallway-TV mode is strictly read-only for app/state (its only write is the display heartbeat).
+  if (TV_MODE) { logProblem("tv-readonly", "Blocked a save attempt in TV mode.", true); return Promise.resolve({ ok: false, code: "tv-readonly" }); }
   if (opts.stashKey) stashDraft(opts.stashKey, opts.stashData);
   const ourRev = (state && state._rev) || 0;
   const run = saveQueue.then(() => saveStateNow(newState, opts, ourRev));
@@ -3654,6 +3864,8 @@ const ROUTES = [
   // Time Clock (or Today, if they don't have that either) to Admin.
   { id: "participation", label: "Lists", icon: "list", roles: ["teacher", "admin"], visible: (session) => isHeadStaff(session) },
   { id: "admin", label: "Admin", icon: "gear", roles: ["admin"] },
+  // Remote control for the hallway TV (see TV DISPLAY). Admin only. Its id is deliberately NOT "tv" -- "#tv" is the URL that puts a screen into TV mode.
+  { id: "tvdisplay", label: "TV Display", icon: "tv", roles: ["admin"] },
   { id: "balance", label: "My Balance", icon: "search", roles: ["student"] },
   // Only ever shown to the one student(s) admin has granted isTA permission to (see
   // renderChazzanTab/Admin > Students) -- `visible` is an extra per-session check beyond the
@@ -3700,6 +3912,7 @@ function goToRoute(id) {
 
 /* ---------- icons ---------- */
 const ICONS = {
+  tv: '<rect x="2" y="3" width="14" height="9.5" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.6"/><line x1="6" y1="15.3" x2="12" y2="15.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
   check: '<path d="M3 9l4 4 8-9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
   search: '<circle cx="7.5" cy="7.5" r="5.2" fill="none" stroke="currentColor" stroke-width="1.6"/><line x1="11.3" y1="11.3" x2="15.5" y2="15.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
   coin: '<circle cx="9" cy="9" r="7" fill="none" stroke="currentColor" stroke-width="1.6"/><text x="9" y="12.5" font-size="8" text-anchor="middle" fill="currentColor" font-family="serif">T</text>',
@@ -6701,7 +6914,9 @@ function ensureLbRotation(route) {
   }
 }
 
-function lbRange() {
+// Takes its inputs as parameters (instead of reading the page-level lbScope/lbAnchor/...) so the
+// hallway TV can ask for a range without touching whatever a staff member is viewing.
+function lbRangeFor(lbScope, lbAnchor, lbFrom, lbTo) {
   if (lbScope === "week") {
     const r = weekRangeFor(lbAnchor);
     return { from: r.from, to: r.to, title: "This week", sub: fmtDateShort(r.from) + " – " + fmtDateShort(r.to) };
@@ -6718,6 +6933,8 @@ function lbRange() {
   }
   return { from: null, to: null, title: "All time", sub: "Since the start of the year" };
 }
+function lbRange() { return lbRangeFor(lbScope, lbAnchor, lbFrom, lbTo); }
+
 /* One student's raw value + a formatted display string for a given leaderboard category —
    the single place that ties each category id to the stat that ranks it. */
 function leaderboardEntryFor(studentId, catId, range) {
@@ -9817,12 +10034,13 @@ function renderAll() {
   const route = currentRoute(session);
   ensureLbRotation(route);
   ensureLiveSchedule(route, session);
+  tvcSync(route);
   // View-as is a preview, not a way to act as someone else -- force every write path off for
   // the duration of this one render (every renderer reads canWrite synchronously while
   // building its HTML/wiring, so restoring it right after is safe).
   const savedCanWrite = canWrite;
   if (previewing) canWrite = false;
-  ({ today: renderToday, ledger: renderLedger, overview: renderOverview, leaderboard: renderLeaderboard, timeclock: renderAdminTimeClock, participation: renderParticipation, admin: renderAdmin, balance: renderMyBalance, chazzan: renderChazzanTab })[route](root, session);
+  ({ today: renderToday, ledger: renderLedger, overview: renderOverview, leaderboard: renderLeaderboard, timeclock: renderAdminTimeClock, participation: renderParticipation, admin: renderAdmin, tvdisplay: renderTvControl, balance: renderMyBalance, chazzan: renderChazzanTab })[route](root, session);
   canWrite = savedCanWrite;
   updateLiveScheduleBadge(); // reflect the last known poll result immediately, don't wait for the next tick
   wireStudentLinks(root);
@@ -9851,6 +10069,7 @@ async function migrateGcBonusLedgerEntries() {
   await saveState(newState);
 }
 async function init() {
+  if (TV_MODE) { initTv(); return; } // hallway TV: read-only, no login, no migrations, no sheet timers (see TV DISPLAY below)
   renderAll(); // shows the "Loading..." screen (state is still null at this point)
   try {
     const loadStartedAt = performance.now();
@@ -9934,6 +10153,821 @@ function syncNow() {
     if (snap.exists) applyIncomingState(snap.data());
   }).catch((err) => { console.error("Live sync catch-up failed:", err); logProblem("sync-failed", (err && err.code ? err.code + ": " : "") + (err && err.message ? err.message : "unknown"), true); });
 }
+/* ================================================================
+   TV DISPLAY: hallway-TV mode (opened with ?tv=1 or #tv) + the admin "TV Display" control tab.
+
+   Design rules, in order of importance:
+   1. Display config, the heartbeat and the photos live in their OWN Firestore docs
+      (app/display, app/displayStatus, displayPhotos/*) -- never in app/state, and never through
+      saveState(). app/state is near its size limit and is guarded by _rev; keeping TV edits out
+      of it means a TV change can never cause a save conflict for someone marking attendance.
+   2. TV mode is read-only for app/state. Its only write anywhere is the heartbeat. saveState()
+      itself refuses to run in TV mode as a second line of defense.
+   3. TV mode shows aggregates only: counts and percentages for attendance (plus avatars of
+      present students), the same leaderboard students already see in the app, calendar events.
+      Never absent students' names, notes, passwords, per-student scores, ledger or staff data.
+   ================================================================ */
+const TV_FLAG_KEY = "tag_tv_mode_v1";
+const TV_EXIT_SEEN_KEY = "tag_tv_exit_seen_v1";
+const TV_RELOAD_KEY = "tag_tv_last_reload_v1";
+const TV_MAX_PHOTOS = 40;
+const DISPLAY_DOC = db.collection("app").doc("display");
+const DISPLAY_STATUS_DOC = db.collection("app").doc("displayStatus");
+const DISPLAY_PHOTOS = db.collection("displayPhotos");
+const TV_LAYOUTS = [
+  { id: "all", label: "Everything", hint: "Photos, leaderboard, attendance, calendar, clock" },
+  { id: "photos", label: "Photos", hint: "Photo slideshow full screen" },
+  { id: "leaderboard", label: "Leaderboard", hint: "Rankings full screen" },
+  { id: "attendance", label: "Live attendance", hint: "Current class, counts and %" },
+  { id: "calendar", label: "Calendar", hint: "Now / next and the week ahead" },
+  { id: "split", label: "Photos + Leaderboard", hint: "Half and half" },
+];
+const TV_LAYOUT_IDS = TV_LAYOUTS.map((l) => l.id);
+
+// TV mode is entered with ?tv=1 or #tv, then remembered on that device so the screen stays in TV
+// mode even if the hash/query gets dropped (or the stick reboots to its start URL without it).
+// ?tv=0 on that device switches it back to the normal app.
+const TV_MODE = (function detectTvMode() {
+  let on = false, off = false;
+  try { const q = new URLSearchParams(location.search).get("tv"); if (q === "1" || q === "true") on = true; if (q === "0" || q === "off") off = true; } catch (e) {}
+  if ((location.hash || "") === "#tv") on = true;
+  try {
+    if (off) { localStorage.removeItem(TV_FLAG_KEY); return false; }
+    if (on) { localStorage.setItem(TV_FLAG_KEY, "1"); return true; }
+    return localStorage.getItem(TV_FLAG_KEY) === "1";
+  } catch (e) { return on; }
+})();
+if (TV_MODE) document.documentElement.classList.add("tv-mode");
+
+function tvExitToApp() {
+  try { localStorage.removeItem(TV_FLAG_KEY); } catch (e) {}
+  location.replace(location.pathname + "?tv=0");
+}
+
+/* ---------- config ---------- */
+function tvDefaults() {
+  return {
+    layout: "all", mode: "fixed",
+    rotate: [{ layout: "all", secs: 60 }, { layout: "leaderboard", secs: 30 }, { layout: "photos", secs: 30 }],
+    schedule: [], fallback: "all",
+    override: null, announcement: null,
+    photos: { intervalSecs: 12, kenBurns: true },
+    leaderboard: { categories: LEADERBOARD_CATEGORIES.map((c) => c.id), scope: "week", places: 8, secsPerCategory: 12 },
+    attendance: { showPresentGrid: true },
+    exitTvNonce: null,
+  };
+}
+function tvMergeCfg(raw) {
+  const d = tvDefaults();
+  if (!raw || typeof raw !== "object") return d;
+  const out = Object.assign({}, d, raw);
+  ["photos", "leaderboard", "attendance"].forEach((k) => { out[k] = Object.assign({}, d[k], raw[k] || {}); });
+  if (!Array.isArray(out.rotate)) out.rotate = d.rotate;
+  if (!Array.isArray(out.schedule)) out.schedule = [];
+  if (!Array.isArray(out.leaderboard.categories) || !out.leaderboard.categories.length) out.leaderboard.categories = d.leaderboard.categories;
+  return out;
+}
+function tvValidLayout(id) { return TV_LAYOUT_IDS.includes(id) ? id : "all"; }
+// What should be on screen at this instant: a live override first, then the "normal" mode
+// (fixed / rotation / schedule). Pure function of (config, time) so the control tab and every TV
+// compute the identical answer without any write -- an expired override simply stops mattering.
+function tvEffectiveLayout(cfg, nowMs) {
+  const ov = cfg.override;
+  if (ov && ov.layout && (ov.until === null || ov.until === undefined || Number(ov.until) > nowMs)) {
+    return { layout: tvValidLayout(ov.layout), source: "override", until: ov.until === undefined ? null : ov.until };
+  }
+  if (cfg.mode === "rotate" && cfg.rotate.length) {
+    const items = cfg.rotate.map((r) => ({ layout: tvValidLayout(r.layout), secs: Math.max(5, Number(r.secs) || 30) }));
+    const total = items.reduce((s, r) => s + r.secs, 0);
+    let t = Math.floor(nowMs / 1000) % total;
+    for (const r of items) { if (t < r.secs) return { layout: r.layout, source: "rotate" }; t -= r.secs; }
+    return { layout: items[0].layout, source: "rotate" };
+  }
+  if (cfg.mode === "schedule") {
+    const d = new Date(nowMs);
+    const day = DAY_NAMES[d.getDay()];
+    const prevDay = DAY_NAMES[(d.getDay() + 6) % 7];
+    const mins = d.getHours() * 60 + d.getMinutes();
+    const toMin = (s) => { const m = /^(\d{1,2}):(\d{2})$/.exec(s || ""); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
+    for (const row of cfg.schedule) {
+      if (!row || !Array.isArray(row.days)) continue;
+      const a = toMin(row.start), b = toMin(row.end);
+      if (a === null || b === null) continue;
+      // A slot that runs past midnight (e.g. 22:00-02:00) belongs to the day it STARTS on.
+      const inside = a <= b ? (row.days.includes(day) && mins >= a && mins < b)
+        : ((row.days.includes(day) && mins >= a) || (row.days.includes(prevDay) && mins < b));
+      if (inside) return { layout: tvValidLayout(row.layout), source: "schedule" };
+    }
+    return { layout: tvValidLayout(cfg.fallback), source: "fallback" };
+  }
+  return { layout: tvValidLayout(cfg.layout), source: "fixed" };
+}
+function tvLayoutLabel(id) { const l = TV_LAYOUTS.find((x) => x.id === id); return l ? l.label : id; }
+
+/* ---------- the TV screen ---------- */
+const TV = {
+  cfg: tvDefaults(), photos: [], layout: null, lastLayoutCheck: 0,
+  photoIdx: -1, photoSlide: 0, lbIdx: 0, lbStamp: 0,
+  cal: { events: [], fetchedAt: 0, ok: null }, live: { res: null, fetchedAt: 0 },
+  stamps: { photo: 0, lb: 0, cal: 0, live: 0, hb: 0, shift: 0, nightly: 0 },
+  exitHandled: false, started: false, dirty: true,
+};
+
+async function initTv() {
+  document.title = "TAG Academy TV";
+  const root = document.getElementById("tv-root");
+  root.innerHTML = '<div class="tv-shift"><div class="tv-root" id="tv-canvas"><div class="tv-boot">Loading TAG Academy…</div></div></div>';
+  try {
+    await firebaseAuth.signInWithEmailAndPassword(APP_SERVICE_EMAIL, APP_SERVICE_PASSWORD);
+    // Plain read -- unlike loadState(), never creates the document if it's missing.
+    const snap = await STATE_DOC.get();
+    if (!snap.exists) throw new Error("No school data found yet.");
+    state = snap.data();
+  } catch (e) {
+    console.error("TV could not load:", e);
+    const c = document.getElementById("tv-canvas");
+    if (c) c.innerHTML = '<div class="tv-boot">Can’t connect — retrying…</div>';
+    setTimeout(initTv, 15000);
+    return;
+  }
+  tvSubscribe();
+  tvWireHiddenExit();
+  TV.started = true;
+  tvTick();
+  setInterval(tvTick, 1000);
+}
+function tvSubscribe() {
+  function listen(label, makeRef, onData) {
+    let delay = 2000;
+    (function sub() {
+      makeRef().onSnapshot((snap) => { delay = 2000; onData(snap); }, (err) => {
+        console.error("TV " + label + " listener error:", err);
+        setTimeout(sub, delay); delay = Math.min(delay * 2, 60000);
+      });
+    })();
+  }
+  listen("state", () => STATE_DOC, (snap) => { if (snap.exists) tvApplyState(snap.data()); });
+  listen("display", () => DISPLAY_DOC, (snap) => { TV.cfg = tvMergeCfg(snap.exists ? snap.data() : null); tvCheckExit(snap.exists ? snap.data() : null); TV.dirty = true; tvTick(); });
+  listen("photos", () => DISPLAY_PHOTOS.where("enabled", "==", true), (snap) => {
+    TV.photos = snap.docs.map((d) => Object.assign({ id: d.id }, d.data())).filter((p) => p.dataUrl).sort((a, b) => (a.order || 0) - (b.order || 0));
+    if (TV.photoIdx >= TV.photos.length) TV.photoIdx = -1;
+    if (TV.zones && TV.zones.photos) tvNextPhoto(true);
+  });
+  // The live listener above already pushes every change, so on the TV (which is always on and
+  // always "visible") the catch-up poll is just a slow safety net -- 5 minutes, not 20 seconds --
+  // because each one re-downloads the whole shared document.
+  setInterval(() => { STATE_DOC.get().then((s) => { if (s.exists) tvApplyState(s.data()); }).catch(() => {}); }, 300000);
+}
+function tvApplyState(incoming) {
+  if (state && incoming._rev === state._rev) return;
+  state = incoming; TV.dirty = true;
+}
+// "Exit TV mode on screen" from the control tab: the control tab writes a fresh nonce; the TV
+// obeys when the nonce differs from the last one it has seen. No write-back from the TV needed.
+function tvCheckExit(raw) {
+  const nonce = raw && raw.exitTvNonce ? String(raw.exitTvNonce) : "";
+  let seen = null;
+  try { seen = localStorage.getItem(TV_EXIT_SEEN_KEY); } catch (e) {}
+  if (seen === null) { try { localStorage.setItem(TV_EXIT_SEEN_KEY, nonce); } catch (e) {} return; }
+  if (nonce && nonce !== seen) { try { localStorage.setItem(TV_EXIT_SEEN_KEY, nonce); } catch (e) {} tvExitToApp(); }
+}
+// Hidden escape hatch on the device itself: press and hold the top-left corner for 4 seconds.
+function tvWireHiddenExit() {
+  const hot = document.createElement("div");
+  hot.style.cssText = "position:fixed;left:0;top:0;width:8vw;height:8vh;z-index:9999;";
+  let timer = null;
+  const start = () => { clearTimeout(timer); timer = setTimeout(tvExitToApp, 4000); };
+  const stop = () => clearTimeout(timer);
+  ["pointerdown", "touchstart", "mousedown"].forEach((ev) => hot.addEventListener(ev, start));
+  ["pointerup", "pointerleave", "touchend", "mouseup", "pointercancel"].forEach((ev) => hot.addEventListener(ev, stop));
+  document.body.appendChild(hot);
+}
+
+/* master 1-second tick: everything on the TV hangs off this */
+function tvTick() {
+  if (!TV.started) return;
+  const now = Date.now();
+  const eff = tvEffectiveLayout(TV.cfg, now);
+  TV.eff = eff;
+  if (eff.layout !== TV.layout) tvBuildLayout(eff.layout);
+  tvUpdateClock();
+  const S = TV.stamps;
+  if (TV.layout && TV.zones.photos && now - S.photo >= Math.max(4, Number(TV.cfg.photos.intervalSecs) || 12) * 1000) { S.photo = now; tvNextPhoto(); }
+  if (TV.zones.leaderboard) {
+    if (now - S.lb >= Math.max(5, Number(TV.cfg.leaderboard.secsPerCategory) || 12) * 1000) { S.lb = now; TV.lbIdx++; tvUpdateLeaderboard(); }
+    else if (TV.dirty) tvUpdateLeaderboard();
+  }
+  if (TV.zones.attendance) {
+    if (now - S.live >= 60000) { S.live = now; tvRefreshLive(); }
+    else if (TV.dirty) tvUpdateAttendance();
+  }
+  if (TV.zones.calendar) {
+    if (now - S.cal >= 300000) { S.cal = now; tvRefreshCalendar(); }
+    else if (TV.dirty || (TV.zones.calendar.lastMin !== Math.floor(now / 60000))) tvUpdateCalendar();
+  }
+  tvUpdateTicker(now);
+  if (TV.dirty) TV.dirty = false;
+  if (now - S.hb >= 60000) { S.hb = now; tvHeartbeat(); }
+  if (now - S.shift >= 240000) { S.shift = now; tvShiftCanvas(); }
+  tvMaybeNightlyReload(now);
+}
+function tvShiftCanvas() {
+  const el = document.querySelector(".tv-shift");
+  if (!el) return;
+  const dx = Math.round((Math.random() * 2 - 1) * 8), dy = Math.round((Math.random() * 2 - 1) * 8);
+  el.style.transform = "translate(" + dx + "px," + dy + "px)";
+}
+function tvHeartbeat() {
+  // The ONE write TV mode makes. Server timestamp so a wrong clock on the stick can't make it
+  // look offline.
+  DISPLAY_STATUS_DOC.set({
+    lastSeen: firebase.firestore.FieldValue.serverTimestamp(), screen: "hallway",
+    layout: TV.layout || null, source: TV.eff ? TV.eff.source : null,
+  }, { merge: true }).catch((e) => console.error("TV heartbeat failed:", e));
+}
+function tvMaybeNightlyReload(now) {
+  const d = new Date(now);
+  if (d.getHours() !== 3) return;
+  const key = d.getFullYear() + "-" + (d.getMonth() + 1) + "-" + d.getDate();
+  let last = null;
+  try { last = localStorage.getItem(TV_RELOAD_KEY); } catch (e) {}
+  if (last === key) return;
+  try { localStorage.setItem(TV_RELOAD_KEY, key); } catch (e) {}
+  location.reload();
+}
+
+/* ---------- layout skeleton ---------- */
+function tvBuildLayout(layout) {
+  const canvas = document.getElementById("tv-canvas");
+  if (!canvas) return;
+  TV.layout = layout; TV.zones = {};
+  canvas.className = "tv-root tv-layout-" + layout;
+  const z = (name, extra) => '<section class="tv-zone tv-zone-' + name + (extra || "") + '" data-zone="' + name + '"></section>';
+  let main = "", bottom = "";
+  if (layout === "all") {
+    main = z("photos") + '<div class="tv-col-right">' + z("leaderboard") + z("attendance") + "</div>";
+    bottom = z("calendar") + z("clock");
+  } else if (layout === "split") {
+    main = z("photos") + z("leaderboard"); bottom = z("clock", " tv-clock-small");
+  } else {
+    main = z(layout); bottom = z("clock", " tv-clock-small");
+  }
+  canvas.innerHTML = '<div class="tv-main">' + main + '</div><div class="tv-bottom">' + bottom + '</div><div class="tv-ticker empty" id="tv-ticker"></div>';
+  canvas.querySelectorAll("[data-zone]").forEach((el) => { TV.zones[el.getAttribute("data-zone")] = { el }; });
+  if (TV.zones.photos) tvInitPhotos();
+  TV.dirty = true;
+  TV.stamps.lb = Date.now(); TV.stamps.live = Date.now(); TV.stamps.cal = Date.now();
+  if (TV.zones.calendar) { tvUpdateCalendar(); tvRefreshCalendar(); }
+  if (TV.zones.attendance) { tvUpdateAttendance(); tvRefreshLive(); }
+  if (TV.zones.leaderboard) tvUpdateLeaderboard();
+  TV.tickerKey = null;
+}
+
+/* ---------- clock ---------- */
+function tvUpdateClock() {
+  const zone = TV.zones.clock; if (!zone) return;
+  const now = new Date();
+  const time = now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const date = now.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
+  const iso = todayISO();
+  const heb = hebrewDateFor(iso), parsha = parshaFor(iso);
+  const key = time + "|" + date + "|" + heb;
+  if (zone.key === key) return;
+  zone.key = key;
+  zone.el.innerHTML = '<div class="tv-clock-time">' + escapeHtml(time) + "</div>" +
+    '<div class="tv-clock-date">' + escapeHtml(date) + "</div>" +
+    (heb ? '<div class="tv-clock-heb" dir="rtl">' + escapeHtml(heb) + "</div>" : "") +
+    (parsha ? '<div class="tv-clock-parsha">' + escapeHtml(parsha) + "</div>" : "");
+}
+
+/* ---------- photos ---------- */
+function tvInitPhotos() {
+  const el = TV.zones.photos.el;
+  el.innerHTML = '<div class="tv-slide" data-s="0"><img alt=""><div class="tv-cap"></div></div><div class="tv-slide" data-s="1"><img alt=""><div class="tv-cap"></div></div>' +
+    '<div class="tv-photo-empty" style="display:none;"><img src="' + LOGO_DATA_URI + '" alt=""><div>Photos coming soon</div></div>';
+  TV.stamps.photo = 0;
+  tvNextPhoto(true);
+  TV.stamps.photo = Date.now();
+}
+function tvNextPhoto(keepIndex) {
+  const zone = TV.zones.photos; if (!zone) return;
+  const el = zone.el, empty = el.querySelector(".tv-photo-empty");
+  const list = TV.photos;
+  if (!list.length) { empty.style.display = ""; el.querySelectorAll(".tv-slide").forEach((s) => s.classList.remove("show")); return; }
+  empty.style.display = "none";
+  if (!keepIndex || TV.photoIdx < 0) TV.photoIdx = (TV.photoIdx + 1) % list.length;
+  if (TV.photoIdx >= list.length) TV.photoIdx = 0;
+  const photo = list[TV.photoIdx];
+  TV.photoSlide = TV.photoSlide ? 0 : 1;
+  const slide = el.querySelector('.tv-slide[data-s="' + TV.photoSlide + '"]');
+  const other = el.querySelector('.tv-slide[data-s="' + (TV.photoSlide ? 0 : 1) + '"]');
+  const img = slide.querySelector("img");
+  const show = () => {
+    slide.querySelector(".tv-cap").style.display = photo.caption ? "" : "none";
+    slide.querySelector(".tv-cap").textContent = photo.caption || "";
+    slide.classList.remove("kb"); void slide.offsetWidth;
+    slide.style.setProperty("--kb-dur", ((Number(TV.cfg.photos.intervalSecs) || 12) + 3) + "s");
+    if (TV.cfg.photos.kenBurns) slide.classList.add("kb");
+    slide.classList.add("show");
+    if (other) other.classList.remove("show");
+  };
+  img.onload = show; img.onerror = () => { if (list.length > 1) TV.stamps.photo = 0; };
+  img.src = photo.dataUrl;
+  if (img.complete && img.naturalWidth) show();
+}
+
+/* ---------- leaderboard (reuses leaderboardEntryFor / competitionRanks / avatarHtml) ---------- */
+function tvUpdateLeaderboard() {
+  const zone = TV.zones.leaderboard; if (!zone || !state) return;
+  const lbCfg = TV.cfg.leaderboard;
+  const cats = lbCfg.categories.map((id) => LEADERBOARD_CATEGORIES.find((c) => c.id === id)).filter(Boolean);
+  const list = cats.length ? cats : LEADERBOARD_CATEGORIES;
+  const cat = list[((TV.lbIdx % list.length) + list.length) % list.length];
+  const range = lbRangeFor(lbCfg.scope, todayISO(), null, null);
+  // The combined "Everything" layout only has room for the top 5; full-screen boards honor the setting.
+  const places = Math.min(TV.layout === "all" ? 5 : 10, Math.max(3, Number(lbCfg.places) || 8));
+  const entries = activeRoster().map((s) => Object.assign({ student: s }, leaderboardEntryFor(s.id, cat.id, range)));
+  const ranked = entries.filter((e) => e.value !== null && e.value !== undefined).sort((a, b) => b.value - a.value);
+  const ranks = competitionRanks(ranked);
+  const rows = ranked.slice(0, places).map((e, i) => {
+    const r = ranks[i];
+    const val = cat.id === "coins" ? coinBadge("sm") + "<span>" + escapeHtml(e.display) + "</span>" : escapeHtml(e.display);
+    return '<li class="tv-lb-row' + (r <= 3 ? " r" + r : "") + '"><span class="tv-lb-rank">' + r + "</span>" + avatarHtml(e.student) +
+      '<span class="tv-lb-name">' + escapeHtml(e.student.first) + " " + escapeHtml(e.student.last) + '</span><span class="tv-lb-val">' + val + "</span></li>";
+  });
+  const dots = list.length > 1 ? '<span class="tv-dots">' + list.map((c) => '<i class="tv-dot' + (c.id === cat.id ? " on" : "") + '"></i>').join("") + "</span>" : "";
+  const html = '<div class="tv-zone-head"><div class="tv-head-l"><span class="tv-eyebrow">Leaderboard</span><h2>' + escapeHtml(cat.label) + '</h2></div><span class="tv-lb-head-right"><span class="tv-scope">' + escapeHtml(range.title) + "</span>" + dots + "</span></div>" +
+    (rows.length ? '<ol class="tv-lb" style="--n:' + Math.max(rows.length, Math.min(places, 5)) + ';">' + rows.join("") + "</ol>" : '<div class="tv-lb-empty">No scores yet for ' + escapeHtml(cat.label) + "</div>");
+  if (zone.html !== html) { zone.html = html; zone.el.innerHTML = html; }
+}
+
+/* ---------- live attendance (counts and percentages only) ---------- */
+async function tvRefreshLive() {
+  if (!state) return;
+  todayDate = todayISO(); // fetchLiveCalendarPeriod matches against periodsForDate(todayDate)
+  try { TV.live.res = await fetchLiveCalendarPeriod(); } catch (e) { TV.live.res = { ok: false, reason: "error" }; }
+  TV.live.fetchedAt = Date.now();
+  tvUpdateAttendance();
+}
+// "Present" = any attendance credit above zero. Anyone with an excused mark is counted as
+// excused, not absent. Only totals ever leave this function -- no names for anyone but the
+// avatars of students who are present.
+function tvAttendanceFor(period, date, roster) {
+  let marked = 0, present = 0, absent = 0, excused = 0;
+  const presentStudents = [];
+  roster.forEach((s) => {
+    const rec = attendanceRecord(date, s.id);
+    const pair = rec && rec.scores && rec.scores[period];
+    if (!pair) return;
+    const a = pair[0];
+    const hasA = a !== null && a !== undefined && a !== "";
+    if (pair[4] && !hasA) { excused++; return; }
+    if (!hasA) return;
+    marked++;
+    if (Number(a) > 0) { present++; presentStudents.push(s); } else absent++;
+  });
+  const cs = classStats(period, roster, { from: date, to: date });
+  return { marked, present, absent, excused, notMarked: roster.length - marked - excused, total: roster.length, pct: cs.attPct, presentStudents };
+}
+function tvUpdateAttendance() {
+  const zone = TV.zones.attendance; if (!zone || !state) return;
+  const date = todayISO();
+  const roster = activeRoster();
+  const periods = periodsForDate(date);
+  const res = TV.live.res;
+  const livePeriod = res && res.ok && res.matched && periods.includes(res.matched) ? res.matched : null;
+  const fmtPct = (p) => (p === null || p === undefined ? "—" : Math.round(p * 100) + "%");
+  const compact = TV.layout === "all";
+  const liveA = livePeriod ? tvAttendanceFor(livePeriod, date, roster) : null;
+  const badge = livePeriod ? '<span class="tv-live-badge">In session</span>' : '<span class="tv-idle-badge">' + (res && res.ok === false ? (res.reason === "not-configured" ? "calendar not set up" : "calendar offline") : "between classes") + "</span>";
+  let html = '<div class="tv-zone-head"><div class="tv-head-l">' + (compact ? badge : '<span class="tv-eyebrow">Attendance</span>') + "<h2>" + escapeHtml(livePeriod || "No class in session") + "</h2></div>" +
+    (compact ? "" : badge) +
+    (compact && liveA ? '<span class="tv-att-inline">' + fmtPct(liveA.pct) + "<small>Class attendance</small></span>" : '<span class="tv-scope">' + escapeHtml(dayNameFor(date)) + "</span>") + "</div>";
+  if (livePeriod) {
+    const a = liveA;
+    html += '<div class="tv-att-top">' + (compact ? "" : '<div class="tv-att-pct">' + fmtPct(a.pct) + "<small>Class attendance</small></div>") +
+      '<div class="tv-att-tiles">' +
+      '<div class="tv-tile"><b>' + a.marked + '<span style="font-size:.5em;color:var(--tv-muted);"> / ' + a.total + "</span></b><span>Marked</span></div>" +
+      '<div class="tv-tile present"><b>' + a.present + "</b><span>Present</span></div>" +
+      '<div class="tv-tile absent"><b>' + a.absent + "</b><span>Absent</span></div>" +
+      (a.excused ? '<div class="tv-tile"><b>' + a.excused + "</b><span>Excused</span></div>" : "") +
+      "</div></div>";
+    if (TV.cfg.attendance.showPresentGrid && a.presentStudents.length) {
+      const n = a.presentStudents.length;
+      if (TV.layout === "all") {
+        // No room for a picture grid in the combined layout -- it lives in the full "Live attendance" layout.
+      } else {
+        const size = n <= 12 ? 6.5 : n <= 24 ? 5 : n <= 40 ? 4 : 3.2;
+        html += '<div class="tv-av-grid" style="--av:' + size + 'rem;">' + a.presentStudents.map((s) => avatarHtml(s)).join("") + "</div>";
+      }
+    }
+  } else {
+    // Between classes: just the classes that already have marks today, with their class %.
+    const chips = periods.map((p) => ({ p, a: tvAttendanceFor(p, date, roster) })).filter((x) => x.a.marked)
+      .map((x) => '<div class="tv-class-chip"><span>' + escapeHtml(x.p) + "</span><b>" + fmtPct(x.a.pct) + "</b></div>");
+    html += chips.length ? '<div class="tv-classes">' + chips.join("") + "</div>" : '<div class="tv-cal-note">No attendance marked yet today</div>';
+  }
+  if (zone.html !== html) { zone.html = html; zone.el.innerHTML = html; }
+}
+
+/* ---------- calendar ---------- */
+// Same calendar, same API key the Live schedule uses (settings.googleCalendar) -- just a wider
+// events.list window (start of today through 7 days out).
+async function fetchCalendarWindow(days) {
+  const cfg = liveScheduleConfig();
+  if (!cfg.calendarId || !cfg.apiKey) return { ok: false, reason: "not-configured" };
+  const start = new Date(); start.setHours(0, 0, 0, 0);
+  const end = new Date(start.getTime() + days * 86400000);
+  const url = "https://www.googleapis.com/calendar/v3/calendars/" + encodeURIComponent(cfg.calendarId) + "/events" +
+    "?key=" + encodeURIComponent(cfg.apiKey) +
+    "&timeMin=" + encodeURIComponent(start.toISOString()) + "&timeMax=" + encodeURIComponent(end.toISOString()) +
+    "&singleEvents=true&orderBy=startTime&maxResults=150";
+  let res;
+  try { res = await fetch(url); } catch (e) { return { ok: false, reason: "network" }; }
+  if (!res.ok) return { ok: false, reason: "http-" + res.status };
+  let data;
+  try { data = await res.json(); } catch (e) { return { ok: false, reason: "bad-json" }; }
+  const events = (data.items || []).filter((ev) => ev.status !== "cancelled").map((ev) => {
+    const allDay = !!(ev.start && ev.start.date && !ev.start.dateTime);
+    const s = allDay ? jsDateFor(ev.start.date).setHours(0, 0, 0, 0) : new Date(ev.start.dateTime).getTime();
+    const e = allDay ? jsDateFor(ev.end && ev.end.date ? ev.end.date : ev.start.date).setHours(0, 0, 0, 0) : new Date(ev.end.dateTime).getTime();
+    return { title: (ev.summary || "").trim() || "(untitled)", start: s, end: e, allDay };
+  });
+  return { ok: true, events };
+}
+async function tvRefreshCalendar() {
+  const r = await fetchCalendarWindow(7);
+  if (r.ok) { TV.cal.events = r.events; TV.cal.ok = true; } else { TV.cal.ok = TV.cal.events.length ? "stale" : r.reason; }
+  TV.cal.fetchedAt = Date.now();
+  tvUpdateCalendar();
+}
+function tvTimeStr(ms) { return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
+function tvDayLabel(ms, nowMs) {
+  const d0 = new Date(nowMs); d0.setHours(0, 0, 0, 0);
+  const d1 = new Date(ms); d1.setHours(0, 0, 0, 0);
+  const diff = Math.round((d1 - d0) / 86400000);
+  if (diff === 0) return "Today"; if (diff === 1) return "Tomorrow";
+  return d1.toLocaleDateString([], { weekday: "long" });
+}
+function tvUpdateCalendar() {
+  const zone = TV.zones.calendar; if (!zone) return;
+  const now = Date.now();
+  zone.lastMin = Math.floor(now / 60000);
+  const cfg = liveScheduleConfig();
+  const full = TV.layout === "calendar";
+  if (!cfg.calendarId || !cfg.apiKey) {
+    zone.html = '<div class="tv-cal-note">Calendar isn’t connected yet — add it in Admin &gt; Schedule &gt; Live schedule.</div>';
+    zone.el.innerHTML = zone.html; return;
+  }
+  const timed = TV.cal.events.filter((e) => !e.allDay && e.end > now).sort((a, b) => a.start - b.start);
+  const nowEv = timed.find((e) => e.start <= now && now < e.end) || null;
+  const upcoming = timed.filter((e) => e.start > now);
+  const next = upcoming[0] || null;
+  const allDayToday = TV.cal.events.filter((e) => e.allDay && e.start <= now && now < e.end);
+  const rel = (ms) => { const m = Math.round((ms - now) / 60000); return m < 60 ? "in " + m + " min" : m < 1440 ? "in " + Math.floor(m / 60) + " hr" + (m % 60 ? " " + (m % 60) + " min" : "") : ""; };
+  const card = (kind, ev) => ev
+    ? '<div class="tv-cal-card ' + kind + '"><div class="tv-cal-when">' + (kind === "now" ? "Now · until " + tvTimeStr(ev.end) : (tvDayLabel(ev.start, now) === "Today" ? "" : tvDayLabel(ev.start, now) + " · ") + tvTimeStr(ev.start) + (rel(ev.start) ? " · " + rel(ev.start) : "")) + '</div><div class="tv-cal-title">' + escapeHtml(ev.title) + "</div></div>"
+    : '<div class="tv-cal-card ' + kind + '"><div class="tv-cal-when">' + (kind === "now" ? "Now" : "Next") + '</div><div class="tv-cal-title" style="color:var(--tv-muted);">' + (kind === "now" ? "Nothing right now" : "Nothing else scheduled") + "</div></div>";
+  let html = '<div class="tv-zone-head"><div class="tv-head-l"><span class="tv-eyebrow">Schedule</span><h2>Today &amp; this week</h2></div>' +
+    (TV.cal.ok === "stale" ? '<span class="tv-idle-badge">may be out of date</span>' : "") +
+    (allDayToday.length ? '<span class="tv-scope">' + allDayToday.map((e) => escapeHtml(e.title)).join(" · ") + "</span>" : "") + "</div>";
+  if (full) {
+    html += '<div class="tv-cal-hero">' + card("now", nowEv) + card("next", next) + "</div>";
+    const byDay = [];
+    timed.forEach((e) => { if (e === nowEv) return; const label = tvDayLabel(e.start, now); let g = byDay.find((x) => x.label === label); if (!g) { g = { label, evs: [] }; byDay.push(g); } g.evs.push(e); });
+    html += '<div class="tv-cal-days">' + (byDay.length ? byDay.slice(0, 7).map((g) => '<div class="tv-cal-day"><h3>' + escapeHtml(g.label) + "</h3>" +
+      g.evs.slice(0, 9).map((e) => '<div class="tv-cal-ev"><time>' + tvTimeStr(e.start) + "</time><span>" + escapeHtml(e.title) + "</span></div>").join("") + "</div>").join("") : '<div class="tv-cal-note">Nothing else on the calendar this week</div>') + "</div>";
+  } else {
+    const cards = [];
+    if (nowEv) cards.push(card("now", nowEv));
+    upcoming.slice(0, nowEv ? 3 : 4).forEach((e, i) => cards.push(card(i === 0 && !nowEv ? "next" : "", e)));
+    html += '<div class="tv-cal-strip">' + (cards.length ? cards.join("") : '<div class="tv-cal-note">Nothing on the calendar right now</div>') + "</div>";
+  }
+  if (zone.html !== html) { zone.html = html; zone.el.innerHTML = html; }
+}
+
+/* ---------- ticker (announcement) ---------- */
+function tvUpdateTicker(now) {
+  const el = document.getElementById("tv-ticker"); if (!el) return;
+  const a = TV.cfg.announcement;
+  const live = a && a.text && String(a.text).trim() && (a.until === null || a.until === undefined || Number(a.until) > now);
+  const key = live ? (a.style || "info") + "|" + a.text : "";
+  if (TV.tickerKey === key) return;
+  TV.tickerKey = key;
+  if (!live) { el.className = "tv-ticker empty"; el.innerHTML = ""; return; }
+  el.className = "tv-ticker " + (["celebration", "urgent"].includes(a.style) ? a.style : "info");
+  el.innerHTML = '<span class="tv-ticker-inner"></span>';
+  const inner = el.firstChild;
+  inner.textContent = String(a.text).trim();
+  // Static if it fits, scrolling if it doesn't.
+  if (inner.scrollWidth > el.clientWidth - 8) {
+    el.classList.add("scroll");
+    el.style.setProperty("--dur", Math.max(14, Math.round((inner.scrollWidth + el.clientWidth) / (el.clientWidth / 12))) + "s");
+  }
+}
+
+/* ================================================================
+   CONTROL TAB (admin only, route "tvdisplay"). Mobile-first. Listens to app/display,
+   app/displayStatus (and displayPhotos only while the Photos section is open) and writes to
+   app/display / displayPhotos with plain set/update -- never saveState().
+   ================================================================ */
+const TVC = {
+  cfg: tvDefaults(), cfgLoaded: false, status: null, photos: [], photosLoaded: false,
+  unsubs: {}, duration: 15 * 60000, annStyle: "info", annExpiry: 60 * 60000, annText: null,
+  uploading: null, deleteConfirm: null, seenTimer: null,
+};
+function tvcWho() { const s = currentSession(); return (s && s.record && s.record.name) || "admin"; }
+function tvcSync(route) {
+  const wantMain = route === "tvdisplay" && !TV_MODE;
+  const wantPhotos = wantMain && openSections.has("tvPhotos");
+  const refresh = () => { if (currentRouteId === "tvdisplay") refreshViewOrDefer(); };
+  if (wantMain && !TVC.unsubs.cfg) {
+    TVC.unsubs.cfg = DISPLAY_DOC.onSnapshot((snap) => { TVC.cfg = tvMergeCfg(snap.exists ? snap.data() : null); TVC.cfgLoaded = true; refresh(); }, (e) => console.error("display listener:", e));
+    TVC.unsubs.status = DISPLAY_STATUS_DOC.onSnapshot((snap) => { TVC.status = snap.exists ? snap.data() : null; refresh(); }, (e) => console.error("status listener:", e));
+    TVC.seenTimer = setInterval(tvcTickSeen, 1000);
+  } else if (!wantMain && TVC.unsubs.cfg) {
+    TVC.unsubs.cfg(); TVC.unsubs.status(); TVC.unsubs.cfg = TVC.unsubs.status = null;
+    clearInterval(TVC.seenTimer); TVC.seenTimer = null; TVC.cfgLoaded = false;
+  }
+  if (wantPhotos && !TVC.unsubs.photos) {
+    TVC.unsubs.photos = DISPLAY_PHOTOS.onSnapshot((snap) => {
+      TVC.photos = snap.docs.map((d) => Object.assign({ id: d.id }, d.data())).sort((a, b) => (a.order || 0) - (b.order || 0));
+      TVC.photosLoaded = true; refresh();
+    }, (e) => console.error("photos listener:", e));
+  } else if (!wantPhotos && TVC.unsubs.photos) {
+    TVC.unsubs.photos(); TVC.unsubs.photos = null; TVC.photosLoaded = false; TVC.photos = [];
+  }
+}
+function tvcSeenInfo() {
+  const ls = TVC.status && TVC.status.lastSeen;
+  const ms = ls && ls.toMillis ? ls.toMillis() : null;
+  if (!ms) return { online: false, text: "TV never seen yet", ms: null };
+  const age = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  const ago = age < 90 ? age + "s ago" : age < 5400 ? Math.round(age / 60) + " min ago" : Math.round(age / 3600) + " hr ago";
+  return { online: age <= 150, text: (age <= 150 ? "TV online" : "TV offline") + " · last seen " + ago, ms };
+}
+function tvcTickSeen() {
+  const el = document.getElementById("tvc-seen"); if (!el) return;
+  const i = tvcSeenInfo();
+  el.textContent = i.text;
+  const dot = document.getElementById("tvc-dot"); if (dot) dot.className = "tvc-dot " + (i.online ? "on" : "off");
+}
+async function tvcWrite(patch, okMsg) {
+  if (!canWrite) { toast("Can’t save right now — not connected.", "warn"); return false; }
+  try {
+    await DISPLAY_DOC.set(Object.assign({}, patch, { updatedAt: Date.now(), updatedBy: tvcWho() }), { merge: true });
+    if (okMsg) toast(okMsg, "good");
+    return true;
+  } catch (e) {
+    console.error("TV config write failed:", e);
+    logProblem("tv-config", (e && e.code ? e.code + ": " : "") + (e && e.message ? e.message : "unknown"));
+    toast("Couldn’t save that. " + ((e && e.code === "permission-denied") ? "Firestore rules don’t allow app/display yet." : "Try again."), "warn");
+    return false;
+  }
+}
+function tvcMiniPreview(layout) {
+  const b = (cls, label) => '<i class="' + cls + '">' + label + "</i>";
+  const bodies = {
+    all: '<div class="mp mp-all">' + b("p", "Photos") + b("l", "Leaderboard") + b("a", "Attendance") + b("c", "Calendar") + b("k", "Clock") + "</div>",
+    photos: '<div class="mp mp-one">' + b("p", "Photos") + b("k s", "Clock") + "</div>",
+    leaderboard: '<div class="mp mp-one">' + b("l", "Leaderboard") + b("k s", "Clock") + "</div>",
+    attendance: '<div class="mp mp-one">' + b("a", "Attendance") + b("k s", "Clock") + "</div>",
+    calendar: '<div class="mp mp-one">' + b("c", "Calendar") + b("k s", "Clock") + "</div>",
+    split: '<div class="mp mp-split">' + b("p", "Photos") + b("l", "Leaderboard") + b("k s", "Clock") + "</div>",
+  };
+  return '<div class="tvc-preview">' + (bodies[layout] || bodies.all) + "</div>";
+}
+function tvcSourceText(eff) {
+  if (eff.source === "override") return eff.until ? "Override until " + new Date(Number(eff.until)).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "Override until you change it";
+  if (eff.source === "rotate") return "Rotating through your layouts";
+  if (eff.source === "schedule") return "Following your schedule";
+  if (eff.source === "fallback") return "Schedule fallback";
+  return "Fixed layout";
+}
+const TVC_DURATIONS = [[5 * 60000, "5 min"], [15 * 60000, "15 min"], [60 * 60000, "1 hr"], [0, "Until I change it"]];
+const TVC_ANN_EXPIRY = [[30 * 60000, "30 min"], [60 * 60000, "1 hr"], [-1, "End of day"], [0, "Until I clear it"]];
+const TVC_ANN_STYLES = [["info", "Info"], ["celebration", "Celebration"], ["urgent", "Urgent"]];
+
+function renderTvControl(root, session) {
+  tvcSync("tvdisplay");
+  const cfg = TVC.cfg;
+  const now = Date.now();
+  const eff = tvEffectiveLayout(cfg, now);
+  const seen = tvcSeenInfo();
+  const reportedLayout = TVC.status && TVC.status.layout;
+  const ov = cfg.override && (cfg.override.until === null || cfg.override.until === undefined || Number(cfg.override.until) > now) ? cfg.override : null;
+  const ann = cfg.announcement && cfg.announcement.text && (cfg.announcement.until === null || cfg.announcement.until === undefined || Number(cfg.announcement.until) > now) ? cfg.announcement : null;
+  let html = '<div class="page-head"><div><span class="eyebrow">Hallway screen</span><h1>TV Display</h1></div></div>';
+
+  // Status + preview
+  html += '<div class="card card-pad tvc-card"><div class="tvc-status"><span id="tvc-dot" class="tvc-dot ' + (seen.online ? "on" : "off") + '"></span><span id="tvc-seen" class="tvc-seen">' + escapeHtml(seen.text) + "</span></div>" +
+    '<div class="tvc-now">' + tvcMiniPreview(eff.layout) + '<div class="tvc-now-text"><div class="tvc-now-label">Showing now</div><div class="tvc-now-layout">' + escapeHtml(tvLayoutLabel(eff.layout)) + "</div>" +
+    '<div class="tvc-now-src">' + escapeHtml(tvcSourceText(eff)) + "</div>" +
+    (seen.online && reportedLayout && reportedLayout !== eff.layout ? '<div class="tvc-now-src">TV reports: ' + escapeHtml(tvLayoutLabel(reportedLayout)) + "</div>" : "") + "</div></div>" +
+    (!TVC.cfgLoaded ? '<p class="help-text">Loading settings…</p>' : "") + "</div>";
+
+  // Show now
+  html += '<div class="card card-pad tvc-card"><div class="section-title">Show now</div>' +
+    '<div class="tvc-chips" role="group" aria-label="How long">' + TVC_DURATIONS.map(([ms, label]) => '<button type="button" class="tvc-chip' + (TVC.duration === ms ? " active" : "") + '" data-tvc-dur="' + ms + '">' + label + "</button>").join("") + "</div>" +
+    '<div class="tvc-layouts">' + TV_LAYOUTS.map((l) => '<button type="button" class="tvc-layout-btn' + (ov && ov.layout === l.id ? " active" : "") + '" data-tvc-show="' + l.id + '"><b>' + escapeHtml(l.label) + "</b><span>" + escapeHtml(l.hint) + "</span></button>").join("") + "</div>" +
+    (ov ? '<button type="button" class="btn btn-primary tvc-wide" data-tvc-act="clear-override">Back to normal</button>' : "") + "</div>";
+
+  // Announcement
+  const annText = TVC.annText !== null ? TVC.annText : (ann ? ann.text : "");
+  html += '<div class="card card-pad tvc-card"><div class="section-title">Announcement</div>' +
+    (ann ? '<p class="tvc-live-ann tvc-ann-' + escapeHtml(ann.style || "info") + '">On screen now: ' + escapeHtml(ann.text) + "</p>" : '<p class="help-text">Nothing posted. It scrolls along the bottom of the TV.</p>') +
+    '<textarea id="tvc-ann-text" class="tvc-textarea" rows="2" maxlength="240" placeholder="e.g. Mazal tov to Sruly on his bar mitzvah!">' + escapeHtml(annText) + "</textarea>" +
+    '<div class="tvc-sub">Style</div><div class="tvc-chips">' + TVC_ANN_STYLES.map(([v, l]) => '<button type="button" class="tvc-chip' + (TVC.annStyle === v ? " active" : "") + '" data-tvc-annstyle="' + v + '">' + l + "</button>").join("") + "</div>" +
+    '<div class="tvc-sub">Show for</div><div class="tvc-chips">' + TVC_ANN_EXPIRY.map(([ms, l]) => '<button type="button" class="tvc-chip' + (TVC.annExpiry === ms ? " active" : "") + '" data-tvc-annexp="' + ms + '">' + l + "</button>").join("") + "</div>" +
+    '<div class="tvc-row"><button type="button" class="btn btn-primary" data-tvc-act="post-ann">Post</button><button type="button" class="btn btn-ghost" data-tvc-act="clear-ann"' + (ann ? "" : " disabled") + ">Clear</button></div></div>";
+
+  // Photos (collapsible; the photo list is only downloaded while this is open)
+  html += collapsibleSectionHtml("tvPhotos", "Photos", TVC.photosLoaded ? TVC.photos.length + " photo" + (TVC.photos.length === 1 ? "" : "s") : "Slideshow pictures", tvcPhotosHtml());
+  // Normal mode
+  html += collapsibleSectionHtml("tvNormal", "Normal mode", { fixed: "Fixed layout", rotate: "Rotation", schedule: "Schedule" }[cfg.mode] || "", tvcNormalHtml());
+  // Leaderboard settings
+  html += collapsibleSectionHtml("tvLb", "Leaderboard settings", cfg.leaderboard.categories.length + " categories · " + ({ week: "this week", hmonth: "Hebrew month", all: "all time" }[cfg.leaderboard.scope] || ""), tvcLeaderboardHtml());
+  // Attendance settings
+  html += collapsibleSectionHtml("tvAtt", "Live attendance settings", cfg.attendance.showPresentGrid ? "Avatar grid on" : "Avatar grid off",
+    '<label class="tvc-check"><input type="checkbox" id="tvc-grid"' + (cfg.attendance.showPresentGrid ? " checked" : "") + '> Show a grid of present students’ pictures (no names)</label>' +
+    '<p class="help-text">The TV only ever shows counts and percentages for the class in session — never who is absent, notes or scores.</p>');
+  // Exit
+  html += collapsibleSectionHtml("tvExit", "Exit TV mode", "Return the screen to the normal app",
+    '<p class="help-text">Sends the TV back to the normal app login. To put it back in TV mode, open the TV link again.</p><button type="button" class="btn btn-ghost" data-tvc-act="exit-tv">Exit TV mode on screen</button>');
+  root.innerHTML = '<div class="tvc">' + html + "</div>";
+  tvcWire(root);
+}
+
+function tvcNormalHtml() {
+  const cfg = TVC.cfg;
+  const layoutSel = (cls, val, attr) => '<select class="' + cls + '" ' + attr + ">" + TV_LAYOUTS.map((l) => '<option value="' + l.id + '"' + (val === l.id ? " selected" : "") + ">" + escapeHtml(l.label) + "</option>").join("") + "</select>";
+  let h = '<div class="tvc-chips">' + [["fixed", "Fixed"], ["rotate", "Rotation"], ["schedule", "Schedule"]].map(([v, l]) => '<button type="button" class="tvc-chip' + (cfg.mode === v ? " active" : "") + '" data-tvc-mode="' + v + '">' + l + "</button>").join("") + "</div>";
+  if (cfg.mode === "fixed") {
+    h += '<div class="field"><label>Layout</label>' + layoutSel("tvc-sel", cfg.layout, 'data-tvc-fixed="1"') + "</div>";
+  } else if (cfg.mode === "rotate") {
+    h += '<p class="help-text">The TV cycles through these in order.</p>' + cfg.rotate.map((r, i) =>
+      '<div class="tvc-rowline">' + layoutSel("tvc-sel", r.layout, 'data-tvc-rot-layout="' + i + '"') +
+      '<input type="number" class="tvc-num" min="5" max="3600" step="5" value="' + (Number(r.secs) || 30) + '" data-tvc-rot-secs="' + i + '" aria-label="Seconds"><span class="tvc-unit">sec</span>' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-tvc-rot-del="' + i + '" aria-label="Remove">✕</button></div>').join("") +
+      '<button type="button" class="btn btn-ghost btn-sm" data-tvc-act="rot-add">+ Add layout</button>';
+  } else {
+    h += '<p class="help-text">First matching row wins. Times are the TV’s local time.</p>' + cfg.schedule.map((r, i) =>
+      '<div class="tvc-sched"><div class="tvc-chips tvc-days">' + DAY_NAMES.map((d) => '<button type="button" class="tvc-chip sm' + ((r.days || []).includes(d) ? " active" : "") + '" data-tvc-sch-day="' + i + ":" + d + '">' + d.slice(0, 3) + "</button>").join("") + "</div>" +
+      '<div class="tvc-rowline"><input type="time" class="tvc-time" value="' + escapeHtml(r.start || "08:00") + '" data-tvc-sch-start="' + i + '"><span class="tvc-unit">to</span><input type="time" class="tvc-time" value="' + escapeHtml(r.end || "09:00") + '" data-tvc-sch-end="' + i + '">' +
+      layoutSel("tvc-sel", r.layout, 'data-tvc-sch-layout="' + i + '"') + '<button type="button" class="btn btn-ghost btn-sm" data-tvc-sch-del="' + i + '" aria-label="Remove">✕</button></div></div>').join("") +
+      '<button type="button" class="btn btn-ghost btn-sm" data-tvc-act="sch-add">+ Add a time slot</button>' +
+      '<div class="field" style="margin-top:14px;"><label>Otherwise show</label>' + layoutSel("tvc-sel", cfg.fallback, 'data-tvc-fallback="1"') + "</div>";
+  }
+  return h;
+}
+function tvcLeaderboardHtml() {
+  const lb = TVC.cfg.leaderboard;
+  return '<div class="tvc-sub">Categories that rotate</div><div class="tvc-chips">' + LEADERBOARD_CATEGORIES.map((c) => '<button type="button" class="tvc-chip' + (lb.categories.includes(c.id) ? " active" : "") + '" data-tvc-cat="' + c.id + '">' + escapeHtml(c.label) + "</button>").join("") + "</div>" +
+    '<div class="tvc-sub">Time range</div><div class="tvc-chips">' + [["week", "This week"], ["hmonth", "Hebrew month"], ["all", "All time"]].map(([v, l]) => '<button type="button" class="tvc-chip' + (lb.scope === v ? " active" : "") + '" data-tvc-scope="' + v + '">' + l + "</button>").join("") + "</div>" +
+    '<div class="tvc-sub">Places shown</div><div class="tvc-chips">' + [5, 6, 7, 8, 9, 10].map((n) => '<button type="button" class="tvc-chip sm' + (Number(lb.places) === n ? " active" : "") + '" data-tvc-places="' + n + '">' + n + "</button>").join("") + "</div>" +
+    '<div class="tvc-sub">Seconds per category</div><div class="tvc-chips">' + [8, 12, 20, 30].map((n) => '<button type="button" class="tvc-chip sm' + (Number(lb.secsPerCategory) === n ? " active" : "") + '" data-tvc-secs="' + n + '">' + n + "</button>").join("") + "</div>";
+}
+function tvcPhotosHtml() {
+  const cfg = TVC.cfg;
+  let h = '<div class="tvc-row"><label class="btn btn-primary tvc-upload">+ Add photos<input type="file" id="tvc-file" accept="image/*" multiple hidden></label>' +
+    (TVC.uploading ? '<span class="tvc-unit">' + escapeHtml(TVC.uploading) + "</span>" : "") + "</div>" +
+    '<p class="help-text">Pick from your camera roll. Photos are shrunk automatically (max ' + TV_MAX_PHOTOS + " photos).</p>" +
+    '<div class="tvc-sub">Seconds per photo</div><div class="tvc-chips">' + [6, 10, 15, 25].map((n) => '<button type="button" class="tvc-chip sm' + (Number(cfg.photos.intervalSecs) === n ? " active" : "") + '" data-tvc-interval="' + n + '">' + n + "</button>").join("") + "</div>" +
+    '<label class="tvc-check"><input type="checkbox" id="tvc-kb"' + (cfg.photos.kenBurns ? " checked" : "") + "> Slow zoom on photos</label>";
+  if (!TVC.photosLoaded) return h + '<p class="help-text">Loading photos…</p>';
+  if (!TVC.photos.length) return h + '<p class="help-text">No photos yet.</p>';
+  h += '<div class="tvc-photos">' + TVC.photos.map((p, i) =>
+    '<div class="tvc-photo' + (p.enabled === false ? " hidden" : "") + '"><div class="tvc-thumb"><img loading="lazy" decoding="async" alt="" src="' + escapeHtml(p.thumb || p.dataUrl) + '">' + (p.enabled === false ? '<span class="tvc-hid">Hidden</span>' : "") + "</div>" +
+    '<input type="text" class="tvc-cap-in" maxlength="80" placeholder="Caption (optional)" value="' + escapeHtml(p.caption || "") + '" data-tvc-caption="' + p.id + '">' +
+    '<div class="tvc-photo-btns"><button type="button" class="btn btn-ghost btn-sm" data-tvc-move="' + p.id + ':-1"' + (i === 0 ? " disabled" : "") + ' aria-label="Move earlier">↑</button>' +
+    '<button type="button" class="btn btn-ghost btn-sm" data-tvc-move="' + p.id + ':1"' + (i === TVC.photos.length - 1 ? " disabled" : "") + ' aria-label="Move later">↓</button>' +
+    '<button type="button" class="btn btn-ghost btn-sm" data-tvc-toggle="' + p.id + '">' + (p.enabled === false ? "Show" : "Hide") + "</button>" +
+    (TVC.deleteConfirm === p.id ? '<button type="button" class="btn btn-sm tvc-del" data-tvc-del="' + p.id + '">Really delete?</button>' : '<button type="button" class="btn btn-ghost btn-sm" data-tvc-askdel="' + p.id + '">Delete</button>') + "</div></div>").join("") + "</div>";
+  return h;
+}
+
+/* ---------- photo resizing (in the browser) ---------- */
+async function tvcResizePhoto(file) {
+  let bmp;
+  try { bmp = await createImageBitmap(file, { imageOrientation: "from-image" }); }
+  catch (e) {
+    bmp = await new Promise((resolve, reject) => { const im = new Image(); const url = URL.createObjectURL(file); im.onload = () => { URL.revokeObjectURL(url); resolve(im); }; im.onerror = reject; im.src = url; });
+  }
+  const w0 = bmp.width || bmp.naturalWidth, h0 = bmp.height || bmp.naturalHeight;
+  const draw = (maxEdge, quality) => {
+    const k = Math.min(1, maxEdge / Math.max(w0, h0));
+    const c = document.createElement("canvas"); c.width = Math.round(w0 * k); c.height = Math.round(h0 * k);
+    c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+    return c.toDataURL("image/jpeg", quality);
+  };
+  // Max edge 1920px, JPEG ~0.8; step the quality (then the size) down until it's under ~650 KB
+  // as a data URL (the spec's 700 KB budget, leaving room under Firestore's 1 MiB doc limit).
+  const LIMIT = 650 * 1024;
+  let edge = 1920, q = 0.8, url = draw(edge, q);
+  while (url.length > LIMIT && q > 0.5) { q = Math.round((q - 0.1) * 10) / 10; url = draw(edge, q); }
+  while (url.length > LIMIT && edge > 960) { edge = Math.round(edge * 0.85); url = draw(edge, 0.7); }
+  const thumb = draw(360, 0.6);
+  if (bmp.close) bmp.close();
+  return { dataUrl: url, thumb };
+}
+async function tvcUploadFiles(files) {
+  if (!canWrite) { toast("Can’t save right now — not connected.", "warn"); return; }
+  files = Array.from(files).filter((f) => /^image\//.test(f.type));
+  if (!files.length) return;
+  const room = TV_MAX_PHOTOS - TVC.photos.length;
+  if (room <= 0) { toast("That’s the maximum (" + TV_MAX_PHOTOS + " photos). Delete a few first.", "warn"); return; }
+  if (files.length > room) { toast("Only room for " + room + " more — adding the first " + room + ".", "warn"); files = files.slice(0, room); }
+  let order = TVC.photos.reduce((m, p) => Math.max(m, Number(p.order) || 0), 0), done = 0, failed = 0;
+  for (const f of files) {
+    TVC.uploading = "Adding " + (done + 1) + " of " + files.length + "…"; refreshViewOrDefer();
+    try {
+      const r = await tvcResizePhoto(f);
+      await DISPLAY_PHOTOS.add({ dataUrl: r.dataUrl, thumb: r.thumb, caption: "", order: ++order, enabled: true, addedAt: Date.now(), addedBy: tvcWho() });
+      done++;
+    } catch (e) { console.error("photo upload failed:", e); failed++; }
+  }
+  TVC.uploading = null; refreshViewOrDefer();
+  toast(failed ? "Added " + done + ", " + failed + " didn’t work." : "Added " + done + " photo" + (done === 1 ? "" : "s") + ".", failed ? "warn" : "good");
+}
+
+function tvcWire(root) {
+  const on = (sel, ev, fn) => root.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, (e) => fn(el, e)));
+  const cfg = TVC.cfg;
+  on("[data-tvc-dur]", "click", (el) => { TVC.duration = Number(el.getAttribute("data-tvc-dur")); refreshViewOrDefer(); });
+  on("[data-tvc-show]", "click", (el) => {
+    const until = TVC.duration ? Date.now() + TVC.duration : null;
+    tvcWrite({ override: { layout: el.getAttribute("data-tvc-show"), until } }, "Showing " + tvLayoutLabel(el.getAttribute("data-tvc-show")) + (until ? "" : " until you change it") + ".");
+  });
+  on("[data-tvc-act]", "click", (el) => {
+    const act = el.getAttribute("data-tvc-act");
+    if (act === "clear-override") tvcWrite({ override: null }, "Back to normal.");
+    else if (act === "post-ann") {
+      const ta = document.getElementById("tvc-ann-text"); const text = ta ? ta.value.trim() : "";
+      if (!text) { toast("Type the announcement first.", "warn"); return; }
+      let until = null;
+      if (TVC.annExpiry > 0) until = Date.now() + TVC.annExpiry;
+      else if (TVC.annExpiry === -1) { const d = new Date(); d.setHours(23, 59, 0, 0); until = d.getTime(); }
+      TVC.annText = null;
+      tvcWrite({ announcement: { text, style: TVC.annStyle, until } }, "Posted to the TV.");
+    } else if (act === "clear-ann") { TVC.annText = null; tvcWrite({ announcement: null }, "Announcement cleared."); }
+    else if (act === "exit-tv") tvcWrite({ exitTvNonce: String(Date.now()) + "-" + Math.random().toString(36).slice(2, 6) }, "Told the TV to exit TV mode.");
+    else if (act === "rot-add") tvcWrite({ rotate: cfg.rotate.concat([{ layout: "all", secs: 30 }]) });
+    else if (act === "sch-add") tvcWrite({ schedule: cfg.schedule.concat([{ days: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday"], start: "08:00", end: "09:00", layout: "attendance" }]) });
+  });
+  const ta = document.getElementById("tvc-ann-text");
+  if (ta) ta.addEventListener("input", () => { TVC.annText = ta.value; });
+  on("[data-tvc-annstyle]", "click", (el) => { TVC.annStyle = el.getAttribute("data-tvc-annstyle"); refreshViewOrDefer(); });
+  on("[data-tvc-annexp]", "click", (el) => { TVC.annExpiry = Number(el.getAttribute("data-tvc-annexp")); refreshViewOrDefer(); });
+  // normal mode
+  on("[data-tvc-mode]", "click", (el) => tvcWrite({ mode: el.getAttribute("data-tvc-mode") }));
+  on("[data-tvc-fixed]", "change", (el) => tvcWrite({ layout: el.value }, "Saved."));
+  on("[data-tvc-fallback]", "change", (el) => tvcWrite({ fallback: el.value }, "Saved."));
+  const rot = () => cfg.rotate.map((r) => Object.assign({}, r));
+  on("[data-tvc-rot-layout]", "change", (el) => { const a = rot(); a[Number(el.getAttribute("data-tvc-rot-layout"))].layout = el.value; tvcWrite({ rotate: a }); });
+  on("[data-tvc-rot-secs]", "change", (el) => { const a = rot(); a[Number(el.getAttribute("data-tvc-rot-secs"))].secs = Math.max(5, Number(el.value) || 30); tvcWrite({ rotate: a }); });
+  on("[data-tvc-rot-del]", "click", (el) => { const a = rot(); a.splice(Number(el.getAttribute("data-tvc-rot-del")), 1); tvcWrite({ rotate: a }); });
+  const sch = () => cfg.schedule.map((r) => Object.assign({}, r, { days: (r.days || []).slice() }));
+  on("[data-tvc-sch-day]", "click", (el) => {
+    const [i, d] = el.getAttribute("data-tvc-sch-day").split(":"); const a = sch(); const row = a[Number(i)];
+    row.days = row.days.includes(d) ? row.days.filter((x) => x !== d) : row.days.concat([d]); tvcWrite({ schedule: a });
+  });
+  on("[data-tvc-sch-start]", "change", (el) => { const a = sch(); a[Number(el.getAttribute("data-tvc-sch-start"))].start = el.value; tvcWrite({ schedule: a }); });
+  on("[data-tvc-sch-end]", "change", (el) => { const a = sch(); a[Number(el.getAttribute("data-tvc-sch-end"))].end = el.value; tvcWrite({ schedule: a }); });
+  on("[data-tvc-sch-layout]", "change", (el) => { const a = sch(); a[Number(el.getAttribute("data-tvc-sch-layout"))].layout = el.value; tvcWrite({ schedule: a }); });
+  on("[data-tvc-sch-del]", "click", (el) => { const a = sch(); a.splice(Number(el.getAttribute("data-tvc-sch-del")), 1); tvcWrite({ schedule: a }); });
+  // leaderboard + attendance settings
+  on("[data-tvc-cat]", "click", (el) => {
+    const id = el.getAttribute("data-tvc-cat"); const cur = cfg.leaderboard.categories.slice();
+    const next = cur.includes(id) ? cur.filter((x) => x !== id) : LEADERBOARD_CATEGORIES.map((c) => c.id).filter((x) => cur.includes(x) || x === id);
+    if (!next.length) { toast("Keep at least one category.", "warn"); return; }
+    tvcWrite({ leaderboard: { categories: next } });
+  });
+  on("[data-tvc-scope]", "click", (el) => tvcWrite({ leaderboard: { scope: el.getAttribute("data-tvc-scope") } }));
+  on("[data-tvc-places]", "click", (el) => tvcWrite({ leaderboard: { places: Number(el.getAttribute("data-tvc-places")) } }));
+  on("[data-tvc-secs]", "click", (el) => tvcWrite({ leaderboard: { secsPerCategory: Number(el.getAttribute("data-tvc-secs")) } }));
+  const grid = document.getElementById("tvc-grid");
+  if (grid) grid.addEventListener("change", () => tvcWrite({ attendance: { showPresentGrid: grid.checked } }));
+  // photos
+  on("[data-tvc-interval]", "click", (el) => tvcWrite({ photos: { intervalSecs: Number(el.getAttribute("data-tvc-interval")) } }));
+  const kb = document.getElementById("tvc-kb");
+  if (kb) kb.addEventListener("change", () => tvcWrite({ photos: { kenBurns: kb.checked } }));
+  const file = document.getElementById("tvc-file");
+  if (file) file.addEventListener("change", () => { const fl = file.files; if (fl && fl.length) tvcUploadFiles(fl); file.value = ""; });
+  on("[data-tvc-caption]", "change", (el) => DISPLAY_PHOTOS.doc(el.getAttribute("data-tvc-caption")).update({ caption: el.value.trim() }).catch((e) => toast("Couldn’t save the caption.", "warn")));
+  on("[data-tvc-toggle]", "click", (el) => { const p = TVC.photos.find((x) => x.id === el.getAttribute("data-tvc-toggle")); if (p) DISPLAY_PHOTOS.doc(p.id).update({ enabled: p.enabled === false }).catch(() => toast("Couldn’t update.", "warn")); });
+  on("[data-tvc-move]", "click", (el) => {
+    const [id, dir] = el.getAttribute("data-tvc-move").split(":"); const i = TVC.photos.findIndex((x) => x.id === id); const j = i + Number(dir);
+    if (i < 0 || j < 0 || j >= TVC.photos.length) return;
+    const a = TVC.photos[i], b = TVC.photos[j];
+    // Re-number the whole list so equal/missing order values can't make a swap a no-op.
+    const batch = db.batch(); const list = TVC.photos.slice(); list[i] = b; list[j] = a;
+    list.forEach((p, k) => { if ((Number(p.order) || 0) !== k + 1) batch.update(DISPLAY_PHOTOS.doc(p.id), { order: k + 1 }); });
+    batch.commit().catch(() => toast("Couldn’t reorder.", "warn"));
+  });
+  on("[data-tvc-askdel]", "click", (el) => { TVC.deleteConfirm = el.getAttribute("data-tvc-askdel"); refreshViewOrDefer(); });
+  on("[data-tvc-del]", "click", (el) => { TVC.deleteConfirm = null; DISPLAY_PHOTOS.doc(el.getAttribute("data-tvc-del")).delete().then(() => toast("Photo deleted.", "good")).catch(() => toast("Couldn’t delete.", "warn")); });
+}
+
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
 else init();
 </script>
