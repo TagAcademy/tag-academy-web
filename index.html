@@ -1568,6 +1568,12 @@ html.tv-mode #tv-root { display: block; }
 .tvc-layout-btn.active { border-color: var(--brand); box-shadow: 0 0 0 2px var(--brand-soft) inset; }
 .tvc-wide { width: 100%; min-height: 48px; }
 .tvc-sub { font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 700; margin-top: 12px; }
+.tvc-text { width: 100%; font: inherit; padding: 12px; min-height: 46px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); color: var(--ink); margin-top: 8px; }
+.tvc-drive-strip { display: flex; gap: 6px; overflow-x: auto; margin-top: 8px; }
+.tvc-drive-strip img { width: 72px; height: 54px; object-fit: cover; border-radius: 6px; flex: none; background: #000; }
+.tvc-howto { margin-top: 10px; font-size: .88rem; }
+.tvc-howto summary { cursor: pointer; font-weight: 700; min-height: 32px; }
+.tvc-howto ol { margin: 6px 0 0; padding-left: 20px; display: grid; gap: 6px; }
 .tvc-textarea { width: 100%; font: inherit; padding: 12px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); color: var(--ink); resize: vertical; }
 .tvc-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
 .tvc-row .btn { min-height: 46px; }
@@ -10206,7 +10212,7 @@ function tvDefaults() {
     rotate: [{ layout: "all", secs: 60 }, { layout: "leaderboard", secs: 30 }, { layout: "photos", secs: 30 }],
     schedule: [], fallback: "all",
     override: null, announcement: null,
-    photos: { intervalSecs: 12, kenBurns: true },
+    photos: { intervalSecs: 12, kenBurns: true, driveFolder: "" },
     leaderboard: { categories: LEADERBOARD_CATEGORIES.map((c) => c.id), scope: "week", places: 8, secsPerCategory: 12 },
     exitTvNonce: null,
   };
@@ -10260,10 +10266,11 @@ function tvLayoutLabel(id) { const l = TV_LAYOUTS.find((x) => x.id === id); retu
 
 /* ---------- the TV screen ---------- */
 const TV = {
-  cfg: tvDefaults(), photos: [], layout: null, lastLayoutCheck: 0,
+  cfg: tvDefaults(), photos: [], uploaded: [], layout: null, lastLayoutCheck: 0,
+  drive: { folder: "", photos: [], fetchedAt: 0, error: null },
   photoIdx: -1, photoSlide: 0, lbIdx: 0, lbStamp: 0,
   cal: { events: [], fetchedAt: 0, ok: null },
-  stamps: { photo: 0, lb: 0, cal: 0, hb: 0, shift: 0, nightly: 0 },
+  stamps: { photo: 0, lb: 0, cal: 0, drive: 0, hb: 0, shift: 0, nightly: 0 },
   exitHandled: false, started: false, dirty: true,
 };
 
@@ -10303,9 +10310,8 @@ function tvSubscribe() {
   listen("state", () => STATE_DOC, (snap) => { if (snap.exists) tvApplyState(snap.data()); });
   listen("display", () => DISPLAY_DOC, (snap) => { TV.cfg = tvMergeCfg(snap.exists ? snap.data() : null); tvCheckExit(snap.exists ? snap.data() : null); TV.dirty = true; tvTick(); });
   listen("photos", () => DISPLAY_PHOTOS.where("enabled", "==", true), (snap) => {
-    TV.photos = snap.docs.map((d) => Object.assign({ id: d.id }, d.data())).filter((p) => p.dataUrl).sort((a, b) => (a.order || 0) - (b.order || 0));
-    if (TV.photoIdx >= TV.photos.length) TV.photoIdx = -1;
-    if (TV.zones && TV.zones.photos) tvNextPhoto(true);
+    TV.uploaded = snap.docs.map((d) => Object.assign({ id: d.id }, d.data())).filter((p) => p.dataUrl).sort((a, b) => (a.order || 0) - (b.order || 0));
+    tvRebuildPhotos();
   });
   // The live listener above already pushes every change, so on the TV (which is always on and
   // always "visible") the catch-up poll is just a slow safety net -- 5 minutes, not 20 seconds --
@@ -10346,6 +10352,10 @@ function tvTick() {
   if (eff.layout !== TV.layout) tvBuildLayout(eff.layout);
   tvUpdateClock();
   const S = TV.stamps;
+  if (TV.zones.photos) {
+    const folder = driveFolderId(TV.cfg.photos.driveFolder);
+    if (folder !== TV.drive.folder || (folder && now - S.drive >= 300000)) { S.drive = now; tvRefreshDrivePhotos(folder); }
+  }
   if (TV.layout && TV.zones.photos && now - S.photo >= Math.max(4, Number(TV.cfg.photos.intervalSecs) || 12) * 1000) { S.photo = now; tvNextPhoto(); }
   if (TV.zones.leaderboard) {
     if (now - S.lb >= Math.max(5, Number(TV.cfg.leaderboard.secsPerCategory) || 12) * 1000) { S.lb = now; TV.lbIdx++; tvUpdateLeaderboard(); }
@@ -10434,10 +10444,79 @@ function tvUpdateClock() {
     (parsha ? '<div class="tv-clock-parsha">' + escapeHtml(parsha) + "</div>" : "");
 }
 
+/* ---------- photos from a shared Google Drive folder ----------
+   Google Photos no longer lets outside apps read albums (2025), so the slideshow can also pull
+   every picture from a Google Drive folder shared as "Anyone with the link can view". Same API key
+   as the Live schedule (settings.googleCalendar.apiKey) -- it needs the Google Drive API enabled
+   and allowed on that key. Drive's own resized versions are used, so iPhone HEIC photos work and
+   the TV never downloads a full-size original. A photo's Drive "description" becomes its caption. */
+function driveFolderId(input) {
+  const v = String(input || "").trim();
+  if (!v) return "";
+  const m = /\/folders\/([A-Za-z0-9_-]{10,})/.exec(v) || /[?&]id=([A-Za-z0-9_-]{10,})/.exec(v);
+  if (m) return m[1];
+  return /^[A-Za-z0-9_-]{10,}$/.test(v) ? v : "";
+}
+async function fetchDriveFolderPhotos(folderId, apiKey) {
+  if (!folderId) return { ok: false, reason: "no-folder" };
+  if (!apiKey) return { ok: false, reason: "no-key" };
+  const q = "'" + folderId + "' in parents and mimeType contains 'image/' and trashed = false";
+  const url = "https://www.googleapis.com/drive/v3/files?q=" + encodeURIComponent(q) +
+    "&fields=" + encodeURIComponent("files(id,name,description,thumbnailLink)") +
+    "&orderBy=" + encodeURIComponent("createdTime desc") + "&pageSize=200" +
+    "&supportsAllDrives=true&includeItemsFromAllDrives=true&key=" + encodeURIComponent(apiKey);
+  let res;
+  try { res = await fetch(url); } catch (e) { return { ok: false, reason: "network" }; }
+  let data = null;
+  try { data = await res.json(); } catch (e) {}
+  if (!res.ok) {
+    const msg = (data && data.error && data.error.message) || "";
+    return { ok: false, reason: res.status === 404 ? "not-found" : /not been used|disabled|API_KEY_SERVICE_BLOCKED|blocked/i.test(msg) ? "api-off" : "http-" + res.status, message: msg };
+  }
+  const photos = ((data && data.files) || []).map((f) => ({
+    id: "drive:" + f.id,
+    // Drive's public thumbnail address at TV size; the API's own thumbnailLink (asked for at the
+    // same size instead of its default "=s220") is the backup.
+    src: "https://drive.google.com/thumbnail?id=" + encodeURIComponent(f.id) + "&sz=w1920",
+    fallback: f.thumbnailLink ? f.thumbnailLink.replace(/=s\d+(-[a-z0-9-]+)?$/i, "") + "=s1920" : null,
+    thumb: "https://drive.google.com/thumbnail?id=" + encodeURIComponent(f.id) + "&sz=w400",
+    caption: (f.description || "").trim().slice(0, 80),
+  }));
+  return { ok: true, photos };
+}
+function driveErrorText(r) {
+  return {
+    "no-key": "Connect the Google Calendar first (Admin > Schedule > Live schedule) -- the folder uses the same Google API key.",
+    "api-off": "The Google Drive API isn't turned on for your API key yet -- see the steps below.",
+    "not-found": "Couldn't find that folder. Check the link.",
+    "network": "Couldn't reach Google Drive -- check the internet connection.",
+  }[r.reason] || ("Google Drive said no (" + r.reason + (r.message ? ": " + r.message : "") + "). Check that the API key allows the Google Drive API.");
+}
+async function tvRefreshDrivePhotos(folder) {
+  TV.drive.folder = folder;
+  if (!folder) { TV.drive.photos = []; TV.drive.error = null; tvRebuildPhotos(); return; }
+  const r = await fetchDriveFolderPhotos(folder, liveScheduleConfig().apiKey);
+  if (folder !== TV.drive.folder) return; // the setting changed while this was in flight
+  TV.drive.fetchedAt = Date.now();
+  if (r.ok) { TV.drive.photos = r.photos; TV.drive.error = null; }
+  else { TV.drive.error = r.reason; console.error("TV Drive photos:", r); } // keep showing the last good list
+  tvRebuildPhotos();
+}
+// Photos uploaded in the TV Display tab first (in their chosen order), then the Drive folder's.
+function tvRebuildPhotos() {
+  const cur = TV.photos[TV.photoIdx];
+  TV.photos = TV.uploaded.concat(TV.drive.photos);
+  const keep = cur ? TV.photos.findIndex((p) => p.id === cur.id) : -1;
+  TV.photoIdx = keep >= 0 ? keep : -1;
+  if (TV.zones && TV.zones.photos) tvNextPhoto(keep >= 0);
+}
+
 /* ---------- photos ---------- */
 function tvInitPhotos() {
   const el = TV.zones.photos.el;
-  el.innerHTML = '<div class="tv-slide" data-s="0"><img alt=""><div class="tv-cap"></div></div><div class="tv-slide" data-s="1"><img alt=""><div class="tv-cap"></div></div>' +
+  // no-referrer: Google's image hosts serve publicly shared Drive photos to anyone, but can refuse a
+  // request that carries another site's address.
+  el.innerHTML = '<div class="tv-slide" data-s="0"><img alt="" referrerpolicy="no-referrer"><div class="tv-cap"></div></div><div class="tv-slide" data-s="1"><img alt="" referrerpolicy="no-referrer"><div class="tv-cap"></div></div>' +
     '<div class="tv-photo-empty" style="display:none;"><img src="' + LOGO_DATA_URI + '" alt=""><div>Photos coming soon</div></div>';
   TV.stamps.photo = 0;
   tvNextPhoto(true);
@@ -10465,8 +10544,13 @@ function tvNextPhoto(keepIndex) {
     slide.classList.add("show");
     if (other) other.classList.remove("show");
   };
-  img.onload = show; img.onerror = () => { if (list.length > 1) TV.stamps.photo = 0; };
-  img.src = photo.dataUrl;
+  img.onload = show;
+  img.onerror = () => {
+    // A Drive photo whose main address fails gets one try at its backup before skipping ahead.
+    if (photo.fallback && img.src !== photo.fallback) { img.src = photo.fallback; return; }
+    if (list.length > 1) TV.stamps.photo = 0;
+  };
+  img.src = photo.dataUrl || photo.src;
   if (img.complete && img.naturalWidth) show();
 }
 
@@ -10675,7 +10759,7 @@ function tvUpdateTicker(now) {
 const TVC = {
   cfg: tvDefaults(), cfgLoaded: false, status: null, photos: [], photosLoaded: false,
   unsubs: {}, duration: 15 * 60000, annStyle: "info", annExpiry: 60 * 60000, annText: null,
-  uploading: null, deleteConfirm: null, seenTimer: null,
+  uploading: null, deleteConfirm: null, seenTimer: null, driveInput: null, driveCheck: null,
 };
 function tvcWho() { const s = currentSession(); return (s && s.record && s.record.name) || "admin"; }
 function tvcSync(route) {
@@ -10782,7 +10866,8 @@ function renderTvControl(root, session) {
     '<div class="tvc-row"><button type="button" class="btn btn-primary" data-tvc-act="post-ann">Post</button><button type="button" class="btn btn-ghost" data-tvc-act="clear-ann"' + (ann ? "" : " disabled") + ">Clear</button></div></div>";
 
   // Photos (collapsible; the photo list is only downloaded while this is open)
-  html += collapsibleSectionHtml("tvPhotos", "Photos", TVC.photosLoaded ? TVC.photos.length + " photo" + (TVC.photos.length === 1 ? "" : "s") : "Slideshow pictures", tvcPhotosHtml());
+  const driveOn = !!(cfg.photos && cfg.photos.driveFolder);
+  html += collapsibleSectionHtml("tvPhotos", "Photos", (TVC.photosLoaded ? TVC.photos.length + " uploaded" : "Slideshow pictures") + (driveOn ? " + Drive folder" : ""), tvcPhotosHtml());
   // Normal mode
   html += collapsibleSectionHtml("tvNormal", "Normal mode", { fixed: "Fixed layout", rotate: "Rotation", schedule: "Schedule" }[cfg.mode] || "", tvcNormalHtml());
   // Leaderboard settings
@@ -10828,6 +10913,7 @@ function tvcPhotosHtml() {
   let h = '<div class="tvc-row"><label class="btn btn-primary tvc-upload">+ Add photos<input type="file" id="tvc-file" accept="image/*" multiple hidden></label>' +
     (TVC.uploading ? '<span class="tvc-unit">' + escapeHtml(TVC.uploading) + "</span>" : "") + "</div>" +
     '<p class="help-text">Pick from your camera roll. Photos are shrunk automatically (max ' + TV_MAX_PHOTOS + " photos).</p>" +
+    tvcDriveHtml() +
     '<div class="tvc-sub">Seconds per photo</div><div class="tvc-chips">' + [6, 10, 15, 25].map((n) => '<button type="button" class="tvc-chip sm' + (Number(cfg.photos.intervalSecs) === n ? " active" : "") + '" data-tvc-interval="' + n + '">' + n + "</button>").join("") + "</div>" +
     '<label class="tvc-check"><input type="checkbox" id="tvc-kb"' + (cfg.photos.kenBurns ? " checked" : "") + "> Slow zoom on photos</label>";
   if (!TVC.photosLoaded) return h + '<p class="help-text">Loading photos…</p>';
@@ -10840,6 +10926,40 @@ function tvcPhotosHtml() {
     '<button type="button" class="btn btn-ghost btn-sm" data-tvc-toggle="' + p.id + '">' + (p.enabled === false ? "Show" : "Hide") + "</button>" +
     (TVC.deleteConfirm === p.id ? '<button type="button" class="btn btn-sm tvc-del" data-tvc-del="' + p.id + '">Really delete?</button>' : '<button type="button" class="btn btn-ghost btn-sm" data-tvc-askdel="' + p.id + '">Delete</button>') + "</div></div>").join("") + "</div>";
   return h;
+}
+
+function tvcDriveHtml() {
+  const saved = (TVC.cfg.photos && TVC.cfg.photos.driveFolder) || "";
+  const val = TVC.driveInput !== null && TVC.driveInput !== undefined ? TVC.driveInput : saved;
+  const chk = TVC.driveCheck;
+  let h = '<div class="tvc-sub">Google Drive folder</div>' +
+    '<p class="help-text" style="margin-top:4px;">Every picture in this folder shows on the TV too, and the TV checks it for new ones every 5 minutes — so anyone with access to the folder can add photos from the Google Drive app.</p>' +
+    '<input type="text" id="tvc-drive" class="tvc-text" inputmode="url" autocomplete="off" placeholder="Paste the folder link (drive.google.com/drive/folders/…)" value="' + escapeHtml(val) + '">' +
+    '<div class="tvc-row"><button type="button" class="btn btn-primary" data-tvc-act="drive-save">' + (saved ? "Save" : "Connect") + '</button>' +
+    '<button type="button" class="btn btn-ghost" data-tvc-act="drive-check">Check folder</button>' +
+    (saved ? '<button type="button" class="btn btn-ghost" data-tvc-act="drive-clear">Disconnect</button>' : "") + "</div>";
+  if (chk && chk.busy) h += '<p class="help-text">Checking…</p>';
+  else if (chk && chk.ok) {
+    h += '<p class="help-text" style="color:var(--good);font-weight:700;">Found ' + chk.photos.length + " photo" + (chk.photos.length === 1 ? "" : "s") + " in the folder." +
+      (chk.photos.length ? "" : " If you’ve added some, make sure the folder is shared as “Anyone with the link — Viewer”.") + "</p>";
+    if (chk.photos.length) h += '<div class="tvc-drive-strip">' + chk.photos.slice(0, 8).map((p) => '<img loading="lazy" alt="" referrerpolicy="no-referrer" src="' + escapeHtml(p.thumb) + '">').join("") + "</div>";
+  } else if (chk && chk.error) h += '<p class="help-text" style="color:var(--warn);font-weight:700;">' + escapeHtml(chk.error) + "</p>";
+  h += '<details class="tvc-howto"><summary>How to set up the folder</summary><ol>' +
+    "<li>In Google Drive, create a folder (e.g. “TV photos”) and put pictures in it.</li>" +
+    "<li>Share the folder: <b>General access → Anyone with the link → Viewer</b>. (Anyone who has the link can see these photos.)</li>" +
+    "<li>Copy the folder link and paste it above, then press Connect.</li>" +
+    "<li>One-time: in Google Cloud Console, open <b>APIs &amp; Services → Library</b>, enable the <b>Google Drive API</b> in the same project as your calendar key. Then under <b>Credentials</b>, edit that API key and, if it’s limited to certain APIs, add Google Drive API to the list.</li>" +
+    "<li>To give a staff member access to add photos, share the folder with them as an Editor.</li></ol></details>";
+  return h;
+}
+async function tvcCheckDrive(input) {
+  const id = driveFolderId(input);
+  if (!id) { TVC.driveCheck = { error: "That doesn’t look like a Google Drive folder link." }; refreshViewOrDefer(); return null; }
+  TVC.driveCheck = { busy: true }; refreshViewOrDefer();
+  const r = await fetchDriveFolderPhotos(id, liveScheduleConfig().apiKey);
+  TVC.driveCheck = r.ok ? { ok: true, photos: r.photos } : { error: driveErrorText(r) };
+  refreshViewOrDefer();
+  return r;
 }
 
 /* ---------- photo resizing (in the browser) ---------- */
@@ -10894,7 +11014,7 @@ function tvcWire(root) {
     const until = TVC.duration ? Date.now() + TVC.duration : null;
     tvcWrite({ override: { layout: el.getAttribute("data-tvc-show"), until } }, "Showing " + tvLayoutLabel(el.getAttribute("data-tvc-show")) + (until ? "" : " until you change it") + ".");
   });
-  on("[data-tvc-act]", "click", (el) => {
+  on("[data-tvc-act]", "click", async (el) => {
     const act = el.getAttribute("data-tvc-act");
     if (act === "clear-override") tvcWrite({ override: null }, "Back to normal.");
     else if (act === "post-ann") {
@@ -10905,6 +11025,16 @@ function tvcWire(root) {
       else if (TVC.annExpiry === -1) { const d = new Date(); d.setHours(23, 59, 0, 0); until = d.getTime(); }
       TVC.annText = null;
       tvcWrite({ announcement: { text, style: TVC.annStyle, until } }, "Posted to the TV.");
+    } else if (act === "drive-check") {
+      const inp = document.getElementById("tvc-drive");
+      tvcCheckDrive(inp ? inp.value : "");
+    } else if (act === "drive-save") {
+      const inp = document.getElementById("tvc-drive");
+      const v = inp ? inp.value.trim() : "";
+      if (!driveFolderId(v)) { TVC.driveCheck = { error: "That doesn’t look like a Google Drive folder link." }; refreshViewOrDefer(); return; }
+      if (await tvcWrite({ photos: { driveFolder: v } }, "Folder connected — the TV will pick it up within a few seconds.")) { TVC.driveInput = null; tvcCheckDrive(v); }
+    } else if (act === "drive-clear") {
+      if (await tvcWrite({ photos: { driveFolder: "" } }, "Folder disconnected.")) { TVC.driveInput = null; TVC.driveCheck = null; }
     } else if (act === "clear-ann") { TVC.annText = null; tvcWrite({ announcement: null }, "Announcement cleared."); }
     else if (act === "exit-tv") tvcWrite({ exitTvNonce: String(Date.now()) + "-" + Math.random().toString(36).slice(2, 6) }, "Told the TV to exit TV mode.");
     else if (act === "rot-add") tvcWrite({ rotate: cfg.rotate.concat([{ layout: "all", secs: 30 }]) });
@@ -10943,6 +11073,7 @@ function tvcWire(root) {
   on("[data-tvc-secs]", "click", (el) => tvcWrite({ leaderboard: { secsPerCategory: Number(el.getAttribute("data-tvc-secs")) } }));
   // photos
   on("[data-tvc-interval]", "click", (el) => tvcWrite({ photos: { intervalSecs: Number(el.getAttribute("data-tvc-interval")) } }));
+  on("#tvc-drive", "input", (el) => { TVC.driveInput = el.value; });
   const kb = document.getElementById("tvc-kb");
   if (kb) kb.addEventListener("change", () => tvcWrite({ photos: { kenBurns: kb.checked } }));
   const file = document.getElementById("tvc-file");
