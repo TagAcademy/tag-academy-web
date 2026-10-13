@@ -1464,8 +1464,8 @@ html.tv-mode #tv-root { display: block; }
 .tv-photo-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.4rem; color: var(--tv-muted); font-size: 2.2rem; background: radial-gradient(circle at 50% 40%, #16224a, #070b16 70%); }
 .tv-photo-empty img { width: 14rem; height: 14rem; object-fit: contain; opacity: .9; }
 /* leaderboard */
-.tv-lb { list-style: none; margin: 0; padding: 0; flex: 1; min-height: 0; container-type: size; display: grid; grid-template-rows: repeat(var(--n, 8), 1fr); gap: .5rem; }
-.tv-lb-row { display: flex; align-items: center; gap: 1.2rem; min-height: 0; padding: 0 1.2rem; border-radius: .9rem; background: var(--tv-panel-2); font-size: min(2.8rem, calc(100cqh / var(--n, 8) * .5)); }
+.tv-lb { list-style: none; margin: 0; padding: 0; flex: 1; min-height: 0; min-width: 0; container-type: size; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: repeat(var(--n, 8), 1fr); gap: .5rem; }
+.tv-lb-row { display: flex; align-items: center; gap: 1.2rem; min-height: 0; min-width: 0; padding: 0 1.2rem; border-radius: .9rem; background: var(--tv-panel-2); font-size: min(2.8rem, calc(100cqh / var(--n, 8) * .5)); }
 .tv-lb-rank { flex: none; width: 2.1em; text-align: center; font-family: var(--font-display, Arial, sans-serif); font-weight: 800; color: var(--tv-muted); }
 .tv-lb-row.r1 { background: linear-gradient(90deg, rgba(243,203,107,.28), var(--tv-panel-2)); } .tv-lb-row.r1 .tv-lb-rank { color: var(--tv-gold); }
 .tv-lb-row.r2 { background: linear-gradient(90deg, rgba(195,204,226,.20), var(--tv-panel-2)); } .tv-lb-row.r2 .tv-lb-rank { color: var(--tv-silver); }
