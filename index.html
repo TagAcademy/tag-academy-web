@@ -1498,9 +1498,7 @@ html.tv-mode #tv-root { display: block; }
 .tv-tile b { display: block; font-family: var(--font-display, Arial, sans-serif); font-size: 3.4rem; line-height: 1.05; font-variant-numeric: tabular-nums; }
 .tv-tile span { font-size: 1.4rem; color: var(--tv-muted); text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }
 .tv-tile.present b { color: var(--tv-good); } .tv-tile.absent b { color: var(--tv-warn); }
-.tv-head-l .tv-live-badge, .tv-head-l .tv-idle-badge { align-self: flex-start; font-size: 1.15rem; padding: .15rem .8rem; }
-.tv-live-badge { display: inline-flex; align-items: center; gap: .6rem; font-size: 1.5rem; font-weight: 800; color: #07351f; background: var(--tv-good); border-radius: 99rem; padding: .25rem 1rem; text-transform: uppercase; letter-spacing: .08em; }
-.tv-live-badge::before { content: ""; width: .8rem; height: .8rem; border-radius: 50%; background: #07351f; animation: tvPulse 1.6s infinite; }
+.tv-head-l .tv-idle-badge { align-self: flex-start; font-size: 1.15rem; padding: .15rem .8rem; }
 @keyframes tvPulse { 50% { opacity: .25; } }
 .tv-idle-badge { font-size: 1.5rem; font-weight: 800; color: var(--tv-muted); border: 1px solid var(--tv-line); border-radius: 99rem; padding: .25rem 1rem; text-transform: uppercase; letter-spacing: .08em; }
 .tv-av-grid { flex: 1; min-height: 0; display: flex; flex-wrap: wrap; align-content: flex-start; gap: .9rem; margin-top: 1.2rem; overflow: hidden; }
@@ -1511,26 +1509,45 @@ html.tv-mode #tv-root { display: block; }
 .tv-class-chip b { font-family: var(--font-display, Arial, sans-serif); font-variant-numeric: tabular-nums; color: var(--tv-good); }
 .tv-class-chip.cur { outline: .2rem solid var(--tv-brand); }
 /* calendar */
-.tv-cal-strip { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 1rem; flex: 1; min-height: 0; }
-.tv-cal-strip .tv-cal-card { display: flex; flex-direction: column; justify-content: center; }
-.tv-cal-strip .tv-cal-card { padding: .8rem 1rem; }
-.tv-cal-strip .tv-cal-when { font-size: 1.2rem; letter-spacing: 0; text-transform: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tv-cal-strip .tv-cal-title { font-size: 2.1rem; }
-.tv-cal-card { background: var(--tv-panel-2); border-radius: .9rem; padding: .9rem 1.3rem; min-width: 0; overflow: hidden; border-left: .5rem solid var(--tv-line); }
-.tv-cal-card.now { border-left-color: var(--tv-good); background: linear-gradient(90deg, rgba(79,209,154,.18), var(--tv-panel-2)); }
-.tv-cal-card.next { border-left-color: var(--tv-brand); }
-.tv-cal-when { font-size: 1.45rem; color: var(--tv-muted); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
-.tv-cal-card.now .tv-cal-when { color: var(--tv-good); }
-.tv-cal-title { font-size: 2.2rem; font-weight: 800; line-height: 1.12; margin-top: .25rem; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.tv-cal-hero { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; flex: none; margin-bottom: 1.2rem; }
-.tv-cal-hero .tv-cal-card { padding: 1.4rem 1.8rem; }
-.tv-cal-hero .tv-cal-title { font-size: 3.2rem; }
-.tv-cal-days { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr)); gap: 1rem; overflow: hidden; }
-.tv-cal-day { background: var(--tv-panel-2); border-radius: .9rem; padding: .9rem 1.2rem; overflow: hidden; }
-.tv-cal-day h3 { margin: 0 0 .5rem; font-size: 1.9rem; color: var(--tv-gold); }
-.tv-cal-ev { display: flex; gap: 1rem; font-size: 1.7rem; padding: .22rem 0; }
-.tv-cal-ev time { flex: none; width: 7.5rem; color: var(--tv-muted); font-variant-numeric: tabular-nums; }
-.tv-cal-ev span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+/* calendar: the whole day as a list, with a live countdown to the next class beside it */
+.tv-cal-body { flex: 1; min-height: 0; display: flex; gap: 1.6rem; }
+.tv-cd { flex: none; width: 30%; display: flex; flex-direction: column; justify-content: center; gap: .3rem; padding: 1rem 1.4rem; border-radius: .9rem; background: var(--tv-panel-2); border-left: .5rem solid var(--tv-brand); min-width: 0; }
+.tv-cd-now { font-size: 1.5rem; color: var(--tv-ink); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: .5rem; }
+.tv-cd-now span { color: var(--tv-good); text-transform: uppercase; letter-spacing: .08em; margin-right: .6rem; }
+.tv-cd-now small { color: var(--tv-muted); font-size: 1em; font-weight: 600; }
+.tv-cd-label { font-size: 1.4rem; color: var(--tv-muted); font-weight: 700; text-transform: uppercase; letter-spacing: .1em; }
+.tv-cd-title { font-size: 2.6rem; font-weight: 800; line-height: 1.1; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.tv-cd-title.tv-cd-none { color: var(--tv-muted); font-size: 2rem; }
+.tv-cd-time { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; font-family: var(--font-display, Arial, sans-serif); font-size: 4.6rem; font-weight: 800; line-height: 1; color: var(--tv-gold); font-variant-numeric: tabular-nums; margin-top: .3rem; }
+.tv-cd-time small { font-family: var(--font-body, Arial, sans-serif); font-size: 1.5rem; color: var(--tv-muted); font-weight: 700; }
+.tv-cd-time.is-later { font-size: 3rem; color: var(--tv-ink); }
+.tv-cd-time.has-hours { font-size: 3.6rem; }
+.tv-day-list { list-style: none; margin: 0; padding: 0; flex: 1; min-width: 0; min-height: 0; display: grid; grid-auto-flow: column; grid-template-rows: repeat(var(--rows, 6), minmax(0, 1fr)); grid-auto-columns: minmax(0, 1fr); gap: .35rem 1.2rem; container-type: size; }
+.tv-day-ev { display: flex; align-items: center; gap: 1rem; min-height: 0; padding: 0 .9rem; border-radius: .6rem; font-size: min(1.9rem, calc(100cqh / var(--rows, 6) * .55)); border-left: .35rem solid transparent; }
+.tv-day-ev time { flex: none; width: 4.6em; color: var(--tv-muted); font-variant-numeric: tabular-nums; font-weight: 600; }
+.tv-day-ev span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+.tv-day-ev.is-past { opacity: .4; }
+.tv-day-ev.is-past span { font-weight: 500; }
+.tv-day-ev.is-now { background: linear-gradient(90deg, rgba(79,209,154,.22), rgba(79,209,154,.04)); border-left-color: var(--tv-good); }
+.tv-day-ev.is-now time { color: var(--tv-good); }
+.tv-day-ev.is-next { background: var(--tv-panel-2); border-left-color: var(--tv-brand); }
+.tv-layout-calendar .tv-cal-body { gap: 2.2rem; }
+.tv-layout-calendar .tv-cd { width: 34%; padding: 2rem 2.4rem; gap: .6rem; }
+.tv-layout-calendar .tv-cd-now { font-size: 2.2rem; white-space: normal; line-height: 1.25; }
+.tv-layout-calendar .tv-cd-label { font-size: 2rem; }
+.tv-layout-calendar .tv-cd-title { font-size: 4.4rem; }
+.tv-layout-calendar .tv-cd-time { font-size: 9rem; }
+.tv-layout-calendar .tv-cd-time small { font-size: 2.2rem; }
+.tv-layout-calendar .tv-cd-time.has-hours { font-size: 6.4rem; }
+.tv-layout-calendar .tv-cd-time.is-later { font-size: 5rem; }
+.tv-layout-calendar .tv-day-ev { font-size: min(2.8rem, calc(100cqh / var(--rows, 8) * .55)); }
+.tv-cd > * { flex: none; }
+/* No room for the "Now" line in the combined layout's short strip -- the list's green row shows it. */
+.tv-layout-all .tv-cd-now { display: none; }
+.tv-layout-all .tv-cd { width: 34%; padding: .7rem 1.1rem; }
+.tv-layout-all .tv-cd-title { font-size: 2.1rem; -webkit-line-clamp: 1; }
+.tv-layout-all .tv-cd-time { font-size: 3.6rem; }
+.tv-layout-all .tv-cd-time.has-hours, .tv-layout-all .tv-cd-time.is-later { font-size: 2.8rem; }
 .tv-cal-note { color: var(--tv-muted); font-size: 1.6rem; margin: auto; text-align: center; }
 .tv-layout-all .tv-zone-calendar { flex: 1; padding: 1rem 1.4rem; }
 .tv-layout-all .tv-zone-calendar .tv-zone-head { display: none; }
@@ -10364,6 +10381,7 @@ function tvTick() {
   if (TV.zones.calendar) {
     if (now - S.cal >= 300000) { S.cal = now; tvRefreshCalendar(); }
     else if (TV.dirty || (TV.zones.calendar.lastMin !== Math.floor(now / 60000))) tvUpdateCalendar();
+    else tvUpdateCountdown(now);
   }
   tvUpdateTicker(now);
   if (TV.dirty) TV.dirty = false;
@@ -10539,9 +10557,10 @@ function tvUpdateAttendance() {
   const fmtPct = (p) => (p === null || p === undefined ? "—" : Math.round(p * 100) + "%");
   const compact = TV.layout === "all";
   const liveA = livePeriod ? tvAttendanceFor(livePeriod, date, roster) : null;
-  const badge = livePeriod ? '<span class="tv-live-badge">In session</span>' : '<span class="tv-idle-badge">' + (res && res.ok === false ? (res.reason === "not-configured" ? "calendar not set up" : "calendar offline") : "between classes") + "</span>";
-  let html = '<div class="tv-zone-head"><div class="tv-head-l">' + (compact ? badge : '<span class="tv-eyebrow">Attendance</span>') + "<h2>" + escapeHtml(livePeriod || "No class in session") + "</h2></div>" +
-    (compact ? "" : badge) +
+  // Only a calendar problem gets a badge -- "Between classes" in the heading says the rest.
+  const badge = !livePeriod && res && res.ok === false ? '<span class="tv-idle-badge">' + (res.reason === "not-configured" ? "calendar not set up" : "calendar offline") + "</span>" : "";
+  let html = '<div class="tv-zone-head"><div class="tv-head-l"><span class="tv-eyebrow">Attendance</span><h2>' + escapeHtml(livePeriod || "Between classes") + "</h2></div>" +
+    badge +
     (compact && liveA ? '<span class="tv-att-inline">' + fmtPct(liveA.pct) + "<small>Class attendance</small></span>" : '<span class="tv-scope">' + escapeHtml(dayNameFor(date)) + "</span>") + "</div>";
   if (livePeriod) {
     const a = liveA;
@@ -10609,40 +10628,73 @@ function tvDayLabel(ms, nowMs) {
   if (diff === 0) return "Today"; if (diff === 1) return "Tomorrow";
   return d1.toLocaleDateString([], { weekday: "long" });
 }
+// Countdown text for the "Next" block: m:ss under an hour, h:mm:ss under 12 hours, otherwise
+// just the day and time (a countdown to tomorrow morning isn't useful on a hallway screen).
+function tvCountdownText(ms, now) {
+  const secs = Math.max(0, Math.ceil((ms - now) / 1000));
+  if (secs >= 12 * 3600) return null;
+  const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), sec = secs % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  return h ? h + ":" + pad(m) + ":" + pad(sec) : m + ":" + pad(sec);
+}
+function tvCalDayStart(ms) { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d.getTime(); }
+// Called every second from tvTick: only rewrites the countdown digits (the list itself re-renders
+// once a minute), and forces a full re-render the moment the next class starts.
+function tvUpdateCountdown(now) {
+  const zone = TV.zones.calendar; if (!zone || !zone.nextStart) return;
+  if (now >= zone.nextStart) { tvUpdateCalendar(); return; }
+  const el = zone.el.querySelector("[data-tv-countdown]");
+  if (!el) return;
+  const t = tvCountdownText(zone.nextStart, now);
+  // Dropping from h:mm:ss to m:ss changes the size class -- re-render instead of just the digits.
+  if (t && (t.split(":").length > 2) !== el.parentNode.classList.contains("has-hours")) { tvUpdateCalendar(); return; }
+  if (t && el.textContent !== t) el.textContent = t;
+}
 function tvUpdateCalendar() {
   const zone = TV.zones.calendar; if (!zone) return;
   const now = Date.now();
   zone.lastMin = Math.floor(now / 60000);
+  zone.nextStart = null;
   const cfg = liveScheduleConfig();
   const full = TV.layout === "calendar";
   if (!cfg.calendarId || !cfg.apiKey) {
     zone.html = '<div class="tv-cal-note">Calendar isn’t connected yet — add it in Admin &gt; Schedule &gt; Live schedule.</div>';
     zone.el.innerHTML = zone.html; return;
   }
-  const timed = TV.cal.events.filter((e) => !e.allDay && e.end > now).sort((a, b) => a.start - b.start);
-  const nowEv = timed.find((e) => e.start <= now && now < e.end) || null;
-  const upcoming = timed.filter((e) => e.start > now);
-  const next = upcoming[0] || null;
+  const todayStart = tvCalDayStart(now), tomorrowStart = todayStart + 86400000;
+  const timed = TV.cal.events.filter((e) => !e.allDay).sort((a, b) => a.start - b.start);
+  // The whole day, start to finish -- including what's already over (dimmed) -- plus anything
+  // that started yesterday and is still running.
+  const today = timed.filter((e) => (e.start >= todayStart && e.start < tomorrowStart) || (e.start < todayStart && e.end > now));
+  const nowEvs = today.filter((e) => e.start <= now && now < e.end);
+  const next = timed.find((e) => e.start > now) || null;
   const allDayToday = TV.cal.events.filter((e) => e.allDay && e.start <= now && now < e.end);
-  const rel = (ms) => { const m = Math.round((ms - now) / 60000); return m < 60 ? "in " + m + " min" : m < 1440 ? "in " + Math.floor(m / 60) + " hr" + (m % 60 ? " " + (m % 60) + " min" : "") : ""; };
-  const card = (kind, ev) => ev
-    ? '<div class="tv-cal-card ' + kind + '"><div class="tv-cal-when">' + (kind === "now" ? "Now · until " + tvTimeStr(ev.end) : (tvDayLabel(ev.start, now) === "Today" ? "" : tvDayLabel(ev.start, now) + " · ") + tvTimeStr(ev.start) + (rel(ev.start) ? " · " + rel(ev.start) : "")) + '</div><div class="tv-cal-title">' + escapeHtml(ev.title) + "</div></div>"
-    : '<div class="tv-cal-card ' + kind + '"><div class="tv-cal-when">' + (kind === "now" ? "Now" : "Next") + '</div><div class="tv-cal-title" style="color:var(--tv-muted);">' + (kind === "now" ? "Nothing right now" : "Nothing else scheduled") + "</div></div>";
-  let html = '<div class="tv-zone-head"><div class="tv-head-l"><span class="tv-eyebrow">Schedule</span><h2>Today &amp; this week</h2></div>' +
+  if (next) zone.nextStart = next.start;
+
+  // Counting down only makes sense for something later today; tomorrow's first class just shows its time.
+  const cd = next && next.start < tomorrowStart ? tvCountdownText(next.start, now) : null;
+  const nextDay = next ? tvDayLabel(next.start, now) : "";
+  const countdown = '<div class="tv-cd">' +
+    (nowEvs.length ? '<div class="tv-cd-now"><span>Now</span>' + escapeHtml(nowEvs.map((e) => e.title).join(" · ")) + " <small>until " + tvTimeStr(nowEvs[0].end) + "</small></div>" : "") +
+    (next
+      ? '<div class="tv-cd-label">Next' + (nextDay === "Today" ? "" : " · " + escapeHtml(nextDay)) + '</div><div class="tv-cd-title">' + escapeHtml(next.title) + "</div>" +
+        (cd ? '<div class="tv-cd-time' + (cd.split(":").length > 2 ? " has-hours" : "") + '"><span data-tv-countdown>' + cd + "</span><small>at " + tvTimeStr(next.start) + "</small></div>"
+            : '<div class="tv-cd-time is-later">' + tvTimeStr(next.start) + "</div>")
+      : '<div class="tv-cd-label">Next</div><div class="tv-cd-title tv-cd-none">Nothing else this week</div>') +
+    "</div>";
+
+  const row = (e) => {
+    const kind = e.end <= now ? " is-past" : e.start <= now ? " is-now" : e === next ? " is-next" : "";
+    return '<li class="tv-day-ev' + kind + '"><time>' + tvTimeStr(e.start) + "</time><span>" + escapeHtml(e.title) + "</span></li>";
+  };
+  const list = today.length
+    ? '<ol class="tv-day-list" style="--rows:' + (full ? Math.max(8, Math.ceil(today.length / 2)) : Math.max(4, Math.ceil(today.length / 3))) + ';">' + today.map(row).join("") + "</ol>"
+    : '<div class="tv-cal-note">Nothing on the calendar today</div>';
+
+  let html = '<div class="tv-zone-head"><div class="tv-head-l"><span class="tv-eyebrow">Schedule</span><h2>Today</h2></div>' +
     (TV.cal.ok === "stale" ? '<span class="tv-idle-badge">may be out of date</span>' : "") +
     (allDayToday.length ? '<span class="tv-scope">' + allDayToday.map((e) => escapeHtml(e.title)).join(" · ") + "</span>" : "") + "</div>";
-  if (full) {
-    html += '<div class="tv-cal-hero">' + card("now", nowEv) + card("next", next) + "</div>";
-    const byDay = [];
-    timed.forEach((e) => { if (e === nowEv) return; const label = tvDayLabel(e.start, now); let g = byDay.find((x) => x.label === label); if (!g) { g = { label, evs: [] }; byDay.push(g); } g.evs.push(e); });
-    html += '<div class="tv-cal-days">' + (byDay.length ? byDay.slice(0, 7).map((g) => '<div class="tv-cal-day"><h3>' + escapeHtml(g.label) + "</h3>" +
-      g.evs.slice(0, 9).map((e) => '<div class="tv-cal-ev"><time>' + tvTimeStr(e.start) + "</time><span>" + escapeHtml(e.title) + "</span></div>").join("") + "</div>").join("") : '<div class="tv-cal-note">Nothing else on the calendar this week</div>') + "</div>";
-  } else {
-    const cards = [];
-    if (nowEv) cards.push(card("now", nowEv));
-    upcoming.slice(0, nowEv ? 3 : 4).forEach((e, i) => cards.push(card(i === 0 && !nowEv ? "next" : "", e)));
-    html += '<div class="tv-cal-strip">' + (cards.length ? cards.join("") : '<div class="tv-cal-note">Nothing on the calendar right now</div>') + "</div>";
-  }
+  html += '<div class="tv-cal-body">' + countdown + list + "</div>";
   if (zone.html !== html) { zone.html = html; zone.el.innerHTML = html; }
 }
 
