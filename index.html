@@ -4033,7 +4033,7 @@ function renderShell(session, previewing) {
   // renderAvatarPickerModal) -- your own photo if you've picked one, a default face for your
   // role otherwise (see defaultAvatarFor). Inert while previewing someone else, same as the
   // rest of the app's read-only rule there.
-  const avatarInner = '<img src="' + escapeHtml(session.record.photoUrl || defaultAvatarFor(session.record)) + '" alt="" />';
+  const avatarInner = '<img src="' + escapeHtml(photoFor(session.record)) + '" alt="" />';
   const avatarAttrs = previewing ? " disabled" : ' data-open-avatar-picker="1"';
   // Clock in/out icon -- only for the specific staff accounts an admin has flagged with
   // canClockInOut (Admin > Staff Accounts); nobody else ever sees it. Same convention as the
@@ -4114,7 +4114,7 @@ function renderAvatarPickerModal(session) {
   const root = document.getElementById("avatar-picker-root");
   if (!root) return;
   if (!avatarPickerOpen) { root.innerHTML = ""; return; }
-  const current = session.record.photoUrl || defaultAvatarFor(session.record);
+  const current = photoFor(session.record);
   const body = '<div class="avatar-picker-grid">' +
       AVATAR_GALLERY.map((uri, i) =>
         '<button type="button" class="avatar-picker-opt' + (current === uri ? " selected" : "") + '" data-avatar-choice="' + i + '" aria-label="Avatar option ' + (i + 1) + '"><img src="' + uri + '" alt="" /></button>'
@@ -4142,7 +4142,7 @@ function renderAvatarPickerModal(session) {
   const avatarDiagTop = document.getElementById("avatar-diagnostics-top");
   if (avatarDiagTop) avatarDiagTop.addEventListener("click", () => { closeAvatarPicker(session); openDiagnostics(); });
   root.querySelectorAll("[data-avatar-choice]").forEach((btn) => btn.addEventListener("click", () => {
-    setMyAvatar(session, AVATAR_GALLERY[Number(btn.getAttribute("data-avatar-choice"))]);
+    setMyAvatar(session, "gallery:" + Number(btn.getAttribute("data-avatar-choice")));
   }));
 }
 function closeAvatarPicker(session) {
@@ -6976,9 +6976,21 @@ function isStudentRecord(person) { return !!(person && (person.first !== undefin
 // setMyAvatar/renderAvatarPickerModal). Anyone can still change theirs later; this only decides
 // what shows up before they've made a choice of their own.
 function defaultAvatarFor(person) { return isStudentRecord(person) ? DEFAULT_STUDENT_AVATAR : DEFAULT_STAFF_AVATAR; }
+// A chosen avatar is stored as a short "gallery:<n>" reference to AVATAR_GALLERY, not the image
+// itself -- copying a ~10 KB picture into every student/staff record made roster+staff about half
+// of the shared document. (So AVATAR_GALLERY must only ever be appended to, never reordered.)
+// Older records may still hold the full data URL; that still works, and
+// migrateInlineAvatars() shrinks them.
+function photoFor(person) {
+  const v = person && person.photoUrl;
+  if (!v) return defaultAvatarFor(person);
+  const m = /^gallery:(\d+)$/.exec(v);
+  if (m) return AVATAR_GALLERY[Number(m[1])] || defaultAvatarFor(person);
+  return v;
+}
 function avatarHtml(student, sizeClass) {
   const cls = "lb-avatar" + (sizeClass ? " " + sizeClass : "");
-  const url = student.photoUrl || defaultAvatarFor(student);
+  const url = photoFor(student);
   if (url) return '<span class="' + cls + '" style="background:var(--surface-2);"><img src="' + escapeHtml(url) + '" alt="" /></span>';
   return '<span class="' + cls + '" style="background:' + avatarColorFor(student.id) + ';">' + escapeHtml(personInitials(student)) + "</span>";
 }
@@ -7525,7 +7537,7 @@ function renderLeaderboard(root, session) {
         // painted last of all -- on top of their row-mates too.
         const figsHtml = figures.slice().reverse().map((f) =>
           '<img class="lb-podium-figure' + (isMe(f.student) ? " lb-me-glow" : "") + '" style="--row:' + f.row + ";--dx:" + f.dx.toFixed(3) + ';" src="' +
-          escapeHtml(f.student.photoUrl || defaultAvatarFor(f.student)) + '" alt="" />'
+          escapeHtml(photoFor(f.student)) + '" alt="" />'
         ).join("");
         return '<div class="lb-podium-figures">' + figsHtml + "</div>";
       };
@@ -10071,6 +10083,18 @@ async function migrateGcBonusLedgerEntries() {
   });
   await saveState(newState);
 }
+// One-time cleanup: avatars picked before photoFor() existed were stored as the whole image (a
+// ~10 KB data URL) in each record; swap each one that matches a gallery picture for its short
+// "gallery:<n>" reference. Same first-browser-to-load-it-fixes-it pattern as above.
+async function migrateInlineAvatars() {
+  const idx = new Map(AVATAR_GALLERY.map((u, i) => [u, i]));
+  const needs = (r) => r && typeof r.photoUrl === "string" && r.photoUrl.startsWith("data:") && idx.has(r.photoUrl);
+  if (!(state.roster || []).some(needs) && !(state.staff || []).some(needs)) return;
+  await saveEdit((draft) => {
+    (draft.roster || []).concat(draft.staff || []).forEach((r) => { if (needs(r)) r.photoUrl = "gallery:" + idx.get(r.photoUrl); });
+    return draft;
+  });
+}
 async function init() {
   if (TV_MODE) { initTv(); return; } // hallway TV: read-only, no login, no migrations, no sheet timers (see TV DISPLAY below)
   renderAll(); // shows the "Loading..." screen (state is still null at this point)
@@ -10089,6 +10113,7 @@ async function init() {
     return;
   }
   try { await migrateGcBonusLedgerEntries(); } catch (e) { console.error("GC Bonus migration failed:", e); }
+  try { await migrateInlineAvatars(); } catch (e) { console.error("Avatar migration failed:", e); }
   renderAll();
   listenForLiveUpdates();
 }
