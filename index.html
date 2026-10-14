@@ -4033,7 +4033,7 @@ function renderShell(session, previewing) {
   // renderAvatarPickerModal) -- your own photo if you've picked one, a default face for your
   // role otherwise (see defaultAvatarFor). Inert while previewing someone else, same as the
   // rest of the app's read-only rule there.
-  const avatarInner = '<img src="' + escapeHtml(session.record.photoUrl || defaultAvatarFor(session.record)) + '" alt="" />';
+  const avatarInner = '<img src="' + escapeHtml(photoFor(session.record)) + '" alt="" />';
   const avatarAttrs = previewing ? " disabled" : ' data-open-avatar-picker="1"';
   // Clock in/out icon -- only for the specific staff accounts an admin has flagged with
   // canClockInOut (Admin > Staff Accounts); nobody else ever sees it. Same convention as the
@@ -4114,7 +4114,7 @@ function renderAvatarPickerModal(session) {
   const root = document.getElementById("avatar-picker-root");
   if (!root) return;
   if (!avatarPickerOpen) { root.innerHTML = ""; return; }
-  const current = session.record.photoUrl || defaultAvatarFor(session.record);
+  const current = photoFor(session.record);
   const body = '<div class="avatar-picker-grid">' +
       AVATAR_GALLERY.map((uri, i) =>
         '<button type="button" class="avatar-picker-opt' + (current === uri ? " selected" : "") + '" data-avatar-choice="' + i + '" aria-label="Avatar option ' + (i + 1) + '"><img src="' + uri + '" alt="" /></button>'
@@ -4142,7 +4142,7 @@ function renderAvatarPickerModal(session) {
   const avatarDiagTop = document.getElementById("avatar-diagnostics-top");
   if (avatarDiagTop) avatarDiagTop.addEventListener("click", () => { closeAvatarPicker(session); openDiagnostics(); });
   root.querySelectorAll("[data-avatar-choice]").forEach((btn) => btn.addEventListener("click", () => {
-    setMyAvatar(session, AVATAR_GALLERY[Number(btn.getAttribute("data-avatar-choice"))]);
+    setMyAvatar(session, "gallery:" + Number(btn.getAttribute("data-avatar-choice")));
   }));
 }
 function closeAvatarPicker(session) {
@@ -4825,12 +4825,30 @@ function rememberFailedDrafts(date, period, draft) {
   Object.keys(draft || {}).forEach((dk) => { b[dk] = draft[dk]; });
   todayFailedDrafts.set(k, b);
 }
-function forgetFailedDrafts(date, period, draft) {
+// Only drops a remembered mark if it's the same mark that was just saved -- a newer tap on that
+// row while the save was on the wire stays remembered (its own save is still coming).
+function sameTodayPair(a, b) {
+  return !!a && !!b && [0, 1].every((i) => (a[i] === undefined ? null : a[i]) === (b[i] === undefined ? null : b[i])) &&
+    (a[2] || "") === (b[2] || "") && !!a[4] === !!b[4];
+}
+function forgetDraftsIn(map, date, period, draft) {
   const k = date + "|" + period;
-  const b = todayFailedDrafts.get(k);
+  const b = map.get(k);
   if (!b) return;
-  Object.keys(draft || {}).forEach((dk) => { delete b[dk]; });
-  if (!Object.keys(b).length) todayFailedDrafts.delete(k);
+  Object.keys(draft || {}).forEach((dk) => { if (sameTodayPair(b[dk], draft[dk])) delete b[dk]; });
+  if (!Object.keys(b).length) map.delete(k);
+}
+function forgetFailedDrafts(date, period, draft) { forgetDraftsIn(todayFailedDrafts, date, period, draft); }
+// Marks tapped on THIS device whose save hasn't finished yet (waiting behind another save, or on
+// the wire). Any re-render in the meantime -- an earlier save finishing, someone else's save
+// arriving live -- draws the grid from `state`, which doesn't have these marks yet; without this
+// the check simply vanished, and pressing Save then re-saved the blank row, wiping the mark.
+const todayPendingDrafts = new Map();
+function rememberPendingDraft(date, period, draft) {
+  const k = date + "|" + period;
+  const b = todayPendingDrafts.get(k) || {};
+  Object.keys(draft || {}).forEach((dk) => { b[dk] = draft[dk].slice(); });
+  todayPendingDrafts.set(k, b);
 }
 function failedDraftCount() {
   let n = 0;
@@ -4882,9 +4900,13 @@ function renderToday(root, session) {
   // Marks from this device whose save failed win over what the server has, and count as
   // "touched" so the Save button will retry them.
   const failedHere = selectedPeriod ? failedDraftBucket(todayDate, selectedPeriod) : null;
-  if (failedHere) {
-    restored = Object.assign({}, restored || {}, failedHere);
-    Object.keys(failedHere).forEach((dk) => {
+  // Only a failed save (or a stashed draft) is worth the warning banner; marks still on their way
+  // to the server are drawn the same way but quietly.
+  const showUnsavedBanner = !!(restored || failedHere);
+  const pendingHere = selectedPeriod ? todayPendingDrafts.get(todayDate + "|" + selectedPeriod) || null : null;
+  if (failedHere || pendingHere) {
+    restored = Object.assign({}, restored || {}, failedHere || {}, pendingHere || {});
+    Object.keys(Object.assign({}, failedHere || {}, pendingHere || {})).forEach((dk) => {
       todayTouchedCards.add(dk.startsWith("staff:") ? dk.slice(6) + ":staff" : dk + ":student");
     });
   }
@@ -4994,7 +5016,7 @@ function renderToday(root, session) {
   if (parshaHebLabel) html += '<div class="today-parsha-line" dir="rtl">' + escapeHtml(parshaHebLabel) + "</div>";
 
   if (!canWrite) html += '<div class="banner banner-warn">Read-only view — changes here won’t be saved.</div>';
-  if (restored) html += '<div class="banner banner-warn">Some of your marks have not been saved yet (the save didn’t go through). They’re shown below — tap Save to try again.</div>';
+  if (showUnsavedBanner) html += '<div class="banner banner-warn">Some of your marks have not been saved yet (the save didn’t go through). They’re shown below — tap Save to try again.</div>';
 
   // "+ Add a class" has two shapes: a single button that sits inline with the other quick
   // actions below, or -- once clicked -- a wider field-row (select, name input, Add/Cancel)
@@ -6126,6 +6148,7 @@ function wireTodayGrid(root, teacherName) {
       stashData: first.draftForStash,
       retry: (fresh) => buildTodayPatch(fresh, cards).newState,
     });
+    forgetDraftsIn(todayPendingDrafts, dateAtStart, periodAtStart, first.draftForStash);
     if (res.ok || res.local) {
       forgetFailedDrafts(dateAtStart, periodAtStart, first.draftForStash);
       lastSaveUndo = { date: todayDate, period: selectedPeriod, snapshot: first.undoSnapshot };
@@ -6144,6 +6167,7 @@ function wireTodayGrid(root, teacherName) {
   }
   function scheduleAutosave(card) {
     markTouched(card);
+    rememberPendingDraft(todayDate, selectedPeriod, buildTodayPatch(state, [card]).draftForStash);
     todayAutosavePending.set(card.getAttribute("data-student") + ":" + (card.dataset.staff === "1" ? "staff" : "student"), card);
     if (todayAutosaveInFlight.size > 0) { updateTodaySaveStatus(); return; }
     const run = () => {
@@ -6184,6 +6208,7 @@ function wireTodayGrid(root, teacherName) {
       stashData: first.draftForStash,
       retry: (fresh) => buildTodayPatch(fresh).newState,
     });
+    forgetDraftsIn(todayPendingDrafts, dateAtStart, periodAtStart, first.draftForStash);
     if (res.ok || res.local) {
       forgetFailedDrafts(dateAtStart, periodAtStart, first.draftForStash);
       // Without this, the button stayed disabled and the status text stuck on "Saving…"
@@ -6976,9 +7001,21 @@ function isStudentRecord(person) { return !!(person && (person.first !== undefin
 // setMyAvatar/renderAvatarPickerModal). Anyone can still change theirs later; this only decides
 // what shows up before they've made a choice of their own.
 function defaultAvatarFor(person) { return isStudentRecord(person) ? DEFAULT_STUDENT_AVATAR : DEFAULT_STAFF_AVATAR; }
+// A chosen avatar is stored as a short "gallery:<n>" reference to AVATAR_GALLERY, not the image
+// itself -- copying a ~10 KB picture into every student/staff record made roster+staff about half
+// of the shared document. (So AVATAR_GALLERY must only ever be appended to, never reordered.)
+// Older records may still hold the full data URL; that still works, and
+// migrateInlineAvatars() shrinks them.
+function photoFor(person) {
+  const v = person && person.photoUrl;
+  if (!v) return defaultAvatarFor(person);
+  const m = /^gallery:(\d+)$/.exec(v);
+  if (m) return AVATAR_GALLERY[Number(m[1])] || defaultAvatarFor(person);
+  return v;
+}
 function avatarHtml(student, sizeClass) {
   const cls = "lb-avatar" + (sizeClass ? " " + sizeClass : "");
-  const url = student.photoUrl || defaultAvatarFor(student);
+  const url = photoFor(student);
   if (url) return '<span class="' + cls + '" style="background:var(--surface-2);"><img src="' + escapeHtml(url) + '" alt="" /></span>';
   return '<span class="' + cls + '" style="background:' + avatarColorFor(student.id) + ';">' + escapeHtml(personInitials(student)) + "</span>";
 }
@@ -7525,7 +7562,7 @@ function renderLeaderboard(root, session) {
         // painted last of all -- on top of their row-mates too.
         const figsHtml = figures.slice().reverse().map((f) =>
           '<img class="lb-podium-figure' + (isMe(f.student) ? " lb-me-glow" : "") + '" style="--row:' + f.row + ";--dx:" + f.dx.toFixed(3) + ';" src="' +
-          escapeHtml(f.student.photoUrl || defaultAvatarFor(f.student)) + '" alt="" />'
+          escapeHtml(photoFor(f.student)) + '" alt="" />'
         ).join("");
         return '<div class="lb-podium-figures">' + figsHtml + "</div>";
       };
@@ -10071,6 +10108,18 @@ async function migrateGcBonusLedgerEntries() {
   });
   await saveState(newState);
 }
+// One-time cleanup: avatars picked before photoFor() existed were stored as the whole image (a
+// ~10 KB data URL) in each record; swap each one that matches a gallery picture for its short
+// "gallery:<n>" reference. Same first-browser-to-load-it-fixes-it pattern as above.
+async function migrateInlineAvatars() {
+  const idx = new Map(AVATAR_GALLERY.map((u, i) => [u, i]));
+  const needs = (r) => r && typeof r.photoUrl === "string" && r.photoUrl.startsWith("data:") && idx.has(r.photoUrl);
+  if (!(state.roster || []).some(needs) && !(state.staff || []).some(needs)) return;
+  await saveEdit((draft) => {
+    (draft.roster || []).concat(draft.staff || []).forEach((r) => { if (needs(r)) r.photoUrl = "gallery:" + idx.get(r.photoUrl); });
+    return draft;
+  });
+}
 async function init() {
   if (TV_MODE) { initTv(); return; } // hallway TV: read-only, no login, no migrations, no sheet timers (see TV DISPLAY below)
   renderAll(); // shows the "Loading..." screen (state is still null at this point)
@@ -10089,6 +10138,7 @@ async function init() {
     return;
   }
   try { await migrateGcBonusLedgerEntries(); } catch (e) { console.error("GC Bonus migration failed:", e); }
+  try { await migrateInlineAvatars(); } catch (e) { console.error("Avatar migration failed:", e); }
   renderAll();
   listenForLiveUpdates();
 }
