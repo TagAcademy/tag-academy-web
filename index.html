@@ -4825,12 +4825,30 @@ function rememberFailedDrafts(date, period, draft) {
   Object.keys(draft || {}).forEach((dk) => { b[dk] = draft[dk]; });
   todayFailedDrafts.set(k, b);
 }
-function forgetFailedDrafts(date, period, draft) {
+// Only drops a remembered mark if it's the same mark that was just saved -- a newer tap on that
+// row while the save was on the wire stays remembered (its own save is still coming).
+function sameTodayPair(a, b) {
+  return !!a && !!b && [0, 1].every((i) => (a[i] === undefined ? null : a[i]) === (b[i] === undefined ? null : b[i])) &&
+    (a[2] || "") === (b[2] || "") && !!a[4] === !!b[4];
+}
+function forgetDraftsIn(map, date, period, draft) {
   const k = date + "|" + period;
-  const b = todayFailedDrafts.get(k);
+  const b = map.get(k);
   if (!b) return;
-  Object.keys(draft || {}).forEach((dk) => { delete b[dk]; });
-  if (!Object.keys(b).length) todayFailedDrafts.delete(k);
+  Object.keys(draft || {}).forEach((dk) => { if (sameTodayPair(b[dk], draft[dk])) delete b[dk]; });
+  if (!Object.keys(b).length) map.delete(k);
+}
+function forgetFailedDrafts(date, period, draft) { forgetDraftsIn(todayFailedDrafts, date, period, draft); }
+// Marks tapped on THIS device whose save hasn't finished yet (waiting behind another save, or on
+// the wire). Any re-render in the meantime -- an earlier save finishing, someone else's save
+// arriving live -- draws the grid from `state`, which doesn't have these marks yet; without this
+// the check simply vanished, and pressing Save then re-saved the blank row, wiping the mark.
+const todayPendingDrafts = new Map();
+function rememberPendingDraft(date, period, draft) {
+  const k = date + "|" + period;
+  const b = todayPendingDrafts.get(k) || {};
+  Object.keys(draft || {}).forEach((dk) => { b[dk] = draft[dk].slice(); });
+  todayPendingDrafts.set(k, b);
 }
 function failedDraftCount() {
   let n = 0;
@@ -4882,9 +4900,13 @@ function renderToday(root, session) {
   // Marks from this device whose save failed win over what the server has, and count as
   // "touched" so the Save button will retry them.
   const failedHere = selectedPeriod ? failedDraftBucket(todayDate, selectedPeriod) : null;
-  if (failedHere) {
-    restored = Object.assign({}, restored || {}, failedHere);
-    Object.keys(failedHere).forEach((dk) => {
+  // Only a failed save (or a stashed draft) is worth the warning banner; marks still on their way
+  // to the server are drawn the same way but quietly.
+  const showUnsavedBanner = !!(restored || failedHere);
+  const pendingHere = selectedPeriod ? todayPendingDrafts.get(todayDate + "|" + selectedPeriod) || null : null;
+  if (failedHere || pendingHere) {
+    restored = Object.assign({}, restored || {}, failedHere || {}, pendingHere || {});
+    Object.keys(Object.assign({}, failedHere || {}, pendingHere || {})).forEach((dk) => {
       todayTouchedCards.add(dk.startsWith("staff:") ? dk.slice(6) + ":staff" : dk + ":student");
     });
   }
@@ -4994,7 +5016,7 @@ function renderToday(root, session) {
   if (parshaHebLabel) html += '<div class="today-parsha-line" dir="rtl">' + escapeHtml(parshaHebLabel) + "</div>";
 
   if (!canWrite) html += '<div class="banner banner-warn">Read-only view — changes here won’t be saved.</div>';
-  if (restored) html += '<div class="banner banner-warn">Some of your marks have not been saved yet (the save didn’t go through). They’re shown below — tap Save to try again.</div>';
+  if (showUnsavedBanner) html += '<div class="banner banner-warn">Some of your marks have not been saved yet (the save didn’t go through). They’re shown below — tap Save to try again.</div>';
 
   // "+ Add a class" has two shapes: a single button that sits inline with the other quick
   // actions below, or -- once clicked -- a wider field-row (select, name input, Add/Cancel)
@@ -6126,6 +6148,7 @@ function wireTodayGrid(root, teacherName) {
       stashData: first.draftForStash,
       retry: (fresh) => buildTodayPatch(fresh, cards).newState,
     });
+    forgetDraftsIn(todayPendingDrafts, dateAtStart, periodAtStart, first.draftForStash);
     if (res.ok || res.local) {
       forgetFailedDrafts(dateAtStart, periodAtStart, first.draftForStash);
       lastSaveUndo = { date: todayDate, period: selectedPeriod, snapshot: first.undoSnapshot };
@@ -6144,6 +6167,7 @@ function wireTodayGrid(root, teacherName) {
   }
   function scheduleAutosave(card) {
     markTouched(card);
+    rememberPendingDraft(todayDate, selectedPeriod, buildTodayPatch(state, [card]).draftForStash);
     todayAutosavePending.set(card.getAttribute("data-student") + ":" + (card.dataset.staff === "1" ? "staff" : "student"), card);
     if (todayAutosaveInFlight.size > 0) { updateTodaySaveStatus(); return; }
     const run = () => {
@@ -6184,6 +6208,7 @@ function wireTodayGrid(root, teacherName) {
       stashData: first.draftForStash,
       retry: (fresh) => buildTodayPatch(fresh).newState,
     });
+    forgetDraftsIn(todayPendingDrafts, dateAtStart, periodAtStart, first.draftForStash);
     if (res.ok || res.local) {
       forgetFailedDrafts(dateAtStart, periodAtStart, first.draftForStash);
       // Without this, the button stayed disabled and the status text stuck on "Saving…"
