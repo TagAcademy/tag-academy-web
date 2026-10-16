@@ -4279,9 +4279,10 @@ function fmtDurationMs(ms) {
 // Compact "what was this time for" cell -- a category pill plus an optional note underneath;
 // entries with neither (an ordinary in-hours clock-in) just show a dash.
 function timeClockDetailHtml(e) {
-  if (!e.category && !e.note) return "—";
+  const adjusted = e.startSetAt ? '<div class="help-text" style="margin-top:2px;" title="Clocked in at ' + escapeHtml(fmtClockTime(e.startSetAt)) + '">Start time entered by hand</div>' : "";
+  if (!e.category && !e.note) return adjusted || "—";
   return (e.category ? '<span class="pill pill-muted">' + escapeHtml(e.category) + "</span>" : "") +
-    (e.note ? '<div class="help-text" style="margin-top:2px;">' + escapeHtml(e.note) + "</div>" : "");
+    (e.note ? '<div class="help-text" style="margin-top:2px;">' + escapeHtml(e.note) + "</div>" : "") + adjusted;
 }
 // The 4 middle cells (Clocked in / Clocked out / Duration / For) shared by the staff's own
 // history table and the Admin > Time Clock full log -- a day-off entry reuses the same 4 columns
@@ -4333,6 +4334,32 @@ function localInputValueToMs(v) {
   return isNaN(t) ? null : t;
 }
 let timeClockShowDayOffForm = false;
+// "Started earlier?" -- the time someone says they really started (e.g. arrived 8:30, only got to
+// the clock at 9). timeClockStartEdit is which form is open: "new" (choosing a start before
+// clocking in) or "open" (fixing the start of the session already running).
+let timeClockStartEdit = null;
+let timeClockStartValue = ""; // "HH:MM" from the time box
+const TIME_CLOCK_MAX_BACKDATE_MS = 16 * 60 * 60 * 1000;
+function hhmmOf(ms) { const d = new Date(ms); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); }
+// "HH:MM" -> the most recent moment at that clock time, not after now (a time later than now
+// means last night, e.g. picking 11:30 PM at 1 AM). Returns { ms } or { error }.
+function timeClockStartFromHhmm(hhmm, now) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm || "");
+  if (!m) return { error: "Pick a start time." };
+  const d = new Date(now); d.setHours(Number(m[1]), Number(m[2]), 0, 0);
+  let ms = d.getTime();
+  const later = ms > now + 60000;
+  if (later) ms -= 24 * 60 * 60 * 1000;
+  if (ms > now) ms = now;
+  if (now - ms > TIME_CLOCK_MAX_BACKDATE_MS) return { error: later ? "That time hasn’t happened yet — pick when you actually started." : "That’s more than 16 hours ago — ask an admin to add it in the full log instead." };
+  return { ms };
+}
+// The start time chosen in the "Started earlier?" box, if one is open and valid; else null (= now).
+function timeClockChosenStart(now) {
+  if (timeClockStartEdit !== "new" || !timeClockStartValue) return null;
+  const r = timeClockStartFromHhmm(timeClockStartValue, now);
+  return r.ms != null ? r.ms : null;
+}
 // Time Clock calendar (the modal's history view): one small dot per staff member who clocked in
 // (solid) or took a personal/sick day (hollow ring) on a given day, each person in their own color,
 // instead of the long scrolling list this modal used to show -- see renderTimeClockModal.
@@ -4440,7 +4467,8 @@ function renderTimeClockModal(session) {
   // must be excluded here or a stray dayOff record would look like an ordinary still-clocked-in
   // entry and the toggle button would try to "clock it out".
   const open = entries.find((e) => !e.dayOff && !e.clockOutAt);
-  const needsReason = !open && timeClockIsAfterHoursAt(appNow());
+  const chosenStart = !open ? timeClockChosenStart(appNow()) : null;
+  const needsReason = !open && timeClockIsAfterHoursAt(chosenStart != null ? chosenStart : appNow());
   // Keep the modal's scroll position across the re-renders a calendar tap triggers.
   const prevModal = root.querySelector(".modal");
   const prevScroll = prevModal ? prevModal.scrollTop : 0;
@@ -4462,12 +4490,14 @@ function renderTimeClockModal(session) {
       '<div style="display:flex;gap:10px;margin-bottom:14px;">' +
       '<button type="button" class="btn btn-primary" id="time-clock-dayoff-save-btn" style="flex:1;">Log day</button>' +
       '<button type="button" class="btn btn-ghost" id="time-clock-dayoff-cancel-btn">Cancel</button></div>'
-    : '<button type="button" class="btn ' + (open ? "btn-danger" : "btn-primary") + '" id="time-clock-toggle-btn" style="width:100%;margin-bottom:10px;">' + (open ? "Clock Out" : "Clock In") + "</button>" +
-      (open ? "" : '<button type="button" class="btn btn-ghost" id="time-clock-dayoff-open-btn" style="width:100%;margin-bottom:14px;">Take a personal or sick day</button>');
+    : '<button type="button" class="btn ' + (open ? "btn-danger" : "btn-primary") + '" id="time-clock-toggle-btn" style="width:100%;margin-bottom:10px;">' +
+        (open ? "Clock Out" : chosenStart != null ? "Clock In from " + escapeHtml(new Date(chosenStart).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })) : "Clock In") + "</button>" +
+      timeClockStartEditHtml(open) +
+      (open ? timeClockSwitchHtml(open) : '<button type="button" class="btn btn-ghost" id="time-clock-dayoff-open-btn" style="width:100%;margin-bottom:14px;">Take a personal or sick day</button>');
   root.innerHTML = '<div class="modal-backdrop" id="time-clock-backdrop">' +
     '<div class="modal modal-wide">' +
     "<h2>Time Clock</h2>" +
-    '<p class="sub">' + (open ? "Clocked in since " + fmtClockTime(open.clockInAt) + "." : needsReason ? "It's after hours — let us know what this time is for." : timeClockShowDayOffForm ? "Log a personal or sick day." : "You’re not clocked in right now.") + "</p>" +
+    '<p class="sub">' + (open ? "Clocked in since " + fmtClockTime(open.clockInAt) + (open.category ? " · " + escapeHtml(open.category) : "") + "." : needsReason ? "It's after hours — let us know what this time is for." : timeClockShowDayOffForm ? "Log a personal or sick day." : "You’re not clocked in right now.") + "</p>" +
     '<p class="help-text" style="margin-top:-4px;margin-bottom:14px;">Personal days used: ' + dayOffCounts.Personal + " · Sick days used: " + dayOffCounts.Sick + "</p>" +
     actionHtml +
     timeClockCalendarHtml() +
@@ -4493,8 +4523,14 @@ function renderTimeClockModal(session) {
     if (!open && needsReason) { timeClockShowReasonForm = true; renderTimeClockModal(session); return; }
     // A regular clock-in during normal school hours needs no manual tagging at all -- it's
     // automatically logged under "Student", the overwhelming common case, with no extra step.
-    toggleTimeClock(session, open ? undefined : { category: "Student" });
+    if (!open && timeClockStartEdit === "new" && timeClockStartValue) {
+      const r = timeClockStartFromHhmm(timeClockStartValue, appNow());
+      if (r.error) { toast(r.error, "warn"); return; }
+    }
+    toggleTimeClock(session, open ? undefined : { category: "Student", startMs: chosenStart });
   });
+  wireTimeClockStartEdit(session, open);
+  wireTimeClockSwitch(session, open);
   wireTimeClockCategorySelect(document.getElementById("tc-reason-category"), document.getElementById("tc-reason-category-custom"));
   const confirmBtn = document.getElementById("time-clock-confirm-btn");
   if (confirmBtn) confirmBtn.addEventListener("click", () => {
@@ -4502,7 +4538,7 @@ function renderTimeClockModal(session) {
     const note = document.getElementById("tc-reason-note").value.trim();
     if (!category) { toast("Choose what this time is for.", "warn"); return; }
     timeClockShowReasonForm = false;
-    toggleTimeClock(session, { category, note });
+    toggleTimeClock(session, { category, note, startMs: timeClockChosenStart(appNow()) });
   });
   const reasonCancelBtn = document.getElementById("time-clock-reason-cancel-btn");
   if (reasonCancelBtn) reasonCancelBtn.addEventListener("click", () => { timeClockShowReasonForm = false; renderTimeClockModal(session); });
@@ -4525,7 +4561,93 @@ function closeTimeClock(session) {
   timeClockCalMonth = null;
   timeClockShowReasonForm = false;
   timeClockShowDayOffForm = false;
+  timeClockStartEdit = null; timeClockStartValue = "";
   renderTimeClockModal(session);
+}
+// "Started earlier?" (before clocking in) / "Change start time" (while clocked in).
+function timeClockStartEditHtml(open) {
+  const mode = open ? "open" : "new";
+  if (timeClockStartEdit !== mode) {
+    return '<button type="button" class="diag-link" id="tc-start-edit-open" style="display:block;margin:-2px auto 12px;font-size:0.85rem;">' +
+      (open ? "Change start time" : "Started earlier? Set your start time") + "</button>";
+  }
+  const val = timeClockStartValue || hhmmOf(open ? open.clockInAt : appNow());
+  return '<div class="field" style="margin-bottom:12px;"><label for="tc-start-time">' + (open ? "You actually started at" : "Started at") + "</label>" +
+    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><input type="time" id="tc-start-time" value="' + escapeHtml(val) + '" style="flex:1;min-width:120px;">' +
+    (open ? '<button type="button" class="btn btn-primary btn-sm" id="tc-start-save">Save</button>' : "") +
+    '<button type="button" class="btn btn-ghost btn-sm" id="tc-start-cancel">' + (open ? "Cancel" : "Use now instead") + "</button></div>" +
+    (open ? "" : '<p class="help-text" style="margin:4px 0 0;">Then tap Clock In.</p>') + "</div>";
+}
+function wireTimeClockStartEdit(session, open) {
+  const openBtn = document.getElementById("tc-start-edit-open");
+  if (openBtn) openBtn.addEventListener("click", () => {
+    timeClockStartEdit = open ? "open" : "new";
+    timeClockStartValue = hhmmOf(open ? open.clockInAt : appNow());
+    renderTimeClockModal(session);
+    const inp = document.getElementById("tc-start-time"); if (inp) inp.focus();
+  });
+  const inp = document.getElementById("tc-start-time");
+  if (inp) inp.addEventListener("change", () => { timeClockStartValue = inp.value; if (!open) renderTimeClockModal(session); });
+  const cancel = document.getElementById("tc-start-cancel");
+  if (cancel) cancel.addEventListener("click", () => { timeClockStartEdit = null; timeClockStartValue = ""; renderTimeClockModal(session); });
+  const save = document.getElementById("tc-start-save");
+  if (save && open) save.addEventListener("click", () => {
+    const r = timeClockStartFromHhmm(inp ? inp.value : "", appNow());
+    if (r.error) { toast(r.error, "warn"); return; }
+    changeOpenTimeClockStart(session, open.id, r.ms);
+  });
+}
+async function changeOpenTimeClockStart(session, entryId, startMs) {
+  const staffId = session.record.id;
+  const clash = findOverlappingTimeClockEntry(state.timeClock, staffId, startMs, null, entryId);
+  if (clash) { toast(timeClockOverlapMessage(clash), "warn"); return; }
+  const setAt = appNow();
+  const res = await saveEdit((ns) => {
+    const e = (ns.timeClock || []).find((x) => x.id === entryId && !x.clockOutAt);
+    if (e) { if (!e.startSetAt) e.startSetAt = e.clockInAt; e.clockInAt = startMs; }
+    return ns;
+  });
+  if (res.ok || res.local) {
+    timeClockStartEdit = null; timeClockStartValue = "";
+    toast("Start time changed to " + new Date(startMs).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) + ".", "good");
+    renderAll();
+  }
+}
+// While clocked in: switch what the time is for without clocking out. The current stretch ends
+// now and a new one starts now under the new category, so each category's hours stay right.
+// (Within the first minute it just relabels the session instead of leaving a 0-minute entry.)
+function timeClockSwitchHtml(open) {
+  return '<div class="field" style="margin-bottom:14px;"><label for="tc-switch-category">Switch what you’re doing (stays clocked in)</label>' +
+    '<div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;"><div style="flex:1;min-width:160px;">' +
+    '<select id="tc-switch-category">' + timeClockCategoryOptionsHtml("", "Choose…").replace('<option value="' + escapeHtml(open.category || "") + '">', '<option value="' + escapeHtml(open.category || "") + '" disabled>') + "</select>" +
+    timeClockCategoryCustomInputHtml("tc-switch-category-custom", "") + "</div>" +
+    '<button type="button" class="btn btn-ghost btn-sm" id="tc-switch-btn" style="min-height:40px;">Switch</button></div></div>';
+}
+function wireTimeClockSwitch(session, open) {
+  const sel = document.getElementById("tc-switch-category"), custom = document.getElementById("tc-switch-category-custom");
+  wireTimeClockCategorySelect(sel, custom);
+  const btn = document.getElementById("tc-switch-btn");
+  if (btn && open) btn.addEventListener("click", () => {
+    const category = resolveTimeClockCategory(sel, custom);
+    if (!category) { toast("Choose what you’re switching to.", "warn"); return; }
+    if (category === open.category) { toast("You’re already clocked in for " + category + ".", "warn"); return; }
+    switchTimeClockCategory(session, open.id, category);
+  });
+}
+async function switchTimeClockCategory(session, openId, category) {
+  const staffId = session.record.id;
+  const now = appNow();
+  const newEntryId = uid("tc"); // fixed up front -- see toggleTimeClock
+  const res = await saveEdit((ns) => {
+    ns.timeClock = ns.timeClock || [];
+    const open = ns.timeClock.find((e) => e.id === openId && !e.clockOutAt) || ns.timeClock.find((e) => e.staffId === staffId && !e.dayOff && !e.clockOutAt);
+    if (!open) return ns;
+    if (now - open.clockInAt < 60000) { open.category = category; return ns; }
+    open.clockOutAt = now;
+    if (!ns.timeClock.some((e) => e.id === newEntryId)) ns.timeClock.push({ id: newEntryId, staffId, clockInAt: now, clockOutAt: null, category });
+    return ns;
+  });
+  if (res.ok || res.local) { toast("Switched to " + category + " — still clocked in.", "good"); renderAll(); }
 }
 async function toggleTimeClock(session, extra) {
   const staffId = session.record.id;
@@ -4549,15 +4671,23 @@ async function toggleTimeClock(session, extra) {
     if (open) {
       open.clockOutAt = now;
     } else {
-      const entry = { id: newEntryId, staffId, clockInAt: now, clockOutAt: null };
+      const startMs = extra && extra.startMs != null && extra.startMs < now ? extra.startMs : now;
+      const entry = { id: newEntryId, staffId, clockInAt: startMs, clockOutAt: null };
+      // Remember the real tap time whenever the start was set by hand, so the log can say so.
+      if (startMs !== now) entry.startSetAt = now;
       if (extra && extra.category) entry.category = extra.category;
       if (extra && extra.note) entry.note = extra.note;
       ns.timeClock.push(entry);
     }
     return ns;
   }
+  if (!wasOpenNow && extra && extra.startMs != null) {
+    const clash = findOverlappingTimeClockEntry(state.timeClock, staffId, extra.startMs, null, null);
+    if (clash) { toast(timeClockOverlapMessage(clash), "warn"); return; }
+  }
   const res = await saveState(applyToggle(state), { retry: applyToggle });
   if (res.ok || res.local) {
+    timeClockStartEdit = null; timeClockStartValue = "";
     toast(wasOpenNow ? "Clocked out." : "Clocked in.", "good");
     renderAll();
   }
