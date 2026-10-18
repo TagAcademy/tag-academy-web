@@ -4279,7 +4279,8 @@ function fmtDurationMs(ms) {
 // Compact "what was this time for" cell -- a category pill plus an optional note underneath;
 // entries with neither (an ordinary in-hours clock-in) just show a dash.
 function timeClockDetailHtml(e) {
-  const adjusted = e.startSetAt ? '<div class="help-text" style="margin-top:2px;" title="Clocked in at ' + escapeHtml(fmtClockTime(e.startSetAt)) + '">Start time entered by hand</div>' : "";
+  const adjusted = (e.startSetAt ? '<div class="help-text" style="margin-top:2px;" title="Clocked in at ' + escapeHtml(fmtClockTime(e.startSetAt)) + '">Start time entered by hand</div>' : "") +
+    (e.endSetAt ? '<div class="help-text" style="margin-top:2px;" title="Clocked out at ' + escapeHtml(fmtClockTime(e.endSetAt)) + '">End time entered by hand</div>' : "");
   if (!e.category && !e.note) return adjusted || "—";
   return (e.category ? '<span class="pill pill-muted">' + escapeHtml(e.category) + "</span>" : "") +
     (e.note ? '<div class="help-text" style="margin-top:2px;">' + escapeHtml(e.note) + "</div>" : "") + adjusted;
@@ -4339,6 +4340,10 @@ let timeClockShowDayOffForm = false;
 // clocking in) or "open" (fixing the start of the session already running).
 let timeClockStartEdit = null;
 let timeClockStartValue = ""; // "HH:MM" from the time box
+// The same for the end of a session: "open" = choosing an earlier end before tapping Clock Out,
+// "last" = fixing the clock-out of the most recent session after the fact.
+let timeClockEndEdit = null;
+let timeClockEndValue = "";
 const TIME_CLOCK_MAX_BACKDATE_MS = 16 * 60 * 60 * 1000;
 function hhmmOf(ms) { const d = new Date(ms); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); }
 // "HH:MM" -> the most recent moment at that clock time, not after now (a time later than now
@@ -4353,6 +4358,24 @@ function timeClockStartFromHhmm(hhmm, now) {
   if (ms > now) ms = now;
   if (now - ms > TIME_CLOCK_MAX_BACKDATE_MS) return { error: later ? "That time hasn’t happened yet — pick when you actually started." : "That’s more than 16 hours ago — ask an admin to add it in the full log instead." };
   return { ms };
+}
+// An end time from the time box for a session that started at startMs: the most recent moment at
+// that clock time, after the start and not after now. Returns { ms } or { error }.
+function timeClockEndFromHhmm(hhmm, startMs, now) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm || "");
+  if (!m) return { error: "Pick an end time." };
+  const sameDay = new Date(now); sameDay.setHours(Number(m[1]), Number(m[2]), 0, 0);
+  const future = sameDay.getTime() > now + 60000;
+  const r = timeClockStartFromHhmm(hhmm, now);
+  if ((r.error || r.ms <= startMs) && future) return { error: "That time hasn’t happened yet — pick when you actually stopped." };
+  if (r.error) return r;
+  if (r.ms <= startMs) return { error: "That’s before this session started (" + new Date(startMs).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) + ")." };
+  return r;
+}
+// The most recent finished worked session, if it ended recently enough to fix from here.
+function timeClockLastClosed(entries, now) {
+  const last = entries.filter((e) => !e.dayOff && e.clockOutAt).sort((a, b) => b.clockOutAt - a.clockOutAt)[0];
+  return last && now - last.clockOutAt <= TIME_CLOCK_MAX_BACKDATE_MS ? last : null;
 }
 // The start time chosen in the "Started earlier?" box, if one is open and valid; else null (= now).
 function timeClockChosenStart(now) {
@@ -4468,6 +4491,9 @@ function renderTimeClockModal(session) {
   // entry and the toggle button would try to "clock it out".
   const open = entries.find((e) => !e.dayOff && !e.clockOutAt);
   const chosenStart = !open ? timeClockChosenStart(appNow()) : null;
+  let chosenEnd = null;
+  if (open && timeClockEndEdit === "open" && timeClockEndValue) { const r = timeClockEndFromHhmm(timeClockEndValue, open.clockInAt, appNow()); if (r.ms != null) chosenEnd = r.ms; }
+  const lastClosed = !open ? timeClockLastClosed(entries, appNow()) : null;
   const needsReason = !open && timeClockIsAfterHoursAt(chosenStart != null ? chosenStart : appNow());
   // Keep the modal's scroll position across the re-renders a calendar tap triggers.
   const prevModal = root.querySelector(".modal");
@@ -4491,8 +4517,10 @@ function renderTimeClockModal(session) {
       '<button type="button" class="btn btn-primary" id="time-clock-dayoff-save-btn" style="flex:1;">Log day</button>' +
       '<button type="button" class="btn btn-ghost" id="time-clock-dayoff-cancel-btn">Cancel</button></div>'
     : '<button type="button" class="btn ' + (open ? "btn-danger" : "btn-primary") + '" id="time-clock-toggle-btn" style="width:100%;margin-bottom:10px;">' +
-        (open ? "Clock Out" : chosenStart != null ? "Clock In from " + escapeHtml(new Date(chosenStart).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })) : "Clock In") + "</button>" +
+        (open ? (chosenEnd != null ? "Clock Out at " + escapeHtml(new Date(chosenEnd).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })) : "Clock Out") : chosenStart != null ? "Clock In from " + escapeHtml(new Date(chosenStart).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })) : "Clock In") + "</button>" +
+      (open ? timeClockEndEditHtml(open, null) : "") +
       timeClockStartEditHtml(open) +
+      (!open && lastClosed ? timeClockEndEditHtml(null, lastClosed) : "") +
       (open ? timeClockSwitchHtml(open) : '<button type="button" class="btn btn-ghost" id="time-clock-dayoff-open-btn" style="width:100%;margin-bottom:14px;">Take a personal or sick day</button>');
   root.innerHTML = '<div class="modal-backdrop" id="time-clock-backdrop">' +
     '<div class="modal modal-wide">' +
@@ -4527,9 +4555,14 @@ function renderTimeClockModal(session) {
       const r = timeClockStartFromHhmm(timeClockStartValue, appNow());
       if (r.error) { toast(r.error, "warn"); return; }
     }
-    toggleTimeClock(session, open ? undefined : { category: "Student", startMs: chosenStart });
+    if (open && timeClockEndEdit === "open" && timeClockEndValue) {
+      const r = timeClockEndFromHhmm(timeClockEndValue, open.clockInAt, appNow());
+      if (r.error) { toast(r.error, "warn"); return; }
+    }
+    toggleTimeClock(session, open ? { endMs: chosenEnd } : { category: "Student", startMs: chosenStart });
   });
   wireTimeClockStartEdit(session, open);
+  wireTimeClockEndEdit(session, open, lastClosed);
   wireTimeClockSwitch(session, open);
   wireTimeClockCategorySelect(document.getElementById("tc-reason-category"), document.getElementById("tc-reason-category-custom"));
   const confirmBtn = document.getElementById("time-clock-confirm-btn");
@@ -4562,7 +4595,58 @@ function closeTimeClock(session) {
   timeClockShowReasonForm = false;
   timeClockShowDayOffForm = false;
   timeClockStartEdit = null; timeClockStartValue = "";
+  timeClockEndEdit = null; timeClockEndValue = "";
   renderTimeClockModal(session);
+}
+// "Left earlier?" (before tapping Clock Out) / "Change your last clock-out" (after clocking out).
+function timeClockEndEditHtml(open, last) {
+  const mode = open ? "open" : "last";
+  const t = (ms) => escapeHtml(new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }));
+  if (timeClockEndEdit !== mode) {
+    return '<button type="button" class="diag-link" id="tc-end-edit-open" style="display:block;margin:-2px auto 8px;font-size:0.85rem;">' +
+      (open ? "Left earlier? Set your end time" : "Change your last clock-out (" + t(last.clockOutAt) + ")") + "</button>";
+  }
+  const val = timeClockEndValue || hhmmOf(open ? appNow() : last.clockOutAt);
+  return '<div class="field" style="margin-bottom:12px;"><label for="tc-end-time">' + (open ? "You actually stopped at" : "Your last session (from " + t(last.clockInAt) + ") ended at") + "</label>" +
+    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><input type="time" id="tc-end-time" value="' + escapeHtml(val) + '" style="flex:1;min-width:120px;">' +
+    (open ? "" : '<button type="button" class="btn btn-primary btn-sm" id="tc-end-save">Save</button>') +
+    '<button type="button" class="btn btn-ghost btn-sm" id="tc-end-cancel">' + (open ? "Use now instead" : "Cancel") + "</button></div>" +
+    (open ? '<p class="help-text" style="margin:4px 0 0;">Then tap Clock Out.</p>' : "") + "</div>";
+}
+function wireTimeClockEndEdit(session, open, last) {
+  const openBtn = document.getElementById("tc-end-edit-open");
+  if (openBtn) openBtn.addEventListener("click", () => {
+    timeClockEndEdit = open ? "open" : "last";
+    timeClockEndValue = hhmmOf(open ? appNow() : last.clockOutAt);
+    renderTimeClockModal(session);
+    const inp = document.getElementById("tc-end-time"); if (inp) inp.focus();
+  });
+  const inp = document.getElementById("tc-end-time");
+  if (inp) inp.addEventListener("change", () => { timeClockEndValue = inp.value; if (open) renderTimeClockModal(session); });
+  const cancel = document.getElementById("tc-end-cancel");
+  if (cancel) cancel.addEventListener("click", () => { timeClockEndEdit = null; timeClockEndValue = ""; renderTimeClockModal(session); });
+  const save = document.getElementById("tc-end-save");
+  if (save && last) save.addEventListener("click", () => {
+    const r = timeClockEndFromHhmm(inp ? inp.value : "", last.clockInAt, appNow());
+    if (r.error) { toast(r.error, "warn"); return; }
+    changeTimeClockEnd(session, last.id, r.ms);
+  });
+}
+async function changeTimeClockEnd(session, entryId, endMs) {
+  const entry = (state.timeClock || []).find((x) => x.id === entryId);
+  if (!entry) return;
+  const clash = findOverlappingTimeClockEntry(state.timeClock, session.record.id, entry.clockInAt, endMs, entryId);
+  if (clash) { toast(timeClockOverlapMessage(clash), "warn"); return; }
+  const res = await saveEdit((ns) => {
+    const e = (ns.timeClock || []).find((x) => x.id === entryId && x.clockOutAt);
+    if (e) { if (!e.endSetAt) e.endSetAt = e.clockOutAt; e.clockOutAt = endMs; }
+    return ns;
+  });
+  if (res.ok || res.local) {
+    timeClockEndEdit = null; timeClockEndValue = "";
+    toast("Clock-out changed to " + new Date(endMs).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) + ".", "good");
+    renderAll();
+  }
 }
 // "Started earlier?" (before clocking in) / "Change start time" (while clocked in).
 function timeClockStartEditHtml(open) {
@@ -4669,7 +4753,9 @@ async function toggleTimeClock(session, extra) {
     ns.timeClock = ns.timeClock || [];
     const open = ns.timeClock.find((e) => e.staffId === staffId && !e.dayOff && !e.clockOutAt);
     if (open) {
-      open.clockOutAt = now;
+      const endMs = extra && extra.endMs != null && extra.endMs < now && extra.endMs > open.clockInAt ? extra.endMs : now;
+      open.clockOutAt = endMs;
+      if (endMs !== now) open.endSetAt = now;
     } else {
       const startMs = extra && extra.startMs != null && extra.startMs < now ? extra.startMs : now;
       const entry = { id: newEntryId, staffId, clockInAt: startMs, clockOutAt: null };
@@ -4688,6 +4774,7 @@ async function toggleTimeClock(session, extra) {
   const res = await saveState(applyToggle(state), { retry: applyToggle });
   if (res.ok || res.local) {
     timeClockStartEdit = null; timeClockStartValue = "";
+    timeClockEndEdit = null; timeClockEndValue = "";
     toast(wasOpenNow ? "Clocked out." : "Clocked in.", "good");
     renderAll();
   }
