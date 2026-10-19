@@ -10372,6 +10372,12 @@ function applyIncomingState(incoming) {
   // acting on our own save a second time, so it doesn't trigger a redundant re-render or
   // stomp on whatever the person has started doing since that save went through.
   if (state && incoming._rev === state._rev) return;
+  // Never step backwards: every save sets _rev to one more than what it replaced, so a copy with a
+  // lower _rev is older than what we already have. That happens when the 20-second catch-up fetch
+  // (syncNow) starts just before one of our own saves and comes back just after it -- taking that
+  // older copy wiped the mark that had just saved off the screen (it was still saved; the next
+  // catch-up brought it back), which looked like every tap flipping on and then back off.
+  if (state && (incoming._rev || 0) < (state._rev || 0)) return;
   state = incoming;
   refreshViewOrDefer();
 }
@@ -10586,7 +10592,7 @@ function tvSubscribe() {
   setInterval(() => { STATE_DOC.get().then((s) => { if (s.exists) tvApplyState(s.data()); }).catch(() => {}); }, 300000);
 }
 function tvApplyState(incoming) {
-  if (state && incoming._rev === state._rev) return;
+  if (state && (incoming._rev || 0) <= (state._rev || 0)) return; // same or older copy -- see applyIncomingState
   state = incoming; TV.dirty = true;
 }
 // "Exit TV mode on screen" from the control tab: the control tab writes a fresh nonce; the TV
