@@ -1597,6 +1597,29 @@ html.tv-mode #tv-root { display: block; }
 .tvc-del { background: var(--warn); color: #fff; }
 .tvc-upload { cursor: pointer; }
 @media (min-width: 700px) { .tvc-photos { grid-template-columns: repeat(3, 1fr); } .tvc-layouts { grid-template-columns: repeat(3, 1fr); } }
+/* Family ledger (see VIEW: FAMILY) */
+.fam-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 16px; }
+.fam-list { display: flex; flex-direction: column; }
+.fam-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 10px 0; background: none; border: 0; border-top: 1px solid var(--line); font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.fam-row:first-child { border-top: 0; }
+.fam-row:disabled { cursor: default; }
+.fam-row:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.fam-main { display: flex; flex-direction: column; min-width: 0; }
+.fam-title { font-weight: 700; unicode-bidi: plaintext; overflow-wrap: anywhere; }
+.fam-sub { font-size: 0.78rem; color: var(--muted); unicode-bidi: plaintext; }
+.fam-badges { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; flex-shrink: 0; max-width: 55%; }
+.fam-amt { font-weight: 700; white-space: nowrap; }
+.fam-amt.is-pos { color: var(--good); }
+.fam-amt.is-neg { color: var(--warn); }
+.fam-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.fam-rules { margin: 10px 0 0; padding-left: 18px; font-size: 0.85rem; color: var(--ink-2); }
+.fam-modal { max-width: 460px; }
+.fam-modal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 14px; }
+.fam-check { display: flex; align-items: center; gap: 8px; font-weight: 500; font-size: 0.85rem; margin-bottom: 14px; }
+.fam-check input { width: 18px; height: 18px; flex-shrink: 0; }
+.fam-preview { background: var(--surface-2); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 14px; }
+.fam-foot { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; align-items: center; }
+.fam-err { color: var(--warn); font-size: 0.82rem; margin: 8px 0 0; min-height: 1em; }
 </style>
 </head>
 <body>
@@ -1608,6 +1631,7 @@ html.tv-mode #tv-root { display: block; }
   <div id="avatar-picker-root"></div>
   <div id="time-clock-root"></div>
   <div id="diagnostics-root"></div>
+  <div id="family-modal-root"></div>
   <div id="app">
     <aside class="sidebar" id="sidebar"></aside>
     <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
@@ -2419,7 +2443,7 @@ function participationState() { return state.participation || newParticipationSt
 // candidate list participationRows filters down, and also what backs the "Removed from Lists"
 // section's names (a hidden person still needs their name looked up to show "Add Antonio back").
 function participationCandidates() {
-  const staffRows = state.staff.slice().sort((a, b) => a.name.localeCompare(b.name))
+  const staffRows = state.staff.filter((s) => s.role !== "family").sort((a, b) => a.name.localeCompare(b.name))
     .map((s) => ({ id: s.id, name: s.name, isStaff: true, isHeadStaff: isHeadStaffRecord(s) }));
   const studentRows = activeRoster().map((s) => ({ id: s.id, name: s.first + " " + s.last, isStaff: false, isHeadStaff: false }));
   return staffRows.concat(studentRows);
@@ -3866,6 +3890,9 @@ const ROUTES = [
   // people as Time Clock) ever see or edit it -- everyone else's nav just skips straight from
   // Time Clock (or Today, if they don't have that either) to Admin.
   { id: "participation", label: "Lists", icon: "list", roles: ["teacher", "admin"], visible: (session) => isHeadStaff(session) },
+  // R. Aizik's family ledger (see VIEW: FAMILY). Shown only to a "family" login (which sees nothing
+  // else) or to staff given the familyAccess flag in Admin > Staff Accounts.
+  { id: "family", label: "Family", icon: "home", roles: ["teacher", "admin", "family"], visible: (session) => canSeeFamily(session) },
   { id: "admin", label: "Admin", icon: "gear", roles: ["admin"] },
   // Remote control for the hallway TV (see TV DISPLAY). Admin only. Its id is deliberately NOT "tv" -- "#tv" is the URL that puts a screen into TV mode.
   { id: "tvdisplay", label: "TV Display", icon: "tv", roles: ["admin"] },
@@ -3916,6 +3943,7 @@ function goToRoute(id) {
 /* ---------- icons ---------- */
 const ICONS = {
   tv: '<rect x="2" y="3" width="14" height="9.5" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.6"/><line x1="6" y1="15.3" x2="12" y2="15.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
+  home: '<path d="M2.5 8.5L9 3l6.5 5.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M4.5 7.5V15h9V7.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>',
   check: '<path d="M3 9l4 4 8-9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
   search: '<circle cx="7.5" cy="7.5" r="5.2" fill="none" stroke="currentColor" stroke-width="1.6"/><line x1="11.3" y1="11.3" x2="15.5" y2="15.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
   coin: '<circle cx="9" cy="9" r="7" fill="none" stroke="currentColor" stroke-width="1.6"/><text x="9" y="12.5" font-size="8" text-anchor="middle" fill="currentColor" font-family="serif">T</text>',
@@ -4027,7 +4055,7 @@ function renderShell(session, previewing) {
     : '<div class="mode-pill"><span class="dot"></span>Read-only view</div>';
   const person = session.type === "staff" ? session.record.name : (session.record.first + " " + session.record.last);
   const roleLabel = session.type === "staff"
-    ? (session.record.role === "admin" ? "Admin" : session.record.role === "limited" ? "Limited Staff" : "Teacher")
+    ? (session.record.role === "admin" ? "Admin" : session.record.role === "limited" ? "Limited Staff" : session.record.role === "family" ? "Family" : "Teacher")
     : "Student";
   // Your own avatar chip doubles as the button that opens the avatar picker (see
   // renderAvatarPickerModal) -- your own photo if you've picked one, a default face for your
@@ -8092,7 +8120,7 @@ function renderAdminStaff(root) {
     '<div class="field"><label for="st-name">Name</label><input type="text" id="st-name"></div>' +
     '<div class="field"><label for="st-username">Username</label><input type="text" id="st-username"></div>' +
     '<div class="field"><label for="st-password">Password</label>' + passwordFieldHtml("st-password", { placeholder: "leave blank to auto-generate" }) + "</div>" +
-    '<div class="field" style="max-width:170px;"><label for="st-role">Role</label><select id="st-role"><option value="teacher">Teacher</option><option value="admin">Admin</option><option value="limited">Limited (one class)</option></select></div>' +
+    '<div class="field" style="max-width:170px;"><label for="st-role">Role</label><select id="st-role"><option value="teacher">Teacher</option><option value="admin">Admin</option><option value="limited">Limited (one class)</option><option value="family">Family only</option></select></div>' +
     // Only meaningful for the "limited" role -- a single-class account (e.g. a cleaning person)
     // that should see nothing but its one restricted period. Hidden unless that role is picked
     // (see the st-role change listener below); state.settings.periods is a plain list of period
@@ -8101,7 +8129,7 @@ function renderAdminStaff(root) {
     state.settings.periods.map((p) => '<option value="' + escapeHtml(p) + '">' + escapeHtml(p) + "</option>").join("") +
     "</select></div>" +
     "</div><button class=\"btn btn-primary btn-sm\" id=\"st-add\">Add staff member</button>" +
-    '<p class="help-text" style="margin-top:12px;">Admins can set everything up here; teachers see Today, TAG Coins, and Reports — kept simple on purpose; a Limited account sees only Today, locked to the one class it\'s restricted to (nothing else in the app).</p>' +
+    '<p class="help-text" style="margin-top:12px;">Admins can set everything up here; teachers see Today, TAG Coins, and Reports — kept simple on purpose; a Limited account sees only Today, locked to the one class it\'s restricted to (nothing else in the app); a Family only account sees only the Family tab.</p>' +
     (showBulkStaffForm ? "" : '<button class="btn btn-ghost btn-sm" id="st-bulk-toggle" style="margin-top:12px;">Bulk add multiple staff…</button>') +
     "</div>";
 
@@ -8133,6 +8161,7 @@ function renderAdminStaff(root) {
         "<option value=\"teacher\"" + (s.role === "teacher" ? " selected" : "") + ">Teacher</option>" +
         "<option value=\"admin\"" + (s.role === "admin" ? " selected" : "") + ">Admin</option>" +
         "<option value=\"limited\"" + (s.role === "limited" ? " selected" : "") + ">Limited (one class)</option>" +
+        "<option value=\"family\"" + (s.role === "family" ? " selected" : "") + ">Family only</option>" +
         "</select>" +
         "<div id=\"st-edit-restricted-wrap-" + s.id + "\" style=\"margin-top:4px;display:" + (s.role === "limited" ? "" : "none") + ";\">" +
         "<select id=\"st-edit-restricted-" + s.id + "\">" +
@@ -8152,11 +8181,14 @@ function renderAdminStaff(root) {
         '<button class="btn btn-ghost btn-sm" data-edit-staff="' + s.id + '">Edit</button>' +
         '<button class="btn btn-ghost btn-sm" data-reset-staff="' + s.id + '">Reset password</button>' +
         '<button class="btn btn-ghost btn-sm" data-toggle-clock="' + s.id + '">' + (s.canClockInOut ? "Remove Time Clock access" : "Allow Time Clock access") + '</button>' +
+        (s.role === "family" ? "" : '<button class="btn btn-ghost btn-sm" data-toggle-family="' + s.id + '">' + (s.familyAccess ? "Remove Family tab" : "Allow Family tab") + '</button>') +
         '<button class="btn btn-ghost btn-sm" data-delete-staff="' + s.id + '" style="color:var(--warn);">Delete</button>';
     html += "<tr><td>" + escapeHtml(s.name) + '</td><td class="num">' + escapeHtml(s.username) + '</td><td class="num">' + passwordCellHtml(s.password, "staff:" + s.id) +
       '</td><td>' + (s.role === "admin" ? '<span class="pill pill-gold">Admin</span>'
         : s.role === "limited" ? '<span class="pill pill-muted">Limited: ' + escapeHtml(s.restrictedPeriod || "?") + "</span>"
+        : s.role === "family" ? '<span class="pill pill-muted">Family only</span>'
         : '<span class="pill pill-muted">Teacher</span>') +
+      (s.familyAccess && s.role !== "family" ? ' <span class="pill pill-good" title="Sees the Family tab">Family</span>' : "") +
       (s.canClockInOut ? ' <span class="pill pill-good" title="Sees a clock icon next to their profile to clock in/out, plus a Time Clock tab in their own nav with the full combined log">⏱ Time Clock</span>' : "") +
       '</td><td class="num">' + num2(staffStats(s.id).balance) + "</td>" +
       '<td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' + actions + "</td></tr>";
@@ -8210,6 +8242,14 @@ function renderAdminStaff(root) {
     s.canClockInOut = !s.canClockInOut;
     const res = await saveState(newState);
     if (res.ok || res.local) { toast(s.canClockInOut ? s.name + " can now clock in/out from a clock icon near their profile." : s.name + " no longer has Time Clock access.", "good"); renderAll(); }
+  }));
+  root.querySelectorAll("[data-toggle-family]").forEach((btn) => btn.addEventListener("click", async () => {
+    const id = btn.getAttribute("data-toggle-family");
+    const flip = (base) => { const ns = JSON.parse(JSON.stringify(base)); const s = (ns.staff || []).find((x) => x.id === id); if (s) s.familyAccess = !s.familyAccess; return ns; };
+    const next = flip(state);
+    const s = next.staff.find((x) => x.id === id);
+    const res = await saveState(next, { retry: flip });
+    if (res.ok || res.local) { toast(s.familyAccess ? s.name + " now sees the Family tab." : s.name + " no longer sees the Family tab.", "good"); renderAll(); }
   }));
   root.querySelectorAll("[data-delete-staff]").forEach((btn) => btn.addEventListener("click", () => {
     confirmDeleteStaffId = btn.getAttribute("data-delete-staff");
@@ -10245,6 +10285,479 @@ function renderParticipation(root, session) {
 }
 
 /* ================================================================
+   VIEW: FAMILY -- R. Aizik's ledger for his boys: money he's holding for them, and screen-time
+   credit they earn by learning (Tanya, the Bar Mitzvah Maamer, Parsha points).
+
+   Design rules:
+   1. Its data lives in its OWN doc (app/family), never in app/state and never through
+      saveState() -- same reasoning as the TV docs below: app/state is near its size limit and
+      _rev-contended, and nothing here should ever cause a conflict for attendance.
+   2. Only staff with role "family" (a family-only login: sees this tab and nothing else) or
+      with the familyAccess flag (Admin > Staff Accounts) get the tab. That is UI-only hiding --
+      every client shares the one service login, so anyone determined could still read the doc.
+      Agreed as fine for now; real privacy needs per-person Firebase Auth + rules.
+   3. Every write is a transaction that re-applies the change to the freshest copy, so two
+      parents saving at once never wipe each other's entries.
+   Amounts: money entries are in cents, screen entries in minutes (negative = spent/used).
+   ================================================================ */
+const FAMILY_DOC = db.collection("app").doc("family");
+const FAMILY_KIDS = [{ id: "mendu", name: "Mendu" }, { id: "chaikel", name: "Chaikel" }, { id: "getzel", name: "Getzel" }];
+const FAMILY_DEVICES = ["Switch", "Mommy's phone", "Big screen", "Computer", "iPad", "Other"];
+const FAMILY_KID_KEY = "tag_family_kid_v1";
+let familyData = null; // { entries: [], learning: [] } once the first snapshot arrives
+let familyListening = false;
+let familyLoadError = false;
+let familyKid = (function () { try { const k = localStorage.getItem(FAMILY_KID_KEY); return FAMILY_KIDS.some((x) => x.id === k) ? k : "mendu"; } catch (e) { return "mendu"; } })();
+let familyFilter = "all";
+let familyLimit = 40;
+
+function canSeeFamily(session) { return !!(session && session.type === "staff" && (session.record.role === "family" || session.record.familyAccess)); }
+function familyKidName(id) { const k = FAMILY_KIDS.find((x) => x.id === id); return k ? k.name : id; }
+function ensureFamilyListener() {
+  if (familyListening) return;
+  familyListening = true;
+  let retryDelay = 2000;
+  function subscribe() {
+    FAMILY_DOC.onSnapshot((snap) => {
+      retryDelay = 2000;
+      familyLoadError = false;
+      const d = snap.exists ? snap.data() : {};
+      familyData = { entries: d.entries || [], learning: d.learning || [] };
+      refreshViewOrDefer();
+    }, (err) => {
+      console.error("Family sync error:", err);
+      familyLoadError = true;
+      refreshViewOrDefer();
+      setTimeout(subscribe, retryDelay);
+      retryDelay = Math.min(retryDelay * 2, 30000);
+    });
+  }
+  subscribe();
+}
+async function familySave(mutate, okMsg) {
+  if (!canWrite) { toast("Read-only view — changes here won’t be saved.", "warn"); return false; }
+  try {
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(FAMILY_DOC);
+      const cur = snap.exists ? snap.data() : {};
+      const draft = JSON.parse(JSON.stringify({ entries: cur.entries || [], learning: cur.learning || [] }));
+      const next = mutate(draft) || draft;
+      tx.set(FAMILY_DOC, { entries: next.entries, learning: next.learning, _rev: (cur._rev || 0) + 1, updatedAt: Date.now() });
+    });
+    if (okMsg) toast(okMsg, "good");
+    return true;
+  } catch (e) {
+    console.error("Family save failed:", e);
+    toast("Couldn’t save — check your connection and try again." + (e && e.code === "permission-denied" ? " (The database refused the write.)" : ""), "warn");
+    return false;
+  }
+}
+
+function famMoney(c, signed) { const s = c < 0 ? "−" : (signed && c > 0 ? "+" : ""); return s + "$" + (Math.abs(c) / 100).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+function famMins(m, signed) { const s = m < 0 ? "−" : (signed && m > 0 ? "+" : ""); m = Math.abs(Math.round(m)); const h = Math.floor(m / 60), r = m % 60; return s + (h ? h + "h" + (r ? " " + r + "m" : "") : r + "m"); }
+function famToday() { const d = new Date(appNow()); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+function famDate(iso) { if (!iso) return "From the old sheet"; const p = iso.split("-").map(Number); return new Date(p[0], p[1] - 1, p[2]).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }); }
+function famNum(v) { const n = parseFloat(String(v).replace(/[^0-9.\-]/g, "")); return isFinite(n) ? n : 0; }
+// Hebrew month of a date, for the once-a-month Perek review. key ("5787-Heshvan") is what's
+// compared; label is what's shown, spelled the way the family writes it.
+const FAM_HEB_NAMES = { Heshvan: "Cheshvan", Tishri: "Tishrei", Tamuz: "Tammuz" };
+function famHeb(date) {
+  try {
+    const p = new Intl.DateTimeFormat("en-u-ca-hebrew", { month: "long", year: "numeric", day: "numeric" }).formatToParts(date || new Date());
+    const g = (t) => (p.find((x) => x.type === t) || {}).value;
+    return { key: g("year") + "-" + g("month"), label: FAM_HEB_NAMES[g("month")] || g("month"), year: g("year"), day: g("day") };
+  } catch (e) { return { key: "", label: "", year: "", day: "" }; }
+}
+function famTotals(kid) {
+  let cash = 0, owed = 0, screen = 0;
+  (familyData ? familyData.entries : []).forEach((e) => {
+    if (e.kid !== kid) return;
+    if (e.kind === "money") { if (e.pending) owed += e.amount; else cash += e.amount; }
+    else if (e.kind === "screen") screen += e.amount;
+  });
+  return { cash, owed, money: cash + owed, screen };
+}
+
+// The earning rules, as the family set them. Each calc returns screen minutes and money cents.
+const FAMILY_RULES = [
+  { id: "tanya_new", label: "New Tanya lines by heart", fields: ["lines", "item"], calc: (v) => ({ screen: 60 * v.lines, money: 25 * v.lines, why: v.lines + " line" + (v.lines === 1 ? "" : "s") + " × 1 hour, × $0.25" }) },
+  { id: "tanya_time", label: "Time spent learning Tanya", fields: ["time", "item"], calc: (v) => ({ screen: v.time, why: "Same as time spent" }) },
+  { id: "perek_review", label: "Monthly review of a full Perek", fields: ["completeItem", "reviewLines"], calc: (v) => ({ screen: 60, money: 5 * v.lines, why: "1 hour, plus " + v.lines + " line" + (v.lines === 1 ? "" : "s") + " × $0.05" }) },
+  { id: "perek_perfect", label: "Full Perek with 0 mistakes (first time)", fields: ["completeItem"], calc: () => ({ screen: 180, why: "3 hours, one time per Perek" }) },
+  { id: "maamer_time", label: "Time spent on Bar Mitzvah Maamer", fields: ["time"], calc: (v) => ({ screen: 2 * v.time, why: "Time spent × 2" }) },
+  { id: "maamer_new", label: "New Maamer paragraph", fields: ["paras"], calc: (v) => ({ screen: 120 * v.paras, why: v.paras + " paragraph" + (v.paras === 1 ? "" : "s") + " × 2 hours" }) },
+  { id: "maamer_review", label: "Daily Maamer review", fields: ["reviewParas", "testedNew"], calc: (v) => ({ screen: (v.tested ? 5 : 1) * v.paras, why: v.paras + " paragraph" + (v.paras === 1 ? "" : "s") + " × " + (v.tested ? "5 minutes (new paragraph tested today)" : "1 minute") }) },
+  { id: "parsha", label: "Parsha points", fields: ["points"], calc: (v) => ({ screen: Math.round(v.points / 20), why: "100 points = 5 minutes" }) },
+  { id: "other", label: "Something else", fields: ["time", "note"], calc: (v) => ({ screen: v.time, why: "Custom amount" }) },
+];
+
+function renderFamily(root, session) {
+  ensureFamilyListener();
+  const heb = famHeb();
+  let html = '<div class="page-head"><div><span class="eyebrow">Family' + (heb.label ? " · " + escapeHtml(heb.day + " " + heb.label + " " + heb.year) : "") + '</span><h1>The Boys’ Ledger</h1>' +
+    '<p>Money held for the boys, and the screen time they earn by learning.</p></div></div>';
+  if (familyLoadError && !familyData) { root.innerHTML = html + '<div class="banner banner-warn">Couldn’t load the family ledger. Check your connection; it will keep retrying.</div>'; return; }
+  if (!familyData) { root.innerHTML = html + '<p class="help-text">Loading…</p>'; return; }
+  if (!canWrite) html += '<div class="banner banner-warn">Read-only view — changes here won’t be saved.</div>';
+  if (!familyData.entries.length && !familyData.learning.length) {
+    html += '<div class="card card-pad"><div class="section-title">Load your data</div>' +
+      '<p class="help-text" style="margin-top:-6px;">Pick the <code>boys-ledger-backup.json</code> file to bring over everything from the Claude version: all money entries, screen-time balances and learning items.</p>' +
+      (canWrite ? '<input type="file" id="fam-import" accept=".json,application/json" style="margin-top:8px;">' : "") + "</div>";
+  }
+  html += '<div class="admin-tabs">' + FAMILY_KIDS.map((k) => {
+    const t = famTotals(k.id);
+    return '<button class="admin-tab' + (familyKid === k.id ? " active" : "") + '" data-fam-kid="' + k.id + '">' + k.name + ' <span class="num" style="font-weight:500;">' + famMoney(t.money) + "</span></button>";
+  }).join("") + "</div>";
+  const t = famTotals(familyKid);
+  html += '<div class="grid-stats">' +
+    '<div class="stat-tile"><div class="label">Money</div><div class="value' + (t.money < 0 ? " warn" : "") + '">' + famMoney(t.money) + '</div><div class="sub">' +
+      (t.owed ? famMoney(t.cash) + " held · " + famMoney(t.owed) + " still owed to him" : "All held by you") + "</div></div>" +
+    '<div class="stat-tile"><div class="label">Screen time</div><div class="value' + (t.screen < 0 ? " warn" : " good") + '">' + famMins(t.screen) + '</div><div class="sub">' +
+      (t.screen < 0 ? "Paying it off — no screen time until he’s back above zero" : "Available to use") + "</div></div></div>";
+  if (canWrite) {
+    html += '<div class="fam-actions">' +
+      '<button class="btn btn-primary" data-fam-act="learn">Log learning</button>' +
+      '<button class="btn btn-ghost" data-fam-act="use">Screen time used</button>' +
+      '<button class="btn btn-ghost" data-fam-act="in">Money received</button>' +
+      '<button class="btn btn-ghost" data-fam-act="out">Money spent</button></div>';
+  }
+  // Learning
+  const items = familyData.learning.filter((i) => i.kid === familyKid).sort((a, b) => (a.order || 0) - (b.order || 0));
+  html += '<div class="card card-pad"><div class="section-title" style="justify-content:space-between;">Learning' +
+    (canWrite ? '<button class="btn btn-ghost btn-sm" data-fam-add-item>Add item</button>' : "") + "</div>";
+  html += items.length ? '<div class="fam-list">' + items.map((it) => {
+    let badges = "";
+    if (it.complete) {
+      badges += it.lastReviewKey === heb.key ? '<span class="pill pill-good">Reviewed ' + escapeHtml(it.lastReviewLabel) + "</span>"
+        : '<span class="pill pill-caution">Review due' + (it.lastReviewLabel ? " · last " + escapeHtml(it.lastReviewLabel) : "") + "</span>";
+      if (it.perfect) badges += '<span class="pill pill-good">0 mistakes ✓</span>';
+    } else badges += '<span class="pill pill-muted">In progress</span>';
+    return '<button type="button" class="fam-row" data-fam-item="' + escapeHtml(it.id) + '"' + (canWrite ? "" : " disabled") + '><span class="fam-main"><span class="fam-title" dir="auto">' + escapeHtml(it.title) + "</span>" +
+      (it.progress ? '<span class="fam-sub" dir="auto">' + escapeHtml(it.progress) + "</span>" : "") + '</span><span class="fam-badges">' + badges + "</span></button>";
+  }).join("") + "</div>" : '<p class="help-text">Nothing here yet. Add what he’s learning so you can track reviews.</p>';
+  html += "</div>";
+  // History
+  let list = familyData.entries.filter((e) => e.kid === familyKid).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  if (familyFilter === "money") list = list.filter((e) => e.kind === "money");
+  if (familyFilter === "screen") list = list.filter((e) => e.kind === "screen");
+  if (familyFilter === "owed") list = list.filter((e) => e.pending);
+  html += '<div class="card card-pad"><div class="section-title">History</div><div class="fam-chips">' +
+    [["all", "All"], ["money", "Money"], ["screen", "Screen time"], ["owed", "Owed to him"]].map((f) => '<button class="btn btn-sm ' + (familyFilter === f[0] ? "btn-primary" : "btn-ghost") + '" data-fam-filter="' + f[0] + '">' + f[1] + "</button>").join("") + "</div>";
+  html += list.length ? '<div class="fam-list">' + list.slice(0, familyLimit).map((e) => {
+    const isM = e.kind === "money";
+    const sub = [famDate(e.date), e.device, e.rule].filter(Boolean).map(escapeHtml).join(" · ");
+    return '<button type="button" class="fam-row" data-fam-entry="' + escapeHtml(e.id) + '"' + (canWrite ? "" : " disabled") + '><span class="fam-main"><span class="fam-title" dir="auto">' + escapeHtml(e.note || (isM ? "No description" : "Screen time")) +
+      (e.pending ? ' <span class="pill pill-caution">Owed</span>' : "") + '</span><span class="fam-sub">' + (isM ? "Money" : "Screen time") + " · " + sub + "</span></span>" +
+      '<span class="fam-amt num ' + (e.amount < 0 ? "is-neg" : "is-pos") + '">' + (isM ? famMoney(e.amount, true) : famMins(e.amount, true)) + "</span></button>";
+  }).join("") + "</div>" + (list.length > familyLimit ? '<button class="btn btn-ghost btn-sm" data-fam-more style="margin-top:10px;">Show ' + (list.length - familyLimit) + " more</button>" : "")
+    : '<p class="help-text">No entries yet.</p>';
+  html += "</div>";
+  html += '<div class="card card-pad"><details><summary class="section-title" style="margin:0;cursor:pointer;">Screen-time rules</summary><ul class="fam-rules">' +
+    "<li>New line of Tanya by heart: 1 hour, plus $0.25 a line. Tanya in English counts the same (lines based on the Hebrew).</li>" +
+    "<li>Time spent learning earns the same amount of screen time.</li>" +
+    "<li>Full Perek review, once each Hebrew month: 1 hour, plus $0.05 a line.</li>" +
+    "<li>First full Perek with 0 mistakes: 3 hours, one time.</li>" +
+    "<li>Bar Mitzvah Maamer: time spent × 2. New paragraph: 2 hours (based on the Hebrew).</li>" +
+    "<li>Maamer daily review: 1 minute a paragraph, or 5 minutes a paragraph on a day a new paragraph was learned and tested.</li>" +
+    "<li>100 Parsha points = 5 minutes.</li>" +
+    "<li>Negative balance: no screen time until it’s paid off.</li></ul></details>" +
+    '<button class="btn btn-ghost btn-sm" data-fam-backup style="margin-top:12px;">Download a backup</button></div>';
+  root.innerHTML = html;
+
+  root.querySelectorAll("[data-fam-kid]").forEach((b) => b.addEventListener("click", () => {
+    familyKid = b.getAttribute("data-fam-kid"); familyLimit = 40;
+    try { localStorage.setItem(FAMILY_KID_KEY, familyKid); } catch (e) {}
+    renderFamily(root, session);
+  }));
+  root.querySelectorAll("[data-fam-filter]").forEach((b) => b.addEventListener("click", () => { familyFilter = b.getAttribute("data-fam-filter"); familyLimit = 40; renderFamily(root, session); }));
+  const more = root.querySelector("[data-fam-more]");
+  if (more) more.addEventListener("click", () => { familyLimit += 60; renderFamily(root, session); });
+  root.querySelector("[data-fam-backup]").addEventListener("click", famDownloadBackup);
+  const imp = root.querySelector("#fam-import");
+  if (imp) imp.addEventListener("change", () => famImport(imp.files && imp.files[0]));
+  if (!canWrite) return;
+  root.querySelectorAll("[data-fam-act]").forEach((b) => b.addEventListener("click", () => {
+    const a = b.getAttribute("data-fam-act");
+    if (a === "learn") famOpenLearn(session); else if (a === "use") famOpenUse(session); else famOpenMoney(session, a);
+  }));
+  root.querySelectorAll("[data-fam-entry]").forEach((b) => b.addEventListener("click", () => famOpenEntry(b.getAttribute("data-fam-entry"))));
+  root.querySelectorAll("[data-fam-item]").forEach((b) => b.addEventListener("click", () => famOpenItem(b.getAttribute("data-fam-item"))));
+  root.querySelector("[data-fam-add-item]").addEventListener("click", () => famOpenItem(null));
+}
+
+function famDownloadBackup() {
+  if (!familyData) return;
+  const out = { exported: new Date().toISOString(), entries: {}, learning: {} };
+  familyData.entries.forEach((e) => { const c = Object.assign({}, e); delete c.id; out.entries[e.id] = c; });
+  familyData.learning.forEach((i) => { const c = Object.assign({}, i); delete c.id; out.learning[i.id] = c; });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 1)], { type: "application/json" }));
+  a.download = "boys-ledger-backup-" + famToday() + ".json";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+// Accepts the backup format (entries/learning as {id: record} maps, as both the Claude version
+// and Download a backup write it) or plain arrays of records that carry their own id.
+async function famImport(file) {
+  if (!file) return;
+  let parsed;
+  try { parsed = JSON.parse(await file.text()); } catch (e) { toast("That file isn’t a ledger backup.", "warn"); return; }
+  const toList = (v) => Array.isArray(v) ? v.map((x) => Object.assign({ id: x.id || x._id || uid("fe") }, x)) : Object.keys(v || {}).map((id) => Object.assign({}, v[id], { id }));
+  const entries = toList(parsed.entries).map((e) => { delete e._id; return e; });
+  const learning = toList(parsed.learning).map((e) => { delete e._id; return e; });
+  if (!entries.length && !learning.length) { toast("That file has no entries in it.", "warn"); return; }
+  await familySave((d) => {
+    const haveE = new Set(d.entries.map((e) => e.id)), haveL = new Set(d.learning.map((e) => e.id));
+    entries.forEach((e) => { if (!haveE.has(e.id)) d.entries.push(e); });
+    learning.forEach((e) => { if (!haveL.has(e.id)) d.learning.push(e); });
+    return d;
+  }, "Loaded " + entries.length + " entries and " + learning.length + " learning items.");
+}
+
+/* ---------- family modals ---------- */
+function famCloseModal() { const r = document.getElementById("family-modal-root"); if (r) r.innerHTML = ""; }
+function famOpenModal(title, bodyHtml, onMount) {
+  const r = document.getElementById("family-modal-root");
+  if (!r) return;
+  r.innerHTML = '<div class="modal-backdrop" data-fam-backdrop><div class="modal fam-modal" role="dialog" aria-modal="true" aria-label="' + escapeHtml(title) + '">' +
+    '<div class="fam-modal-head"><div class="section-title" style="margin:0;">' + escapeHtml(title) + '</div><button class="btn btn-ghost btn-sm" data-fam-close aria-label="Close">✕</button></div>' +
+    bodyHtml + '<p class="fam-err" aria-live="polite"></p></div></div>';
+  const bd = r.querySelector("[data-fam-backdrop]");
+  bd.addEventListener("click", (e) => { if (e.target === bd || e.target.closest("[data-fam-close]")) famCloseModal(); });
+  onMount(bd.querySelector(".modal"));
+}
+function famKidSelect(id, sel) { return '<select id="' + id + '">' + FAMILY_KIDS.map((k) => '<option value="' + k.id + '"' + (k.id === sel ? " selected" : "") + ">" + k.name + "</option>").join("") + "</select>"; }
+function famErr(m, text) { const el = m.querySelector(".fam-err"); if (el) el.textContent = text; }
+function famNewEntries(list, session) {
+  const now = Date.now();
+  return list.map((e, i) => Object.assign({ id: uid("fe"), ts: now + i, by: session.record.id }, e));
+}
+function famItemsFor(kid, completeOnly) { return familyData.learning.filter((i) => i.kid === kid && (!completeOnly || i.complete)).sort((a, b) => (a.order || 0) - (b.order || 0)); }
+
+function famOpenLearn(session) {
+  const body = '<div class="field"><label for="fl-kid">For</label>' + famKidSelect("fl-kid", familyKid) + "</div>" +
+    '<div class="field"><label for="fl-rule">What did he do?</label><select id="fl-rule">' + FAMILY_RULES.map((r) => '<option value="' + r.id + '">' + escapeHtml(r.label) + "</option>").join("") + "</select></div>" +
+    '<div id="fl-fields"></div><div class="fam-preview" id="fl-prev"></div>' +
+    '<div class="field"><label for="fl-date">Date</label><input type="date" id="fl-date" value="' + famToday() + '"></div>' +
+    '<div class="fam-foot"><button class="btn btn-ghost btn-sm" data-fam-close>Cancel</button><button class="btn btn-primary btn-sm" id="fl-save">Add</button></div>';
+  famOpenModal("Log learning", body, (m) => {
+    const kidSel = m.querySelector("#fl-kid"), ruleSel = m.querySelector("#fl-rule"), fields = m.querySelector("#fl-fields");
+    let rule = FAMILY_RULES[0];
+    const val = (id) => { const el = m.querySelector("#" + id); return el ? famNum(el.value) : 0; };
+    const values = () => ({
+      lines: rule.id === "perek_review" ? val("ff-rlines") : val("ff-lines"),
+      time: val("ff-h") * 60 + val("ff-m"),
+      paras: rule.id === "maamer_review" ? val("ff-rparas") : val("ff-paras"),
+      points: val("ff-points"),
+      tested: !!(m.querySelector("#ff-tested") || {}).checked,
+    });
+    const pickedItem = () => { const s = m.querySelector("#ff-item"); return s && s.value ? familyData.learning.find((i) => i.id === s.value) : null; };
+    function update() {
+      const c = rule.calc(values()), it = pickedItem();
+      let warn = "";
+      if (rule.id === "perek_review" && it && it.lastReviewKey === famHeb(new Date((m.querySelector("#fl-date").value || famToday()) + "T12:00")).key) warn = "Already reviewed this month.";
+      if (rule.id === "perek_perfect" && it && it.perfect) warn = "This Perek already earned its 3 hours.";
+      m.querySelector("#fl-prev").innerHTML = "<strong>" + famMins(c.screen, true) + " screen time" + (c.money ? " · " + famMoney(c.money, true) : "") + '</strong><span class="help-text" style="display:block;">' + escapeHtml(c.why) + "</span>" +
+        (warn ? '<span class="help-text" style="display:block;color:var(--caution);">' + escapeHtml(warn) + "</span>" : "");
+    }
+    function draw() {
+      rule = FAMILY_RULES.find((r) => r.id === ruleSel.value);
+      const f = rule.fields;
+      let h = "";
+      const numField = (id, label, v) => '<div class="field"><label for="' + id + '">' + label + '</label><input type="number" inputmode="numeric" min="0" id="' + id + '" value="' + v + '"></div>';
+      if (f.includes("lines")) h += numField("ff-lines", "Number of new lines", 1);
+      if (f.includes("time")) h += '<div class="field-row"><div class="field" style="min-width:100px;"><label for="ff-h">Hours</label><input type="number" inputmode="numeric" min="0" id="ff-h" value="0"></div><div class="field" style="min-width:100px;"><label for="ff-m">Minutes</label><input type="number" inputmode="numeric" min="0" id="ff-m" value="30"></div></div>';
+      if (f.includes("item")) {
+        h += '<div class="field"><label for="ff-item">Which item (optional)</label><select id="ff-item"><option value="">None</option>' + famItemsFor(kidSel.value).map((i) => '<option value="' + escapeHtml(i.id) + '">' + escapeHtml(i.title) + "</option>").join("") + "</select></div>" +
+          '<div class="field"><label for="ff-progress">Now up to (optional)</label><input type="text" dir="auto" id="ff-progress" placeholder="e.g. דף ז׳ שורה 14"></div>';
+      }
+      if (f.includes("completeItem")) {
+        const its = famItemsFor(kidSel.value, true);
+        h += its.length ? '<div class="field"><label for="ff-item">Which Perek</label><select id="ff-item">' + its.map((i) => '<option value="' + escapeHtml(i.id) + '">' + escapeHtml(i.title) + "</option>").join("") + "</select></div>"
+          : '<p class="help-text">No finished Perakim yet for ' + familyKidName(kidSel.value) + '. Tap an item under Learning and tick “Finished” first.</p>';
+      }
+      if (f.includes("reviewLines")) h += numField("ff-rlines", "Lines reviewed (for $0.05 each)", 0);
+      if (f.includes("paras")) h += numField("ff-paras", "New paragraphs", 1);
+      if (f.includes("reviewParas")) h += numField("ff-rparas", "Paragraphs reviewed today", 1);
+      if (f.includes("testedNew")) h += '<label class="fam-check"><input type="checkbox" id="ff-tested"> Learned and tested on a new paragraph today</label>';
+      if (f.includes("points")) h += numField("ff-points", "Parsha points", 1000);
+      if (f.includes("note")) h += '<div class="field"><label for="ff-note">Description</label><input type="text" id="ff-note" placeholder="What was it for?"></div>';
+      fields.innerHTML = h;
+      update();
+    }
+    ruleSel.addEventListener("change", draw);
+    kidSel.addEventListener("change", draw);
+    m.addEventListener("input", update);
+    m.addEventListener("change", update);
+    draw();
+    m.querySelector("#fl-save").addEventListener("click", async () => {
+      const kid = kidSel.value, c = rule.calc(values()), it = pickedItem();
+      const date = m.querySelector("#fl-date").value || famToday();
+      if (rule.fields.includes("completeItem") && !it) { famErr(m, "Pick which Perek."); return; }
+      if (rule.id === "perek_perfect" && it && it.perfect) { famErr(m, "This Perek already earned its 3 hours."); return; }
+      if (!c.screen && !c.money) { famErr(m, "Enter an amount above zero."); return; }
+      const noteEl = m.querySelector("#ff-note");
+      const note = (noteEl && noteEl.value.trim()) || (it ? rule.label + ": " + it.title : rule.label);
+      const progEl = m.querySelector("#ff-progress");
+      const progress = progEl ? progEl.value.trim() : "";
+      const add = [];
+      if (c.screen) add.push({ kid, kind: "screen", amount: c.screen, note, date, rule: c.why });
+      if (c.money) add.push({ kid, kind: "money", amount: c.money, note: "Tanya Baal Peh" + (it ? ": " + it.title : ""), date, rule: c.why });
+      const newOnes = famNewEntries(add, session);
+      const reviewHeb = famHeb(new Date(date + "T12:00"));
+      const ok = await familySave((d) => {
+        d.entries.push(...newOnes);
+        const rec = it && d.learning.find((i) => i.id === it.id);
+        if (rec) {
+          if (rule.id === "perek_review") { rec.lastReviewKey = reviewHeb.key; rec.lastReviewLabel = reviewHeb.label; }
+          if (rule.id === "perek_perfect") rec.perfect = true;
+          if (progress) rec.progress = progress;
+        }
+        return d;
+      }, "Added " + famMins(c.screen, true) + " for " + familyKidName(kid) + ".");
+      if (ok) famCloseModal();
+    });
+  });
+}
+
+function famOpenUse(session) {
+  let device = "Switch";
+  const body = '<div class="field"><label for="fu-kid">Who</label>' + famKidSelect("fu-kid", familyKid) + "</div>" +
+    '<div class="field-row"><div class="field" style="min-width:100px;"><label for="fu-h">Hours</label><input type="number" inputmode="numeric" min="0" id="fu-h" value="0"></div><div class="field" style="min-width:100px;"><label for="fu-m">Minutes</label><input type="number" inputmode="numeric" min="0" id="fu-m" value="30"></div></div>' +
+    '<div class="field"><label>Device</label><div class="fam-chips">' + FAMILY_DEVICES.map((d) => '<button type="button" class="btn btn-sm ' + (d === device ? "btn-primary" : "btn-ghost") + '" data-dev="' + escapeHtml(d) + '">' + escapeHtml(d) + "</button>").join("") + "</div></div>" +
+    '<div class="field"><label for="fu-date">Date</label><input type="date" id="fu-date" value="' + famToday() + '"></div>' +
+    '<div class="field"><label for="fu-note">Note (optional)</label><input type="text" id="fu-note" placeholder="e.g. September total from the Switch app"></div>' +
+    '<p class="help-text" id="fu-after"></p>' +
+    '<div class="fam-foot"><button class="btn btn-ghost btn-sm" data-fam-close>Cancel</button><button class="btn btn-primary btn-sm" id="fu-save">Subtract</button></div>';
+  famOpenModal("Screen time used", body, (m) => {
+    const mins = () => famNum(m.querySelector("#fu-h").value) * 60 + famNum(m.querySelector("#fu-m").value);
+    const after = () => { m.querySelector("#fu-after").textContent = "Balance after: " + famMins(famTotals(m.querySelector("#fu-kid").value).screen - mins()); };
+    m.addEventListener("input", after); m.addEventListener("change", after); after();
+    m.querySelectorAll("[data-dev]").forEach((b) => b.addEventListener("click", () => {
+      device = b.getAttribute("data-dev");
+      m.querySelectorAll("[data-dev]").forEach((x) => { x.classList.toggle("btn-primary", x === b); x.classList.toggle("btn-ghost", x !== b); });
+    }));
+    m.querySelector("#fu-save").addEventListener("click", async () => {
+      const used = Math.round(mins());
+      if (used <= 0) { famErr(m, "Enter how much time was used."); return; }
+      const kid = m.querySelector("#fu-kid").value;
+      const e = famNewEntries([{ kid, kind: "screen", amount: -used, note: m.querySelector("#fu-note").value.trim() || "Screen time used", device, date: m.querySelector("#fu-date").value || famToday() }], session);
+      if (await familySave((d) => { d.entries.push(...e); return d; }, "Subtracted " + famMins(used) + " for " + familyKidName(kid) + ".")) famCloseModal();
+    });
+  });
+}
+
+function famOpenMoney(session, dir) {
+  const spend = dir === "out";
+  const body = '<div class="field"><label>For</label><div class="fam-chips">' + FAMILY_KIDS.map((k) => '<button type="button" class="btn btn-sm ' + (k.id === familyKid ? "btn-primary" : "btn-ghost") + '" data-k="' + k.id + '" aria-pressed="' + (k.id === familyKid) + '">' + k.name + "</button>").join("") + "</div></div>" +
+    '<div class="field"><label for="fm-amt">Amount ($)</label><input type="text" inputmode="decimal" id="fm-amt" placeholder="0.00"></div>' +
+    '<label class="fam-check" id="fm-split-wrap" hidden><input type="checkbox" id="fm-split"> Split this total between them (otherwise each one gets the full amount)</label>' +
+    '<div class="field"><label for="fm-note">Description</label><input type="text" id="fm-note" placeholder="' + (spend ? "e.g. Lego set" : "e.g. Birthday cash from Savta") + '"></div>' +
+    (spend ? "" : '<label class="fam-check"><input type="checkbox" id="fm-pend"> Not received yet: someone still owes this to him</label>') +
+    '<div class="field"><label for="fm-date">Date</label><input type="date" id="fm-date" value="' + famToday() + '"></div>' +
+    '<p class="help-text" id="fm-prev"></p>' +
+    '<div class="fam-foot"><button class="btn btn-ghost btn-sm" data-fam-close>Cancel</button><button class="btn btn-primary btn-sm" id="fm-save">' + (spend ? "Subtract" : "Add") + "</button></div>";
+  famOpenModal(spend ? "Money spent" : "Money received", body, (m) => {
+    const picked = () => Array.from(m.querySelectorAll("[data-k][aria-pressed=true]")).map((b) => b.getAttribute("data-k"));
+    const plan = () => {
+      const ids = picked(), total = Math.round(famNum(m.querySelector("#fm-amt").value) * 100);
+      const split = ids.length > 1 && m.querySelector("#fm-split").checked;
+      const per = split ? Math.floor(total / ids.length) : total, rem = split ? total - per * ids.length : 0;
+      return ids.map((k, i) => ({ kid: k, cents: per + (i < rem ? 1 : 0) }));
+    };
+    const upd = () => {
+      m.querySelector("#fm-split-wrap").hidden = picked().length < 2;
+      const p = plan();
+      m.querySelector("#fm-prev").textContent = p.length && p[0].cents ? p.map((x) => familyKidName(x.kid) + " " + famMoney(spend ? -x.cents : x.cents, true)).join(" · ") : "";
+    };
+    m.querySelectorAll("[data-k]").forEach((b) => b.addEventListener("click", () => {
+      const on = b.getAttribute("aria-pressed") !== "true";
+      b.setAttribute("aria-pressed", on); b.classList.toggle("btn-primary", on); b.classList.toggle("btn-ghost", !on); upd();
+    }));
+    m.addEventListener("input", upd); m.addEventListener("change", upd); upd();
+    m.querySelector("#fm-save").addEventListener("click", async () => {
+      const p = plan();
+      if (!p.length) { famErr(m, "Pick at least one boy."); return; }
+      if (!p[0].cents) { famErr(m, "Enter an amount."); return; }
+      const pend = !!(m.querySelector("#fm-pend") || {}).checked;
+      const note = m.querySelector("#fm-note").value.trim(), date = m.querySelector("#fm-date").value || famToday();
+      const e = famNewEntries(p.map((x) => Object.assign({ kid: x.kid, kind: "money", amount: spend ? -x.cents : x.cents, note, date }, pend ? { pending: true } : {})), session);
+      if (await familySave((d) => { d.entries.push(...e); return d; }, spend ? "Spending recorded." : "Money added.")) famCloseModal();
+    });
+  });
+}
+
+function famOpenEntry(id) {
+  const e = familyData.entries.find((x) => x.id === id);
+  if (!e) return;
+  const isM = e.kind === "money";
+  const body = '<p class="help-text" style="margin-top:-4px;">' + familyKidName(e.kid) + " · " + (isM ? "Money" : "Screen time") + (e.rule ? " · " + escapeHtml(e.rule) : "") + "</p>" +
+    '<div class="field"><label for="fe-note">Description</label><input type="text" dir="auto" id="fe-note" value="' + escapeHtml(e.note || "") + '"></div>' +
+    (isM ? '<div class="field"><label for="fe-amt">Amount ($, minus for spending)</label><input type="text" inputmode="decimal" id="fe-amt" value="' + (e.amount / 100).toFixed(2) + '"></div>'
+      : '<div class="field"><label for="fe-amt">Minutes (minus for time used)</label><input type="number" inputmode="numeric" id="fe-amt" value="' + e.amount + '"></div>') +
+    '<div class="field"><label for="fe-date">Date</label><input type="date" id="fe-date" value="' + escapeHtml(e.date || "") + '"></div>' +
+    (isM ? '<label class="fam-check"><input type="checkbox" id="fe-pend"' + (e.pending ? " checked" : "") + "> Still owed to him (not received yet)</label>" : "") +
+    '<div class="fam-foot"><button class="btn btn-danger btn-sm" id="fe-del">Delete</button><span style="flex:1;"></span>' +
+    (e.pending ? '<button class="btn btn-ghost btn-sm" id="fe-recv">Mark received</button>' : "") + '<button class="btn btn-primary btn-sm" id="fe-save">Save</button></div>';
+  famOpenModal("Edit entry", body, (m) => {
+    const patch = (fields, msg) => familySave((d) => { const r = d.entries.find((x) => x.id === id); if (r) Object.assign(r, fields); return d; }, msg).then((ok) => { if (ok) famCloseModal(); });
+    m.querySelector("#fe-save").addEventListener("click", () => {
+      const raw = famNum(m.querySelector("#fe-amt").value);
+      const f = { note: m.querySelector("#fe-note").value.trim(), amount: isM ? Math.round(raw * 100) : Math.round(raw), date: m.querySelector("#fe-date").value || null };
+      if (isM) f.pending = m.querySelector("#fe-pend").checked;
+      patch(f, "Saved.");
+    });
+    const recv = m.querySelector("#fe-recv");
+    if (recv) recv.addEventListener("click", () => patch({ pending: false }, "Marked received."));
+    const del = m.querySelector("#fe-del");
+    del.addEventListener("click", async () => {
+      if (!del.dataset.sure) { del.dataset.sure = "1"; del.textContent = "Tap again to delete"; return; }
+      if (await familySave((d) => { d.entries = d.entries.filter((x) => x.id !== id); return d; }, "Deleted.")) famCloseModal();
+    });
+  });
+}
+
+function famOpenItem(id) {
+  const it = id ? familyData.learning.find((x) => x.id === id) : null;
+  const heb = famHeb();
+  const body = (it ? "" : '<div class="field"><label for="fi-kid">For</label>' + famKidSelect("fi-kid", familyKid) + "</div>") +
+    '<div class="field"><label for="fi-title">Item</label><input type="text" dir="auto" id="fi-title" value="' + escapeHtml(it ? it.title : "") + '" placeholder="e.g. תניא – פרק ג׳"></div>' +
+    '<div class="field"><label for="fi-prog">Up to</label><input type="text" dir="auto" id="fi-prog" value="' + escapeHtml(it ? it.progress || "" : "") + '" placeholder="e.g. שורה 42"></div>' +
+    '<label class="fam-check"><input type="checkbox" id="fi-done"' + (it && it.complete ? " checked" : "") + "> Finished (whole Perek known; reviewed monthly)</label>" +
+    '<label class="fam-check"><input type="checkbox" id="fi-perf"' + (it && it.perfect ? " checked" : "") + "> Already earned the 0-mistakes bonus</label>" +
+    '<div class="field"><label for="fi-rev">Last review month</label><input type="text" id="fi-rev" value="' + escapeHtml(it ? it.lastReviewLabel || "" : "") + '" placeholder="e.g. ' + escapeHtml(heb.label) + '">' +
+    '<p class="help-text">Filled in for you when you log a Perek review.</p></div>' +
+    '<div class="fam-foot">' + (it ? '<button class="btn btn-danger btn-sm" id="fi-del">Delete</button><span style="flex:1;"></span>' : "") +
+    '<button class="btn btn-ghost btn-sm" data-fam-close>Cancel</button><button class="btn btn-primary btn-sm" id="fi-save">Save</button></div>';
+  famOpenModal(it ? "Edit learning item" : "Add learning item", body, (m) => {
+    m.querySelector("#fi-save").addEventListener("click", async () => {
+      const title = m.querySelector("#fi-title").value.trim();
+      if (!title) { famErr(m, "Give the item a name."); return; }
+      const rev = m.querySelector("#fi-rev").value.trim();
+      const fields = { title, progress: m.querySelector("#fi-prog").value.trim(), complete: m.querySelector("#fi-done").checked, perfect: m.querySelector("#fi-perf").checked, lastReviewLabel: rev };
+      // A typed month only counts as "reviewed this month" when it names the current one.
+      if (!it || rev !== (it.lastReviewLabel || "")) fields.lastReviewKey = rev && rev.toLowerCase() === heb.label.toLowerCase() ? heb.key : "";
+      let ok;
+      if (it) ok = await familySave((d) => { const r = d.learning.find((x) => x.id === id); if (r) Object.assign(r, fields); return d; }, "Saved.");
+      else {
+        const kid = m.querySelector("#fi-kid").value;
+        ok = await familySave((d) => {
+          const order = Math.max(0, ...d.learning.filter((i) => i.kid === kid).map((i) => i.order || 0)) + 1;
+          d.learning.push(Object.assign({ id: uid("fl"), kid, order }, fields));
+          return d;
+        }, "Added.");
+      }
+      if (ok) famCloseModal();
+    });
+    const del = m.querySelector("#fi-del");
+    if (del) del.addEventListener("click", async () => {
+      if (!del.dataset.sure) { del.dataset.sure = "1"; del.textContent = "Tap again to delete"; return; }
+      if (await familySave((d) => { d.learning = d.learning.filter((x) => x.id !== id); return d; }, "Deleted.")) famCloseModal();
+    });
+  });
+}
+
+/* ================================================================
    RENDER DISPATCH
    ================================================================ */
 function renderAll() {
@@ -10297,7 +10810,7 @@ function renderAll() {
   // building its HTML/wiring, so restoring it right after is safe).
   const savedCanWrite = canWrite;
   if (previewing) canWrite = false;
-  ({ today: renderToday, ledger: renderLedger, overview: renderOverview, leaderboard: renderLeaderboard, timeclock: renderAdminTimeClock, participation: renderParticipation, admin: renderAdmin, tvdisplay: renderTvControl, balance: renderMyBalance, chazzan: renderChazzanTab })[route](root, session);
+  ({ today: renderToday, ledger: renderLedger, overview: renderOverview, leaderboard: renderLeaderboard, timeclock: renderAdminTimeClock, participation: renderParticipation, admin: renderAdmin, tvdisplay: renderTvControl, balance: renderMyBalance, chazzan: renderChazzanTab, family: renderFamily })[route](root, session);
   canWrite = savedCanWrite;
   updateLiveScheduleBadge(); // reflect the last known poll result immediately, don't wait for the next tick
   wireStudentLinks(root);
