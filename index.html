@@ -10340,6 +10340,25 @@ async function migrateInlineAvatars() {
     return draft;
   });
 }
+// One-time: Shabbos Shacharis led solo used to pay 1 coin; it's now 2 (1 per half -- see
+// chazzanCoinsFor). Bring every earlier solo Shabbos Shacharis Chazzan entry still at 1 up to 2.
+// Splits already paid 1 each and are left alone. A settings flag makes it run exactly once, so a
+// later manual edit of one of these entries is never undone.
+async function migrateShabbosShacharisChazzan() {
+  if ((state.settings || {}).chazzanShabbosSolo2Done) return;
+  const isTarget = (tx, s) => {
+    if (tx.type !== "Chazzan Bonus" || Number(tx.amount) !== 1 || dayNameFor(tx.date) !== "Shabbos") return false;
+    if ((tx.period || periodFromChazzanLedgerId(tx.id)) !== "Shacharis") return false;
+    const pick = s.settings && s.settings.chazzan && s.settings.chazzan[tx.date] && s.settings.chazzan[tx.date].Shacharis;
+    return !!(pick && Array.isArray(pick.studentIds) && pick.studentIds.length === 1);
+  };
+  await saveEdit((draft) => {
+    if (draft.settings.chazzanShabbosSolo2Done) return draft;
+    (draft.ledger || []).forEach((tx) => { if (isTarget(tx, draft)) tx.amount = 2; });
+    draft.settings.chazzanShabbosSolo2Done = true;
+    return draft;
+  });
+}
 async function init() {
   if (TV_MODE) { initTv(); return; } // hallway TV: read-only, no login, no migrations, no sheet timers (see TV DISPLAY below)
   renderAll(); // shows the "Loading..." screen (state is still null at this point)
@@ -10359,6 +10378,7 @@ async function init() {
   }
   try { await migrateGcBonusLedgerEntries(); } catch (e) { console.error("GC Bonus migration failed:", e); }
   try { await migrateInlineAvatars(); } catch (e) { console.error("Avatar migration failed:", e); }
+  try { await migrateShabbosShacharisChazzan(); } catch (e) { console.error("Chazzan migration failed:", e); }
   renderAll();
   listenForLiveUpdates();
 }
