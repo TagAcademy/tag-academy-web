@@ -2547,16 +2547,19 @@ function chazzanPeriodsForDate(dateStr) {
 }
 // The flat, undivided coin amount for leading a tefilah solo. Maariv recorded against a
 // Friday's date is understood as that Friday NIGHT's Maariv (Kabbolas Shabbos, ushering in
-// Shabbos) -- worth a full coin like Shacharis, not the usual smaller weekday amount. Every
-// other period just pays its CHAZZAN_COIN_TABLE amount regardless of the day.
+// Shabbos) -- worth a full coin like Shacharis, not the usual smaller weekday amount. Shabbos
+// Shacharis is worth 2 in all: 1 for each half, so leading the whole thing solo earns both
+// halves (and a split pays 1 each -- see chazzanShareFor). Every other period just pays its
+// CHAZZAN_COIN_TABLE amount regardless of the day.
 function chazzanCoinsFor(period, dateStr) {
   if (period === "Maariv" && dayNameFor(dateStr) === "Friday") return 1;
+  if (period === "Shacharis" && dayNameFor(dateStr) === "Shabbos") return 2;
   return CHAZZAN_COIN_TABLE[period] || 0;
 }
 // The per-person coin amount when `slotCount` slots (real students and/or one CHAZZAN_OTHER)
 // shared a single tefilah between them. Shacharis has its own fixed half-share rather than
-// simply halving the full amount -- Shabbos Shacharis is much longer, so leading even half of
-// it is worth a full coin, the same as leading an entire weekday Shacharis solo (this applies
+// simply halving the full amount -- Shabbos Shacharis is much longer, so each half of it is
+// worth a full coin (2 for the whole), the same as leading an entire weekday Shacharis solo (this applies
 // whether the other half was a second real student or CHAZZAN_OTHER). Every other tefilah just
 // divides its flat table amount evenly between however many slots are filled.
 function chazzanShareFor(period, dateStr, slotCount) {
