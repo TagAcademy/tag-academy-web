@@ -10381,18 +10381,40 @@ function famTotals(kid) {
   return { cash, owed, money: cash + owed, screen };
 }
 
-// The earning rules, as the family set them. Each calc returns screen minutes and money cents.
-const FAMILY_RULES = [
-  { id: "tanya_new", label: "New Tanya lines by heart", fields: ["lines", "item"], calc: (v) => ({ screen: 60 * v.lines, money: 25 * v.lines, why: v.lines + " line" + (v.lines === 1 ? "" : "s") + " × 1 hour, × $0.25" }) },
-  { id: "tanya_time", label: "Time spent learning Tanya", fields: ["time", "item"], calc: (v) => ({ screen: v.time, why: "Same as time spent" }) },
-  { id: "perek_review", label: "Monthly review of a full Perek", fields: ["completeItem", "reviewLines"], calc: (v) => ({ screen: 60, money: 5 * v.lines, why: "1 hour, plus " + v.lines + " line" + (v.lines === 1 ? "" : "s") + " × $0.05" }) },
-  { id: "perek_perfect", label: "Full Perek with 0 mistakes (first time)", fields: ["completeItem"], calc: () => ({ screen: 180, why: "3 hours, one time per Perek" }) },
-  { id: "maamer_time", label: "Time spent on Bar Mitzvah Maamer", fields: ["time"], calc: (v) => ({ screen: 2 * v.time, why: "Time spent × 2" }) },
-  { id: "maamer_new", label: "New Maamer paragraph", fields: ["paras"], calc: (v) => ({ screen: 120 * v.paras, why: v.paras + " paragraph" + (v.paras === 1 ? "" : "s") + " × 2 hours" }) },
-  { id: "maamer_review", label: "Daily Maamer review", fields: ["reviewParas", "testedNew"], calc: (v) => ({ screen: (v.tested ? 5 : 1) * v.paras, why: v.paras + " paragraph" + (v.paras === 1 ? "" : "s") + " × " + (v.tested ? "5 minutes (new paragraph tested today)" : "1 minute") }) },
-  { id: "parsha", label: "Parsha points", fields: ["points"], calc: (v) => ({ screen: Math.round(v.points / 20), why: "100 points = 5 minutes" }) },
-  { id: "other", label: "Something else", fields: ["time", "note"], calc: (v) => ({ screen: v.time, why: "Custom amount" }) },
+// The Bar Mitzvah Maamer by its Hebrew paragraphs, in order: [perek, first words]. Learning in
+// Yiddish or English is still counted by these same Hebrew paragraphs.
+const MAAMER_PARAS = [
+  [1, "איתא במדרש תילים"], [1, "ולכאורה צריך להבין"], [1, "אך הענין הוא"], [1, "ופירוש \"מה שהוא עושה\""],
+  [1, "והנה אמרו רז\"ל"], [1, "וביאור הענין, דהנה כתיב"], [1, "כי הנה כתיב \"רם על כל גוים\""], [1, "וזהו \"כד סליק הקב\"ה לעילא\""],
+  [1, "ולכן כתיב \"ויקץ כישן\""], [1, "וזהו \"הבט משמים וראה\""], [1, "וזהו שאמר הכתוב \"נפתחו השמים\""], [1, "וזהו \"ומי כעמך ישראל\""],
+  [2, "וביאור הענין מעלת התורה"], [2, "להיות שורש ומקור העולמות"], [2, "וזהו שראשית \"עשרה מאמרות\""], [2, "אבל התורה קדמה לעולם"],
+  [2, "שענין בחינת המוחין"], [2, "ועל דרך זה יובן למעלה"], [2, "וזהו שמתחיל העץ חיים"], [2, "אבל מבחינת המוחין לא נמשך"],
+  [2, "והגם כי אמרו רז\"ל"], [2, "אבל \"אורייתא מחכמה נפקת\""],
+  [3, "וזהו שאמר ר' אליעזר"], [3, "שפירוש הקב\"ה הוא זו\"נ"], [3, "אבל ענין שהקב\"ה מניח תפילין"], [3, "ולכן הקטן"],
+  [3, "ונמצא מובן שענין התפילין"], [3, "ופירוש \"כאלו\""],
 ];
+const FAM_LANGS = ["Hebrew", "Yiddish", "English"];
+function famMaamerLabel(n) { const p = MAAMER_PARAS[n - 1]; return p ? "¶" + n + " · פרק " + famHebNum(p[0]) + " · " + p[1] : "Not started"; }
+// Hebrew numerals for Tanya's 53 chapters (15 and 16 are written ט״ו / ט״ז, never י״ה / י״ו).
+function famHebNum(n) {
+  const tens = ["", "י", "כ", "ל", "מ", "נ"], ones = ["", "א", "ב", "ג", "ד", "ה", "ו", "ז", "ח", "ט"];
+  if (n === 15) return "טו"; if (n === 16) return "טז";
+  return tens[Math.floor(n / 10)] + ones[n % 10];
+}
+function famParseHebNum(s) {
+  const v = { א: 1, ב: 2, ג: 3, ד: 4, ה: 5, ו: 6, ז: 7, ח: 8, ט: 9, י: 10, כ: 20, ל: 30, מ: 40, נ: 50 };
+  let n = 0; for (const ch of String(s || "")) n += v[ch] || 0; return n || null;
+}
+// Older items (from the sheet) only have a title; work out what they are from it.
+function famItemKind(it) { if (it.type) return it.type; if (/maamer|מאמר/i.test(it.title || "")) return "maamer"; if (/tanya|תניא/i.test(it.title || "")) return "tanya"; return "other"; }
+function famItemLang(it) { if (it.lang) return it.lang; return /english/i.test(it.title || "") ? "English" : /yiddish/i.test(it.title || "") ? "Yiddish" : "Hebrew"; }
+function famItemPerek(it) {
+  if (it.perek) return it.perek;
+  const h = (it.title || "").match(/פרק\s+([א-ת]+)/); if (h) return famParseHebNum(h[1]);
+  const e = (it.title || "").match(/chapter\s+(\d+)/i); return e ? +e[1] : null;
+}
+function famTanyaTitle(perek, lang) { return lang === "English" ? "Tanya English – Chapter " + perek : "תניא – פרק " + famHebNum(perek) + "׳"; }
+function famMaamerItem(kid, lang) { return familyData.learning.find((i) => i.kid === kid && famItemKind(i) === "maamer" && famItemLang(i) === lang) || null; }
 
 function renderFamily(root, session) {
   ensureFamilyListener();
@@ -10430,7 +10452,8 @@ function renderFamily(root, session) {
     (canWrite ? '<button class="btn btn-ghost btn-sm" data-fam-add-item>Add item</button>' : "") + "</div>";
   html += items.length ? '<div class="fam-list">' + items.map((it) => {
     let badges = "";
-    if (it.complete) {
+    if (famItemKind(it) === "maamer") badges += '<span class="pill pill-muted">' + ((it.maamerPara || 0) >= MAAMER_PARAS.length ? "Finished" : (it.maamerPara || 0) + " of " + MAAMER_PARAS.length + " paragraphs") + "</span>";
+    else if (it.complete) {
       badges += it.lastReviewKey === heb.key ? '<span class="pill pill-good">Reviewed ' + escapeHtml(it.lastReviewLabel) + "</span>"
         : '<span class="pill pill-caution">Review due' + (it.lastReviewLabel ? " · last " + escapeHtml(it.lastReviewLabel) : "") + "</span>";
       if (it.perfect) badges += '<span class="pill pill-good">0 mistakes ✓</span>';
@@ -10461,7 +10484,7 @@ function renderFamily(root, session) {
     "<li>Full Perek review, once each Hebrew month: 1 hour, plus $0.05 a line.</li>" +
     "<li>First full Perek with 0 mistakes: 3 hours, one time.</li>" +
     "<li>Bar Mitzvah Maamer: time spent × 2. New paragraph: 2 hours (based on the Hebrew).</li>" +
-    "<li>Maamer daily review: 1 minute a paragraph, or 5 minutes a paragraph on a day a new paragraph was learned and tested.</li>" +
+    "<li>Maamer daily review: 1 minute a paragraph, or 5 minutes a paragraph on a day a new paragraph was learned and tested (e.g. 17 paragraphs = 1h 25m).</li>" +
     "<li>100 Parsha points = 5 minutes.</li>" +
     "<li>Negative balance: no screen time until it’s paid off.</li></ul></details>" +
     '<button class="btn btn-ghost btn-sm" data-fam-backup style="margin-top:12px;">Download a backup</button></div>';
@@ -10537,87 +10560,170 @@ function famNewEntries(list, session) {
 }
 function famItemsFor(kid, completeOnly) { return familyData.learning.filter((i) => i.kid === kid && (!completeOnly || i.complete)).sort((a, b) => (a.order || 0) - (b.order || 0)); }
 
+// Log learning: pick Tanya, Maamer or Parsha, then what kind, and the award is worked out from
+// the family's rules. Each `plan` returns the screen minutes / money cents, a "why" line, and a
+// change to apply to the learning items (progress, review month, bonus) in the same save.
 function famOpenLearn(session) {
+  const seg = (name, opts, cur) => '<div class="fam-chips" data-seg="' + name + '">' + opts.map((o) => '<button type="button" class="btn btn-sm ' + (o[0] === cur ? "btn-primary" : "btn-ghost") + '" data-val="' + o[0] + '">' + o[1] + "</button>").join("") + "</div>";
+  const timeFields = (h, mm, label) => '<div class="field-row"><div class="field" style="min-width:100px;"><label for="fx-h">' + (label || "Time it took") + ' — hours</label><input type="number" inputmode="numeric" min="0" id="fx-h" value="' + h + '"></div><div class="field" style="min-width:100px;"><label for="fx-m">Minutes</label><input type="number" inputmode="numeric" min="0" id="fx-m" value="' + mm + '"></div></div>';
   const body = '<div class="field"><label for="fl-kid">For</label>' + famKidSelect("fl-kid", familyKid) + "</div>" +
-    '<div class="field"><label for="fl-rule">What did he do?</label><select id="fl-rule">' + FAMILY_RULES.map((r) => '<option value="' + r.id + '">' + escapeHtml(r.label) + "</option>").join("") + "</select></div>" +
-    '<div id="fl-fields"></div><div class="fam-preview" id="fl-prev"></div>' +
+    '<div class="field"><label>What did he do?</label><div id="fl-cat"></div></div>' +
+    '<div id="fl-sub"></div><div id="fl-fields"></div><div class="fam-preview" id="fl-prev"></div>' +
     '<div class="field"><label for="fl-date">Date</label><input type="date" id="fl-date" value="' + famToday() + '"></div>' +
     '<div class="fam-foot"><button class="btn btn-ghost btn-sm" data-fam-close>Cancel</button><button class="btn btn-primary btn-sm" id="fl-save">Add</button></div>';
   famOpenModal("Log learning", body, (m) => {
-    const kidSel = m.querySelector("#fl-kid"), ruleSel = m.querySelector("#fl-rule"), fields = m.querySelector("#fl-fields");
-    let rule = FAMILY_RULES[0];
+    const kidSel = m.querySelector("#fl-kid");
+    let cat = "tanya", sub = "new";
     const val = (id) => { const el = m.querySelector("#" + id); return el ? famNum(el.value) : 0; };
-    const values = () => ({
-      lines: rule.id === "perek_review" ? val("ff-rlines") : val("ff-lines"),
-      time: val("ff-h") * 60 + val("ff-m"),
-      paras: rule.id === "maamer_review" ? val("ff-rparas") : val("ff-paras"),
-      points: val("ff-points"),
-      tested: !!(m.querySelector("#ff-tested") || {}).checked,
-    });
-    const pickedItem = () => { const s = m.querySelector("#ff-item"); return s && s.value ? familyData.learning.find((i) => i.id === s.value) : null; };
-    function update() {
-      const c = rule.calc(values()), it = pickedItem();
-      let warn = "";
-      if (rule.id === "perek_review" && it && it.lastReviewKey === famHeb(new Date((m.querySelector("#fl-date").value || famToday()) + "T12:00")).key) warn = "Already reviewed this month.";
-      if (rule.id === "perek_perfect" && it && it.perfect) warn = "This Perek already earned its 3 hours.";
-      m.querySelector("#fl-prev").innerHTML = "<strong>" + famMins(c.screen, true) + " screen time" + (c.money ? " · " + famMoney(c.money, true) : "") + '</strong><span class="help-text" style="display:block;">' + escapeHtml(c.why) + "</span>" +
-        (warn ? '<span class="help-text" style="display:block;color:var(--caution);">' + escapeHtml(warn) + "</span>" : "");
-    }
-    function draw() {
-      rule = FAMILY_RULES.find((r) => r.id === ruleSel.value);
-      const f = rule.fields;
+    const sel = (id) => { const el = m.querySelector("#" + id); return el ? el.value : ""; };
+    const checked = (id) => !!(m.querySelector("#" + id) || {}).checked;
+    const time = () => Math.round(val("fx-h") * 60 + val("fx-m"));
+    const dateHeb = () => famHeb(new Date((m.querySelector("#fl-date").value || famToday()) + "T12:00"));
+    const tanyaItems = (kid, done) => famItemsFor(kid).filter((i) => famItemKind(i) === "tanya" && !!i.complete === done);
+
+    function drawFields() {
+      const kid = kidSel.value;
+      m.querySelector("#fl-cat").innerHTML = seg("cat", [["tanya", "Tanya"], ["maamer", "Maamer"], ["parsha", "Parsha"]], cat);
+      const subs = cat === "tanya" ? [["new", "New lines"], ["review", "Review a Perek"]] : cat === "maamer" ? [["new", "New paragraph"], ["review", "Daily review"]] : null;
+      m.querySelector("#fl-sub").innerHTML = subs ? '<div class="field">' + seg("sub", subs, sub) + "</div>" : "";
       let h = "";
-      const numField = (id, label, v) => '<div class="field"><label for="' + id + '">' + label + '</label><input type="number" inputmode="numeric" min="0" id="' + id + '" value="' + v + '"></div>';
-      if (f.includes("lines")) h += numField("ff-lines", "Number of new lines", 1);
-      if (f.includes("time")) h += '<div class="field-row"><div class="field" style="min-width:100px;"><label for="ff-h">Hours</label><input type="number" inputmode="numeric" min="0" id="ff-h" value="0"></div><div class="field" style="min-width:100px;"><label for="ff-m">Minutes</label><input type="number" inputmode="numeric" min="0" id="ff-m" value="30"></div></div>';
-      if (f.includes("item")) {
-        h += '<div class="field"><label for="ff-item">Which item (optional)</label><select id="ff-item"><option value="">None</option>' + famItemsFor(kidSel.value).map((i) => '<option value="' + escapeHtml(i.id) + '">' + escapeHtml(i.title) + "</option>").join("") + "</select></div>" +
-          '<div class="field"><label for="ff-progress">Now up to (optional)</label><input type="text" dir="auto" id="ff-progress" placeholder="e.g. דף ז׳ שורה 14"></div>';
+      if (cat === "tanya" && sub === "new") {
+        const its = tanyaItems(kid, false);
+        h += '<div class="field"><label for="ft-item">Which Perek</label><select id="ft-item">' + its.map((i) => '<option value="' + escapeHtml(i.id) + '">' + escapeHtml(i.title) + (i.progress ? " — " + escapeHtml(i.progress) : "") + "</option>").join("") +
+          '<option value="__new">Start another Perek…</option></select></div>' +
+          '<div class="field-row" id="ft-newwrap" hidden><div class="field"><label for="ft-perek">Perek</label><select id="ft-perek">' +
+          Array.from({ length: 53 }, (_, i) => '<option value="' + (i + 1) + '">פרק ' + famHebNum(i + 1) + " (" + (i + 1) + ")</option>").join("") + "</select></div>" +
+          '<div class="field"><label for="ft-lang">Language</label><select id="ft-lang"><option>Hebrew</option><option>English</option></select></div></div>' +
+          '<div class="field"><label for="ft-lines">New lines by heart</label><input type="number" inputmode="numeric" min="0" id="ft-lines" value="1"></div>' +
+          timeFields(0, 0, "Time spent learning") +
+          '<div class="field"><label for="ft-prog">Now up to</label><input type="text" dir="auto" id="ft-prog" placeholder="e.g. דף ז׳ שורה 14"></div>' +
+          '<label class="fam-check"><input type="checkbox" id="ft-done"> He now knows the whole Perek</label>';
+      } else if (cat === "tanya") {
+        const its = tanyaItems(kid, true);
+        h += its.length ? '<div class="field"><label for="ft-item">Which Perek did he review?</label><select id="ft-item">' + its.map((i) => '<option value="' + escapeHtml(i.id) + '">' + escapeHtml(i.title) + (i.lastReviewLabel ? " — last reviewed " + escapeHtml(i.lastReviewLabel) : "") + "</option>").join("") + "</select></div>" +
+          '<div class="field"><label for="ft-rlines">Lines reviewed ($0.05 each)</label><input type="number" inputmode="numeric" min="0" id="ft-rlines" value="0"></div>' +
+          timeFields(0, 0, "Time spent") + '<div id="ft-perfwrap"></div>'
+          : '<p class="help-text">' + familyKidName(kid) + " doesn’t know a whole Perek yet. When he finishes one, tick “He now knows the whole Perek” under New lines.</p>";
+      } else if (cat === "maamer") {
+        h += '<div class="field"><label for="fm-lang">Language</label><select id="fm-lang">' + FAM_LANGS.map((l) => "<option>" + l + "</option>").join("") + "</select></div>";
+        h += '<div id="fm-inner"></div>';
+      } else {
+        h += '<div class="field"><label for="fp-points">Parsha points</label><input type="number" inputmode="numeric" min="0" id="fp-points" value="1000"></div>';
       }
-      if (f.includes("completeItem")) {
-        const its = famItemsFor(kidSel.value, true);
-        h += its.length ? '<div class="field"><label for="ff-item">Which Perek</label><select id="ff-item">' + its.map((i) => '<option value="' + escapeHtml(i.id) + '">' + escapeHtml(i.title) + "</option>").join("") + "</select></div>"
-          : '<p class="help-text">No finished Perakim yet for ' + familyKidName(kidSel.value) + '. Tap an item under Learning and tick “Finished” first.</p>';
-      }
-      if (f.includes("reviewLines")) h += numField("ff-rlines", "Lines reviewed (for $0.05 each)", 0);
-      if (f.includes("paras")) h += numField("ff-paras", "New paragraphs", 1);
-      if (f.includes("reviewParas")) h += numField("ff-rparas", "Paragraphs reviewed today", 1);
-      if (f.includes("testedNew")) h += '<label class="fam-check"><input type="checkbox" id="ff-tested"> Learned and tested on a new paragraph today</label>';
-      if (f.includes("points")) h += numField("ff-points", "Parsha points", 1000);
-      if (f.includes("note")) h += '<div class="field"><label for="ff-note">Description</label><input type="text" id="ff-note" placeholder="What was it for?"></div>';
-      fields.innerHTML = h;
+      m.querySelector("#fl-fields").innerHTML = h;
+      if (cat === "maamer") drawMaamer();
+      if (cat === "tanya" && sub === "review") drawPerfect();
       update();
     }
-    ruleSel.addEventListener("change", draw);
-    kidSel.addEventListener("change", draw);
-    m.addEventListener("input", update);
-    m.addEventListener("change", update);
-    draw();
-    m.querySelector("#fl-save").addEventListener("click", async () => {
-      const kid = kidSel.value, c = rule.calc(values()), it = pickedItem();
-      const date = m.querySelector("#fl-date").value || famToday();
-      if (rule.fields.includes("completeItem") && !it) { famErr(m, "Pick which Perek."); return; }
-      if (rule.id === "perek_perfect" && it && it.perfect) { famErr(m, "This Perek already earned its 3 hours."); return; }
-      if (!c.screen && !c.money) { famErr(m, "Enter an amount above zero."); return; }
-      const noteEl = m.querySelector("#ff-note");
-      const note = (noteEl && noteEl.value.trim()) || (it ? rule.label + ": " + it.title : rule.label);
-      const progEl = m.querySelector("#ff-progress");
-      const progress = progEl ? progEl.value.trim() : "";
-      const add = [];
-      if (c.screen) add.push({ kid, kind: "screen", amount: c.screen, note, date, rule: c.why });
-      if (c.money) add.push({ kid, kind: "money", amount: c.money, note: "Tanya Baal Peh" + (it ? ": " + it.title : ""), date, rule: c.why });
-      const newOnes = famNewEntries(add, session);
-      const reviewHeb = famHeb(new Date(date + "T12:00"));
-      const ok = await familySave((d) => {
-        d.entries.push(...newOnes);
-        const rec = it && d.learning.find((i) => i.id === it.id);
-        if (rec) {
-          if (rule.id === "perek_review") { rec.lastReviewKey = reviewHeb.key; rec.lastReviewLabel = reviewHeb.label; }
-          if (rule.id === "perek_perfect") rec.perfect = true;
-          if (progress) rec.progress = progress;
+    function drawMaamer() {
+      const inner = m.querySelector("#fm-inner"); if (!inner) return;
+      const it = famMaamerItem(kidSel.value, sel("fm-lang"));
+      const at = (it && it.maamerPara) || 0;
+      let h = '<p class="help-text" style="margin:-8px 0 12px;">Holding at: ' + escapeHtml(famMaamerLabel(at)) + " (" + at + " of " + MAAMER_PARAS.length + ")</p>";
+      if (sub === "new") {
+        h += at >= MAAMER_PARAS.length ? '<p class="help-text">He’s finished the whole Maamer in ' + escapeHtml(sel("fm-lang")) + ".</p>"
+          : '<div class="field"><label for="fm-to">Learned up to and including</label><select id="fm-to" dir="rtl">' +
+            MAAMER_PARAS.slice(at).map((_, i) => '<option value="' + (at + i + 1) + '">' + escapeHtml(famMaamerLabel(at + i + 1)) + "</option>").join("") + "</select></div>" + timeFields(0, 30);
+      } else {
+        h += '<div class="field"><label for="fm-rparas">Paragraphs reviewed</label><input type="number" inputmode="numeric" min="0" id="fm-rparas" value="' + at + '"></div>' +
+          '<label class="fam-check"><input type="checkbox" id="fm-tested"> He also learned a new paragraph today and was tested on it</label>';
+      }
+      inner.innerHTML = h;
+    }
+    function drawPerfect() {
+      const w = m.querySelector("#ft-perfwrap"); if (!w) return;
+      const it = familyData.learning.find((i) => i.id === sel("ft-item"));
+      // The 0-mistakes bonus is a one-time thing per Perek; once earned, it isn't offered again.
+      w.innerHTML = it && !it.perfect ? '<label class="fam-check"><input type="checkbox" id="ft-perfect"> Reviewed with 0 mistakes — first time (+3 hours, one time only)</label>' : "";
+    }
+    function plan() {
+      const kid = kidSel.value, t = time();
+      if (cat === "tanya" && sub === "new") {
+        const isNew = sel("ft-item") === "__new", lines = val("ft-lines");
+        const it = isNew ? null : familyData.learning.find((i) => i.id === sel("ft-item"));
+        const perek = isNew ? +sel("ft-perek") : null, lang = isNew ? sel("ft-lang") : null;
+        const title = it ? it.title : famTanyaTitle(perek, lang);
+        if (isNew && familyData.learning.some((i) => i.kid === kid && famItemKind(i) === "tanya" && famItemPerek(i) === perek && famItemLang(i) === lang)) return { error: familyKidName(kid) + " already has " + title + " — pick it from the list." };
+        const prog = sel("ft-prog").trim(), done = checked("ft-done");
+        return {
+          screen: 60 * lines + t, money: 25 * lines,
+          why: lines + " line" + (lines === 1 ? "" : "s") + " × 1 hour" + (t ? " + " + famMins(t) + " spent" : "") + "; " + lines + " × $0.25",
+          note: "Tanya: " + lines + " new line" + (lines === 1 ? "" : "s") + " — " + title, moneyNote: "Tanya Baal Peh: " + title,
+          apply: (d) => {
+            let rec = it && d.learning.find((i) => i.id === it.id);
+            if (!rec) {
+              rec = { id: uid("fl"), kid, type: "tanya", perek, lang, title, progress: "", complete: false, perfect: false, lastReviewKey: "", lastReviewLabel: "", order: Math.max(0, ...d.learning.filter((i) => i.kid === kid).map((i) => i.order || 0)) + 1 };
+              d.learning.push(rec);
+            }
+            if (prog) rec.progress = prog;
+            if (done) { rec.complete = true; rec.progress = ""; }
+          },
+        };
+      }
+      if (cat === "tanya") {
+        const it = familyData.learning.find((i) => i.id === sel("ft-item"));
+        if (!it) return { error: "Pick which Perek he reviewed." };
+        const lines = val("ft-rlines"), perfect = checked("ft-perfect") && !it.perfect, mh = dateHeb();
+        return {
+          screen: 60 + (perfect ? 180 : 0) + t, money: 5 * lines,
+          why: "1 hour" + (perfect ? " + 3 hours for 0 mistakes" : "") + (t ? " + " + famMins(t) + " spent" : "") + (lines ? "; " + lines + " lines × $0.05" : ""),
+          warn: it.lastReviewKey === mh.key ? "Already reviewed this Perek in " + mh.label + " — the monthly review hour is once a month." : "",
+          note: "Tanya review" + (perfect ? " (0 mistakes)" : "") + " — " + it.title, moneyNote: "Tanya review: " + it.title,
+          apply: (d) => { const r = d.learning.find((i) => i.id === it.id); if (!r) return; r.lastReviewKey = mh.key; r.lastReviewLabel = mh.label; if (perfect) r.perfect = true; if (lines) r.lines = lines; },
+        };
+      }
+      if (cat === "maamer") {
+        const lang = sel("fm-lang"), it = famMaamerItem(kid, lang), at = (it && it.maamerPara) || 0;
+        if (sub === "new") {
+          const to = +sel("fm-to") || 0, paras = Math.max(0, to - at);
+          if (!paras) return { error: "Nothing new to add." };
+          return {
+            screen: 120 * paras + 2 * t,
+            why: paras + " paragraph" + (paras === 1 ? "" : "s") + " × 2 hours" + (t ? " + " + famMins(t) + " × 2" : ""),
+            note: "Maamer (" + lang + "): " + (paras === 1 ? "new paragraph" : paras + " new paragraphs") + " — up to ¶" + to + " " + MAAMER_PARAS[to - 1][1],
+            apply: (d) => {
+              let rec = it && d.learning.find((i) => i.id === it.id);
+              if (!rec) { rec = { id: uid("fl"), kid, type: "maamer", lang, title: "Bar Mitzvah Maamer – " + lang, complete: false, perfect: false, order: Math.max(0, ...d.learning.filter((i) => i.kid === kid).map((i) => i.order || 0)) + 1 }; d.learning.push(rec); }
+              rec.type = "maamer"; rec.lang = lang; rec.maamerPara = to; rec.progress = famMaamerLabel(to);
+            },
+          };
         }
-        return d;
-      }, "Added " + famMins(c.screen, true) + " for " + familyKidName(kid) + ".");
+        const paras = val("fm-rparas"), tested = checked("fm-tested");
+        return { screen: (tested ? 5 : 1) * paras, why: paras + " paragraph" + (paras === 1 ? "" : "s") + " × " + (tested ? "5 minutes (new paragraph tested today)" : "1 minute"), note: "Maamer review (" + lang + "): " + paras + " paragraphs" };
+      }
+      const pts = val("fp-points");
+      return { screen: Math.round(pts / 20), why: "100 points = 5 minutes", note: "Parsha points: " + pts };
+    }
+    function update() {
+      const p = plan(), prev = m.querySelector("#fl-prev");
+      prev.innerHTML = p.error ? '<span class="help-text" style="color:var(--caution);">' + escapeHtml(p.error) + "</span>"
+        : "<strong>" + famMins(p.screen, true) + " screen time" + (p.money ? " · " + famMoney(p.money, true) : "") + '</strong><span class="help-text" style="display:block;">' + escapeHtml(p.why) + "</span>" +
+          (p.warn ? '<span class="help-text" style="display:block;color:var(--caution);">' + escapeHtml(p.warn) + "</span>" : "");
+    }
+    m.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-seg] [data-val]"); if (!b) return;
+      const which = b.parentElement.getAttribute("data-seg");
+      if (which === "cat") { cat = b.getAttribute("data-val"); sub = "new"; } else sub = b.getAttribute("data-val");
+      drawFields();
+    });
+    m.addEventListener("change", (e) => {
+      if (e.target.id === "fl-kid") { drawFields(); return; }
+      if (e.target.id === "fm-lang") drawMaamer();
+      if (e.target.id === "ft-item") { const w = m.querySelector("#ft-newwrap"); if (w) w.hidden = e.target.value !== "__new"; drawPerfect(); }
+      update();
+    });
+    m.addEventListener("input", update);
+    drawFields();
+    const nw = m.querySelector("#ft-newwrap"); if (nw) nw.hidden = sel("ft-item") !== "__new";
+    m.querySelector("#fl-save").addEventListener("click", async () => {
+      const p = plan(), kid = kidSel.value, date = m.querySelector("#fl-date").value || famToday();
+      if (p.error) { famErr(m, p.error); return; }
+      if (!p.screen && !p.money) { famErr(m, "Enter an amount above zero."); return; }
+      const add = [];
+      if (p.screen) add.push({ kid, kind: "screen", amount: p.screen, note: p.note, date, rule: p.why });
+      if (p.money) add.push({ kid, kind: "money", amount: p.money, note: p.moneyNote || p.note, date, rule: p.why });
+      const newOnes = famNewEntries(add, session);
+      const ok = await familySave((d) => { d.entries.push(...newOnes); if (p.apply) p.apply(d); return d; }, "Added " + famMins(p.screen, true) + " for " + familyKidName(kid) + ".");
       if (ok) famCloseModal();
     });
   });
@@ -10723,13 +10829,18 @@ function famOpenEntry(id) {
 function famOpenItem(id) {
   const it = id ? familyData.learning.find((x) => x.id === id) : null;
   const heb = famHeb();
+  const isMaamer = !!(it && famItemKind(it) === "maamer");
   const body = (it ? "" : '<div class="field"><label for="fi-kid">For</label>' + famKidSelect("fi-kid", familyKid) + "</div>") +
     '<div class="field"><label for="fi-title">Item</label><input type="text" dir="auto" id="fi-title" value="' + escapeHtml(it ? it.title : "") + '" placeholder="e.g. תניא – פרק ג׳"></div>' +
-    '<div class="field"><label for="fi-prog">Up to</label><input type="text" dir="auto" id="fi-prog" value="' + escapeHtml(it ? it.progress || "" : "") + '" placeholder="e.g. שורה 42"></div>' +
+    (isMaamer
+      ? '<div class="field"><label for="fi-para">Holding at (last paragraph he knows)</label><select id="fi-para" dir="rtl">' +
+        Array.from({ length: MAAMER_PARAS.length + 1 }, (_, n) => '<option value="' + n + '"' + ((it.maamerPara || 0) === n ? " selected" : "") + ">" + escapeHtml(famMaamerLabel(n)) + "</option>").join("") + "</select></div>"
+      : '<div class="field"><label for="fi-prog">Up to</label><input type="text" dir="auto" id="fi-prog" value="' + escapeHtml(it ? it.progress || "" : "") + '" placeholder="e.g. שורה 42"></div>') +
+    '<div' + (isMaamer ? " hidden" : "") + '>' +
     '<label class="fam-check"><input type="checkbox" id="fi-done"' + (it && it.complete ? " checked" : "") + "> Finished (whole Perek known; reviewed monthly)</label>" +
     '<label class="fam-check"><input type="checkbox" id="fi-perf"' + (it && it.perfect ? " checked" : "") + "> Already earned the 0-mistakes bonus</label>" +
     '<div class="field"><label for="fi-rev">Last review month</label><input type="text" id="fi-rev" value="' + escapeHtml(it ? it.lastReviewLabel || "" : "") + '" placeholder="e.g. ' + escapeHtml(heb.label) + '">' +
-    '<p class="help-text">Filled in for you when you log a Perek review.</p></div>' +
+    '<p class="help-text">Filled in for you when you log a Perek review.</p></div></div>' +
     '<div class="fam-foot">' + (it ? '<button class="btn btn-danger btn-sm" id="fi-del">Delete</button><span style="flex:1;"></span>' : "") +
     '<button class="btn btn-ghost btn-sm" data-fam-close>Cancel</button><button class="btn btn-primary btn-sm" id="fi-save">Save</button></div>';
   famOpenModal(it ? "Edit learning item" : "Add learning item", body, (m) => {
@@ -10737,9 +10848,10 @@ function famOpenItem(id) {
       const title = m.querySelector("#fi-title").value.trim();
       if (!title) { famErr(m, "Give the item a name."); return; }
       const rev = m.querySelector("#fi-rev").value.trim();
-      const fields = { title, progress: m.querySelector("#fi-prog").value.trim(), complete: m.querySelector("#fi-done").checked, perfect: m.querySelector("#fi-perf").checked, lastReviewLabel: rev };
+      const paraSel = m.querySelector("#fi-para");
+      const fields = paraSel ? { title, type: "maamer", lang: famItemLang(it), maamerPara: +paraSel.value, progress: famMaamerLabel(+paraSel.value) } : { title, progress: m.querySelector("#fi-prog").value.trim(), complete: m.querySelector("#fi-done").checked, perfect: m.querySelector("#fi-perf").checked, lastReviewLabel: rev };
       // A typed month only counts as "reviewed this month" when it names the current one.
-      if (!it || rev !== (it.lastReviewLabel || "")) fields.lastReviewKey = rev && rev.toLowerCase() === heb.label.toLowerCase() ? heb.key : "";
+      if (!paraSel && (!it || rev !== (it.lastReviewLabel || ""))) fields.lastReviewKey = rev && rev.toLowerCase() === heb.label.toLowerCase() ? heb.key : "";
       let ok;
       if (it) ok = await familySave((d) => { const r = d.learning.find((x) => x.id === id); if (r) Object.assign(r, fields); return d; }, "Saved.");
       else {
