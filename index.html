@@ -10326,6 +10326,7 @@ function ensureFamilyListener() {
       familyLoadError = false;
       const d = snap.exists ? snap.data() : {};
       familyData = { entries: d.entries || [], learning: d.learning || [] };
+      famApplyFixups(d);
       refreshViewOrDefer();
     }, (err) => {
       console.error("Family sync error:", err);
@@ -10337,15 +10338,35 @@ function ensureFamilyListener() {
   }
   subscribe();
 }
+// One-time corrections R. Aizik gave for the data brought over from his sheet. Each runs once, the
+// first time a browser that can write sees the imported items, and is recorded in `fixups`.
+const FAMILY_FIXUPS = [
+  { id: "2026-10-22-holdings", needs: ["mendu-9"], apply: (d) => {
+    const en = d.learning.find((i) => i.id === "mendu-9"); // Mendu was just tested on ¶16 in English
+    if (en) Object.assign(en, { type: "maamer", lang: "English", maamerPara: 16, progress: famMaamerLabel(16) });
+    d.learning = d.learning.filter((i) => i.id !== "mendu-3"); // Mendu never did פרק ג
+    const ch = d.learning.find((i) => i.id === "chaikel-2"); // "הגהה ומתנשא" = page ו, הגהה line 7
+    if (ch && !ch.pos) ch.pos = { f: 6, v: 0, line: 19, h: 7 };
+  } },
+];
+let famFixupsTried = false;
+function famApplyFixups(d) {
+  if (famFixupsTried || !canWrite) return;
+  const done = d.fixups || [];
+  const todo = FAMILY_FIXUPS.filter((x) => !done.includes(x.id) && x.needs.every((id) => (d.learning || []).some((i) => i.id === id)));
+  if (!todo.length) return;
+  famFixupsTried = true;
+  familySave((draft) => { todo.forEach((x) => x.apply(draft)); draft.fixups = (draft.fixups || []).concat(todo.map((x) => x.id)); return draft; });
+}
 async function familySave(mutate, okMsg) {
   if (!canWrite) { toast("Read-only view — changes here won’t be saved.", "warn"); return false; }
   try {
     await db.runTransaction(async (tx) => {
       const snap = await tx.get(FAMILY_DOC);
       const cur = snap.exists ? snap.data() : {};
-      const draft = JSON.parse(JSON.stringify({ entries: cur.entries || [], learning: cur.learning || [] }));
+      const draft = JSON.parse(JSON.stringify({ entries: cur.entries || [], learning: cur.learning || [], fixups: cur.fixups || [] }));
       const next = mutate(draft) || draft;
-      tx.set(FAMILY_DOC, { entries: next.entries, learning: next.learning, _rev: (cur._rev || 0) + 1, updatedAt: Date.now() });
+      tx.set(FAMILY_DOC, { entries: next.entries, learning: next.learning, fixups: next.fixups || [], _rev: (cur._rev || 0) + 1, updatedAt: Date.now() });
     });
     if (okMsg) toast(okMsg, "good");
     return true;
@@ -10415,10 +10436,17 @@ function famItemPerek(it) {
   const e = (it.title || "").match(/chapter\s+(\d+)/i); return e ? +e[1] : null;
 }
 function famTanyaTitle(perek, lang) { return lang === "English" ? "Tanya English – Chapter " + perek : "תניא – פרק " + famHebNum(perek) + "׳"; }
-// Where a boy is holding in Tanya, as {f, v, line}: folio f, v = 0 for the front side (printed
-// with the Hebrew letter, e.g. ז) or 1 for the back (printed as the number 2f, e.g. 14), and the
-// numbered line (every page has 27). Turned into one running number so lines can be subtracted.
+// Where a boy is holding in Tanya, as {f, v, line, h}: folio f, v = 0 for the front side (printed
+// with the Hebrew letter, e.g. ז) or 1 for the back (printed as the number 2f, e.g. 14), the
+// numbered line (every page has 27), and h = the line within a הגהה (side note) when he's in one.
+// Turned into one running count so lines can be subtracted.
 const TANYA_LINES_PER_PAGE = 27;
+// Pages with a הגהה: it's read after line `after`, has `lines` short lines, and the main text
+// beside it (`narrow`, first to last line) is short too. Both count two lines as one.
+const TANYA_HAGAHOT = {
+  "5.1": { after: 4, lines: 6, narrow: [5, 11] },
+  "6.0": { after: 19, lines: 10, narrow: [19, 27] },
+};
 const TANYA_PEREK_BOUNDS = { // first and last line of each Perek we have the pages for
   1: { start: { f: 5, v: 0, line: 1 }, end: { f: 6, v: 0, line: 9 } },
   2: { start: { f: 6, v: 0, line: 10 }, end: { f: 7, v: 0, line: 18 } },
@@ -10427,10 +10455,38 @@ const TANYA_PEREK_BOUNDS = { // first and last line of each Perek we have the pa
   // Only the opening of פרק מא is learned, up to "בעומד לפני המלך" (two lines into its second page).
   41: { start: { f: 56, v: 0, line: 12 }, end: { f: 56, v: 1, line: 2 } },
 };
-function famPosIdx(p) { return p ? (p.f * 2 + p.v) * TANYA_LINES_PER_PAGE + p.line : null; }
+// A page's lines in reading order, each with its weight (½ for a short line beside or in a הגהה).
+function famPageUnits(f, v) {
+  const g = TANYA_HAGAHOT[f + "." + v], out = [];
+  for (let line = 1; line <= TANYA_LINES_PER_PAGE; line++) {
+    out.push({ line, w: g && line >= g.narrow[0] && line <= g.narrow[1] ? 0.5 : 1 });
+    if (g && line === g.after) for (let h = 1; h <= g.lines; h++) out.push({ line, h, w: 0.5 });
+  }
+  return out;
+}
+const famPageWeightCache = {};
+function famPageWeight(f, v) { const k = f + "." + v; if (famPageWeightCache[k] == null) famPageWeightCache[k] = famPageUnits(f, v).reduce((a, u) => a + u.w, 0); return famPageWeightCache[k]; }
+function famSameUnit(u, p) { return u.line === p.line && (u.h || 0) === (p.h || 0); }
+// Lines counted from the start of the book through p (inclusive).
+function famPosIdx(p) {
+  if (!p) return null;
+  let n = 0;
+  for (let k = 10; k < p.f * 2 + p.v; k++) n += famPageWeight(Math.floor(k / 2), k % 2);
+  for (const u of famPageUnits(p.f, p.v)) { n += u.w; if (famSameUnit(u, p)) break; }
+  return n;
+}
+function famPosWeight(p) { const u = famPageUnits(p.f, p.v).find((x) => famSameUnit(x, p)); return u ? u.w : 1; }
+function famPosBefore(p) { return famPosIdx(p) - famPosWeight(p); }
+function famNextPos(p) {
+  const us = famPageUnits(p.f, p.v), i = us.findIndex((u) => famSameUnit(u, p));
+  if (i >= 0 && i < us.length - 1) return Object.assign({ f: p.f, v: p.v }, us[i + 1].h ? { line: us[i + 1].line, h: us[i + 1].h } : { line: us[i + 1].line });
+  return p.v ? { f: p.f + 1, v: 0, line: 1 } : { f: p.f, v: 1, line: 1 };
+}
+function famFmtLines(n) { const w = Math.floor(n), half = n - w >= 0.5; return (w || !half ? String(w) : "") + (half ? "½" : ""); }
 function famPageLabel(p) { const h = famHebNum(p.f); return p.v ? "עמ׳ " + (p.f * 2) : "דף " + (h.length > 1 ? h.slice(0, -1) + "״" + h.slice(-1) : h + "׳"); }
-function famPosLabel(p) { return p ? famPageLabel(p) + " שורה " + p.line : ""; }
-function famPerekLines(perek) { const b = TANYA_PEREK_BOUNDS[perek]; return b && b.end ? famPosIdx(b.end) - famPosIdx(b.start) + 1 : null; }
+function famPosLabel(p) { return p ? famPageLabel(p) + (p.h ? " הגהה שורה " + p.h : " שורה " + p.line) : ""; }
+function famPerekLines(perek) { const b = TANYA_PEREK_BOUNDS[perek]; return b && b.end ? famPosIdx(b.end) - famPosBefore(b.start) : null; }
+function famPerekDone(perek, pos) { const b = TANYA_PEREK_BOUNDS[perek]; return b && pos ? Math.max(0, famPosIdx(pos) - famPosBefore(b.start)) : null; }
 // Older items keep their place as text, e.g. "דף ז׳ שורה 13 לבוש" or "ע׳ 10 שורה 14 שאין". A bare
 // "שורה 20" (no page) means that line on the Perek's first page, "2nd page, שורה 2" on its next one.
 function famParsePos(text, perek) {
@@ -10451,11 +10507,18 @@ function famPageOptions(sel) {
   for (let f = 5; f <= 120; f++) for (let v = 0; v < 2; v++) { const val = f + "." + v; h += '<option value="' + val + '"' + (sel === val ? " selected" : "") + ">" + famPageLabel({ f, v }) + "</option>"; }
   return h;
 }
-function famLineOptions(sel) { let h = ""; for (let l = 1; l <= TANYA_LINES_PER_PAGE; l++) h += '<option value="' + l + '"' + (+sel === l ? " selected" : "") + ">שורה " + l + "</option>"; return h; }
+// Line picker for one page, in reading order; values are "L<line>" or "H<line>.<hagahah line>".
+function famLineOptions(pageVal, sel) {
+  const [f, v] = String(pageVal || "5.0").split(".").map(Number);
+  const key = sel ? (sel.h ? "H" + sel.line + "." + sel.h : "L" + sel.line) : "";
+  return famPageUnits(f, v).map((u) => { const val = u.h ? "H" + u.line + "." + u.h : "L" + u.line; return '<option value="' + val + '"' + (val === key ? " selected" : "") + ">" + (u.h ? "הגהה שורה " + u.h : "שורה " + u.line) + "</option>"; }).join("");
+}
 function famReadPos(m, pageId, lineId) {
   const pe = m.querySelector("#" + pageId), le = m.querySelector("#" + lineId);
-  if (!pe || !le || !pe.value) return null;
-  const [f, v] = pe.value.split(".").map(Number); return { f, v, line: +le.value };
+  if (!pe || !le || !pe.value || !le.value) return null;
+  const [f, v] = pe.value.split(".").map(Number);
+  if (le.value[0] === "H") { const [line, h] = le.value.slice(1).split(".").map(Number); return { f, v, line, h }; }
+  return { f, v, line: +le.value.slice(1) };
 }
 function famMaamerItem(kid, lang) { return familyData.learning.find((i) => i.kid === kid && famItemKind(i) === "maamer" && famItemLang(i) === lang) || null; }
 
@@ -10497,8 +10560,7 @@ function renderFamily(root, session) {
     let badges = "";
     if (famItemKind(it) === "maamer") badges += '<span class="pill pill-muted">' + ((it.maamerPara || 0) >= MAAMER_PARAS.length ? "Finished" : (it.maamerPara || 0) + " of " + MAAMER_PARAS.length + " paragraphs") + "</span>";
     else if (!it.complete && famItemKind(it) === "tanya" && famItemPos(it) && famPerekLines(famItemPerek(it))) {
-      const b = TANYA_PEREK_BOUNDS[famItemPerek(it)];
-      badges += '<span class="pill pill-muted">' + Math.max(0, famPosIdx(famItemPos(it)) - famPosIdx(b.start) + 1) + " of " + famPerekLines(famItemPerek(it)) + " lines</span>";
+      badges += '<span class="pill pill-muted">' + famFmtLines(famPerekDone(famItemPerek(it), famItemPos(it))) + " of " + famFmtLines(famPerekLines(famItemPerek(it))) + " lines</span>";
     } else if (it.complete) {
       badges += it.lastReviewKey === heb.key ? '<span class="pill pill-good">Reviewed ' + escapeHtml(it.lastReviewLabel) + "</span>"
         : '<span class="pill pill-caution">Review due' + (it.lastReviewLabel ? " · last " + escapeHtml(it.lastReviewLabel) : "") + "</span>";
@@ -10642,8 +10704,8 @@ function famOpenLearn(session) {
           '<div class="field"><label for="ft-lang">Language</label><select id="ft-lang"><option>Hebrew</option><option>English</option></select></div></div>' +
           '<p class="help-text" id="ft-at" style="margin:-8px 0 12px;"></p>' +
           '<div class="field-row"><div class="field"><label for="ft-page">Now knows up to</label><select id="ft-page" dir="rtl"></select></div>' +
-          '<div class="field" style="min-width:110px;"><label for="ft-line">Line</label><select id="ft-line" dir="rtl">' + famLineOptions(1) + "</select></div></div>" +
-          '<div class="field"><label for="ft-lines">New lines by heart</label><input type="number" inputmode="numeric" min="0" id="ft-lines" value="1">' +
+          '<div class="field" style="min-width:110px;"><label for="ft-line">Line</label><select id="ft-line" dir="rtl"></select></div></div>' +
+          '<div class="field"><label for="ft-lines">New lines by heart</label><input type="number" inputmode="decimal" min="0" step="0.5" id="ft-lines" value="1">' +
           '<p class="help-text">Worked out from where he was holding; change it if it’s off.</p></div>' +
           timeFields(0, 0, "Time spent learning") +
           '<div class="field"><label for="ft-prog">Note (optional)</label><input type="text" dir="auto" id="ft-prog" placeholder="e.g. the word he stopped on"></div>' +
@@ -10651,7 +10713,7 @@ function famOpenLearn(session) {
       } else if (cat === "tanya") {
         const its = tanyaItems(kid, true);
         h += its.length ? '<div class="field"><label for="ft-item">Which Perek did he review?</label><select id="ft-item">' + its.map((i) => '<option value="' + escapeHtml(i.id) + '">' + escapeHtml(i.title) + (i.lastReviewLabel ? " — last reviewed " + escapeHtml(i.lastReviewLabel) : "") + "</option>").join("") + "</select></div>" +
-          '<div class="field"><label for="ft-rlines">Lines reviewed ($0.05 each)</label><input type="number" inputmode="numeric" min="0" id="ft-rlines" value="0"></div>' +
+          '<div class="field"><label for="ft-rlines">Lines reviewed ($0.05 each)</label><input type="number" inputmode="decimal" min="0" step="0.5" id="ft-rlines" value="0"></div>' +
           timeFields(0, 0, "Time spent") + '<div id="ft-perfwrap"></div>'
           : '<p class="help-text">' + familyKidName(kid) + " doesn’t know a whole Perek yet. When he finishes one, tick “He now knows the whole Perek” under New lines.</p>";
       } else if (cat === "maamer") {
@@ -10674,23 +10736,22 @@ function famOpenLearn(session) {
       const perek = it ? famItemPerek(it) : +sel("ft-perek");
       const b = TANYA_PEREK_BOUNDS[perek];
       const pos = it ? famItemPos(it) : null;
-      const before = pos ? famPosIdx(pos) : b ? famPosIdx(b.start) - 1 : null;
+      const before = pos ? famPosIdx(pos) : b ? famPosBefore(b.start) : null;
       return { isNew, it, perek, b, pos, before };
     }
     // Point the "now knows up to" page/line at where he is, then recount the new lines.
-    function syncTanyaPos(resetPick) {
+    function syncTanyaPos(resetPick, pageChanged) {
       const pe = m.querySelector("#ft-page"); if (!pe) return;
       const c = tanyaCtx();
       const at = m.querySelector("#ft-at");
-      at.textContent = c.pos ? "Holding at: " + famPosLabel(c.pos) + (c.b && c.b.end ? " (" + (famPosIdx(c.pos) - famPosIdx(c.b.start) + 1) + " of " + famPerekLines(c.perek) + " lines)" : "")
-        : c.b ? "Starts at " + famPosLabel(c.b.start) + (c.b.end ? " · " + famPerekLines(c.perek) + " lines" : "") : "No page/line saved yet for this Perek — enter the new lines by hand.";
+      at.textContent = c.pos ? "Holding at: " + famPosLabel(c.pos) + (c.b && c.b.end ? " (" + famFmtLines(famPerekDone(c.perek, c.pos)) + " of " + famFmtLines(famPerekLines(c.perek)) + " lines)" : "")
+        : c.b ? "Starts at " + famPosLabel(c.b.start) + (c.b.end ? " · " + famFmtLines(famPerekLines(c.perek)) + " lines" : "") : "No page/line saved yet for this Perek — enter the new lines by hand.";
       if (resetPick) {
         // Default the pick to the line right after where he's holding (or the Perek's first line).
-        let start = c.b ? c.b.start : null;
-        if (c.pos) start = c.pos.line < TANYA_LINES_PER_PAGE ? { f: c.pos.f, v: c.pos.v, line: c.pos.line + 1 } : { f: c.pos.f + c.pos.v, v: 1 - c.pos.v, line: 1 };
-        pe.innerHTML = famPageOptions(start ? start.f + "." + start.v : "");
-        if (start) m.querySelector("#ft-line").value = String(start.line);
-      }
+        const start = c.pos ? famNextPos(c.pos) : c.b ? c.b.start : { f: 5, v: 0, line: 1 };
+        pe.innerHTML = famPageOptions(start.f + "." + start.v);
+        m.querySelector("#ft-line").innerHTML = famLineOptions(pe.value, start);
+      } else if (pageChanged) m.querySelector("#ft-line").innerHTML = famLineOptions(pe.value, null);
       const now = famReadPos(m, "ft-page", "ft-line");
       if (c.before != null && now) {
         const n = Math.max(0, famPosIdx(now) - c.before);
@@ -10733,9 +10794,9 @@ function famOpenLearn(session) {
         if (isNew && familyData.learning.some((i) => i.kid === kid && famItemKind(i) === "tanya" && famItemPerek(i) === perek && famItemLang(i) === lang)) return { error: familyKidName(kid) + " already has " + title + " — pick it from the list." };
         const prog = sel("ft-prog").trim(), done = checked("ft-done"), newPos = famReadPos(m, "ft-page", "ft-line");
         return {
-          screen: 60 * lines + t, money: 25 * lines,
-          why: lines + " line" + (lines === 1 ? "" : "s") + " × 1 hour" + (t ? " + " + famMins(t) + " spent" : "") + "; " + lines + " × $0.25",
-          note: "Tanya: " + lines + " new line" + (lines === 1 ? "" : "s") + " — " + title, moneyNote: "Tanya Baal Peh: " + title,
+          screen: Math.round(60 * lines) + t, money: Math.round(25 * lines),
+          why: famFmtLines(lines) + " line" + (lines === 1 ? "" : "s") + " × 1 hour" + (t ? " + " + famMins(t) + " spent" : "") + "; " + famFmtLines(lines) + " × $0.25",
+          note: "Tanya: " + famFmtLines(lines) + " new line" + (lines === 1 ? "" : "s") + " — " + title, moneyNote: "Tanya Baal Peh: " + title,
           apply: (d) => {
             let rec = it && d.learning.find((i) => i.id === it.id);
             if (!rec) {
@@ -10752,8 +10813,8 @@ function famOpenLearn(session) {
         if (!it) return { error: "Pick which Perek he reviewed." };
         const lines = val("ft-rlines"), perfect = checked("ft-perfect") && !it.perfect, mh = dateHeb();
         return {
-          screen: 60 + (perfect ? 180 : 0) + t, money: 5 * lines,
-          why: "1 hour" + (perfect ? " + 3 hours for 0 mistakes" : "") + (t ? " + " + famMins(t) + " spent" : "") + (lines ? "; " + lines + " lines × $0.05" : ""),
+          screen: 60 + (perfect ? 180 : 0) + t, money: Math.round(5 * lines),
+          why: "1 hour" + (perfect ? " + 3 hours for 0 mistakes" : "") + (t ? " + " + famMins(t) + " spent" : "") + (lines ? "; " + famFmtLines(lines) + " lines × $0.05" : ""),
           warn: it.lastReviewKey === mh.key ? "Already reviewed this Perek in " + mh.label + " — the monthly review hour is once a month." : "",
           note: "Tanya review" + (perfect ? " (0 mistakes)" : "") + " — " + it.title, moneyNote: "Tanya review: " + it.title,
           apply: (d) => { const r = d.learning.find((i) => i.id === it.id); if (!r) return; r.lastReviewKey = mh.key; r.lastReviewLabel = mh.label; if (perfect) r.perfect = true; if (lines) r.lines = lines; },
@@ -10798,7 +10859,7 @@ function famOpenLearn(session) {
       if (e.target.id === "fm-lang") drawMaamer();
       if (e.target.id === "ft-item") { const w = m.querySelector("#ft-newwrap"); if (w) w.hidden = e.target.value !== "__new"; drawPerfect(); fillReviewLines(); syncTanyaPos(true); }
       if (e.target.id === "ft-perek" || e.target.id === "ft-lang") syncTanyaPos(true);
-      if (e.target.id === "ft-page" || e.target.id === "ft-line") syncTanyaPos(false);
+      if (e.target.id === "ft-page" || e.target.id === "ft-line") syncTanyaPos(false, e.target.id === "ft-page");
       update();
     });
     m.addEventListener("input", update);
@@ -10923,7 +10984,7 @@ function famOpenItem(id) {
     (isMaamer
       ? '<div class="field"><label for="fi-para">Holding at (last paragraph he knows)</label><select id="fi-para" dir="rtl">' +
         Array.from({ length: MAAMER_PARAS.length + 1 }, (_, n) => '<option value="' + n + '"' + ((it.maamerPara || 0) === n ? " selected" : "") + ">" + escapeHtml(famMaamerLabel(n)) + "</option>").join("") + "</select></div>"
-      : ((it && famItemKind(it) === "tanya") ? (() => { const p = famItemPos(it); return '<div class="field-row"><div class="field"><label for="fi-page">Holding at</label><select id="fi-page" dir="rtl"><option value="">Not set</option>' + famPageOptions(p ? p.f + "." + p.v : "") + '</select></div><div class="field" style="min-width:110px;"><label for="fi-line">Line</label><select id="fi-line" dir="rtl">' + famLineOptions(p ? p.line : 1) + "</select></div></div>"; })() : "") +
+      : ((it && famItemKind(it) === "tanya") ? (() => { const p = famItemPos(it); return '<div class="field-row"><div class="field"><label for="fi-page">Holding at</label><select id="fi-page" dir="rtl"><option value="">Not set</option>' + famPageOptions(p ? p.f + "." + p.v : "") + '</select></div><div class="field" style="min-width:110px;"><label for="fi-line">Line</label><select id="fi-line" dir="rtl">' + famLineOptions(p ? p.f + "." + p.v : "5.0", p) + "</select></div></div>"; })() : "") +
         '<div class="field"><label for="fi-prog">Note</label><input type="text" dir="auto" id="fi-prog" value="' + escapeHtml(it ? it.progress || "" : "") + '" placeholder="e.g. שורה 42"></div>') +
     '<div' + (isMaamer ? " hidden" : "") + '>' +
     '<label class="fam-check"><input type="checkbox" id="fi-done"' + (it && it.complete ? " checked" : "") + "> Finished (whole Perek known; reviewed monthly)</label>" +
@@ -10933,6 +10994,8 @@ function famOpenItem(id) {
     '<div class="fam-foot">' + (it ? '<button class="btn btn-danger btn-sm" id="fi-del">Delete</button><span style="flex:1;"></span>' : "") +
     '<button class="btn btn-ghost btn-sm" data-fam-close>Cancel</button><button class="btn btn-primary btn-sm" id="fi-save">Save</button></div>';
   famOpenModal(it ? "Edit learning item" : "Add learning item", body, (m) => {
+    const fp = m.querySelector("#fi-page");
+    if (fp) fp.addEventListener("change", () => { m.querySelector("#fi-line").innerHTML = famLineOptions(fp.value, null); });
     m.querySelector("#fi-save").addEventListener("click", async () => {
       const title = m.querySelector("#fi-title").value.trim();
       if (!title) { famErr(m, "Give the item a name."); return; }
