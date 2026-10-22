@@ -10348,6 +10348,14 @@ const FAMILY_FIXUPS = [
     const ch = d.learning.find((i) => i.id === "chaikel-2"); // "הגהה ומתנשא" = page ו, הגהה line 7
     if (ch && !ch.pos) ch.pos = { f: 6, v: 0, line: 19, h: 7 };
   } },
+  { id: "2026-10-22-mendu", needs: ["mendu-4", "mendu-7"], apply: (d) => {
+    const he = d.learning.find((i) => i.id === "mendu-7"); // Hebrew Maamer: up to ¶3 "אך הענין הוא"
+    if (he) Object.assign(he, { type: "maamer", lang: "Hebrew", maamerPara: 3, progress: famMaamerLabel(3) });
+    const yi = d.learning.find((i) => i.id === "mendu-8"); // none of it in Yiddish yet
+    if (yi) Object.assign(yi, { type: "maamer", lang: "Yiddish", maamerPara: 0, progress: "" });
+    const p41 = d.learning.find((i) => i.id === "mendu-4"); // knows פרק מא through "המלך"
+    if (p41) Object.assign(p41, { complete: true, progress: "", pos: null });
+  } },
 ];
 let famFixupsTried = false;
 function famApplyFixups(d) {
@@ -10455,6 +10463,9 @@ const TANYA_PEREK_BOUNDS = { // first and last line of each Perek we have the pa
   // Only the opening of פרק מא is learned, up to "בעומד לפני המלך" (two lines into its second page).
   41: { start: { f: 56, v: 0, line: 12 }, end: { f: 56, v: 1, line: 2 } },
 };
+// The monthly review earns an hour, except where a Perek is set lower here (minutes).
+const TANYA_REVIEW_MINUTES = { 41: 15 };
+function famReviewMinutes(perek) { return TANYA_REVIEW_MINUTES[perek] || 60; }
 // A page's lines in reading order, each with its weight (½ for a short line beside or in a הגהה).
 function famPageUnits(f, v) {
   const g = TANYA_HAGAHOT[f + "." + v], out = [];
@@ -10589,7 +10600,7 @@ function renderFamily(root, session) {
   html += '<div class="card card-pad"><details><summary class="section-title" style="margin:0;cursor:pointer;">Screen-time rules</summary><ul class="fam-rules">' +
     "<li>New line of Tanya by heart: 1 hour, plus $0.25 a line. Tanya in English counts the same (lines based on the Hebrew).</li>" +
     "<li>Time spent learning earns the same amount of screen time.</li>" +
-    "<li>Full Perek review, once each Hebrew month: 1 hour, plus $0.05 a line.</li>" +
+    "<li>Full Perek review, once each Hebrew month: 1 hour (פרק מא: 15 minutes), plus $0.05 a line.</li>" +
     "<li>First full Perek with 0 mistakes: 3 hours, one time.</li>" +
     "<li>Bar Mitzvah Maamer: time spent × 2. New paragraph: 2 hours (based on the Hebrew).</li>" +
     "<li>Maamer daily review: 1 minute a paragraph, or 5 minutes a paragraph on a day a new paragraph was learned and tested (e.g. 17 paragraphs = 1h 25m).</li>" +
@@ -10812,10 +10823,11 @@ function famOpenLearn(session) {
         const it = familyData.learning.find((i) => i.id === sel("ft-item"));
         if (!it) return { error: "Pick which Perek he reviewed." };
         const lines = val("ft-rlines"), perfect = checked("ft-perfect") && !it.perfect, mh = dateHeb();
+        const revMins = famReviewMinutes(famItemPerek(it));
         return {
-          screen: 60 + (perfect ? 180 : 0) + t, money: Math.round(5 * lines),
-          why: "1 hour" + (perfect ? " + 3 hours for 0 mistakes" : "") + (t ? " + " + famMins(t) + " spent" : "") + (lines ? "; " + famFmtLines(lines) + " lines × $0.05" : ""),
-          warn: it.lastReviewKey === mh.key ? "Already reviewed this Perek in " + mh.label + " — the monthly review hour is once a month." : "",
+          screen: revMins + (perfect ? 180 : 0) + t, money: Math.round(5 * lines),
+          why: (revMins === 60 ? "1 hour" : famMins(revMins) + " monthly review") + (perfect ? " + 3 hours for 0 mistakes" : "") + (t ? " + " + famMins(t) + " spent" : "") + (lines ? "; " + famFmtLines(lines) + " lines × $0.05" : ""),
+          warn: it.lastReviewKey === mh.key ? "Already reviewed this Perek in " + mh.label + " — the monthly review time is once a month." : "",
           note: "Tanya review" + (perfect ? " (0 mistakes)" : "") + " — " + it.title, moneyNote: "Tanya review: " + it.title,
           apply: (d) => { const r = d.learning.find((i) => i.id === it.id); if (!r) return; r.lastReviewKey = mh.key; r.lastReviewLabel = mh.label; if (perfect) r.perfect = true; if (lines) r.lines = lines; },
         };
