@@ -10605,6 +10605,7 @@ function renderFamily(root, session) {
     "<li>Bar Mitzvah Maamer: time spent × 2. New paragraph: 2 hours (based on the Hebrew).</li>" +
     "<li>Maamer daily review: 1 minute a paragraph, or 5 minutes a paragraph on a day a new paragraph was learned and tested (e.g. 17 paragraphs = 1h 25m).</li>" +
     "<li>100 Parsha points = 5 minutes.</li>" +
+    "<li>Daily report from school: rated 4 of 5 = 10 minutes; rated 5 = 10 minutes and $1.</li>" +
     "<li>Negative balance: no screen time until it’s paid off.</li></ul></details>" +
     '<button class="btn btn-ghost btn-sm" data-fam-backup style="margin-top:12px;">Download a backup</button></div>';
   root.innerHTML = html;
@@ -10692,7 +10693,7 @@ function famOpenLearn(session) {
     '<div class="fam-foot"><button class="btn btn-ghost btn-sm" data-fam-close>Cancel</button><button class="btn btn-primary btn-sm" id="fl-save">Add</button></div>';
   famOpenModal("Log learning", body, (m) => {
     const kidSel = m.querySelector("#fl-kid");
-    let cat = "tanya", sub = "new";
+    let cat = "tanya", sub = "new", rating = 5;
     const val = (id) => { const el = m.querySelector("#" + id); return el ? famNum(el.value) : 0; };
     const sel = (id) => { const el = m.querySelector("#" + id); return el ? el.value : ""; };
     const checked = (id) => !!(m.querySelector("#" + id) || {}).checked;
@@ -10702,7 +10703,7 @@ function famOpenLearn(session) {
 
     function drawFields() {
       const kid = kidSel.value;
-      m.querySelector("#fl-cat").innerHTML = seg("cat", [["tanya", "Tanya"], ["maamer", "Maamer"], ["parsha", "Parsha"]], cat);
+      m.querySelector("#fl-cat").innerHTML = seg("cat", [["tanya", "Tanya"], ["maamer", "Maamer"], ["parsha", "Parsha"], ["school", "School report"]], cat);
       const subs = cat === "tanya" ? [["new", "New lines"], ["review", "Review a Perek"]] : cat === "maamer" ? [["new", "New paragraph"], ["review", "Daily review"]] : null;
       m.querySelector("#fl-sub").innerHTML = subs ? '<div class="field">' + seg("sub", subs, sub) + "</div>" : "";
       let h = "";
@@ -10730,6 +10731,9 @@ function famOpenLearn(session) {
       } else if (cat === "maamer") {
         h += '<div class="field"><label for="fm-lang">Language</label><select id="fm-lang">' + FAM_LANGS.map((l) => "<option>" + l + "</option>").join("") + "</select></div>";
         h += '<div id="fm-inner"></div>';
+      } else if (cat === "school") {
+        h += '<div class="field"><label>Teacher’s rating (out of 5)</label>' + seg("rating", [1, 2, 3, 4, 5].map((n) => [String(n), String(n)]), String(rating)) + "</div>" +
+          '<div class="field"><label for="fs-note">Note (optional)</label><input type="text" id="fs-note" placeholder="e.g. what the teacher wrote"></div>';
       } else {
         h += '<div class="field"><label for="fp-points">Parsha points</label><input type="number" inputmode="numeric" min="0" id="fp-points" value="1000"></div>';
       }
@@ -10851,6 +10855,12 @@ function famOpenLearn(session) {
         const paras = val("fm-rparas"), tested = checked("fm-tested");
         return { screen: (tested ? 5 : 1) * paras, why: paras + " paragraph" + (paras === 1 ? "" : "s") + " × " + (tested ? "5 minutes (new paragraph tested today)" : "1 minute"), note: "Maamer review (" + lang + "): " + paras + " paragraphs" };
       }
+      // Daily report from school: 4 earns 10 minutes; 5 earns 10 minutes and $1.
+      if (cat === "school") {
+        if (rating < 4) return { error: "A rating of " + rating + " doesn’t earn anything — 4 earns 10 minutes, 5 earns 10 minutes and $1." };
+        const note = "School report: " + rating + " of 5" + (sel("fs-note").trim() ? " — " + sel("fs-note").trim() : "");
+        return { screen: 10, money: rating === 5 ? 100 : 0, why: rating === 5 ? "Rated 5: 10 minutes and $1" : "Rated 4: 10 minutes", note, moneyNote: note };
+      }
       const pts = val("fp-points");
       return { screen: Math.round(pts / 20), why: "100 points = 5 minutes", note: "Parsha points: " + pts };
     }
@@ -10863,6 +10873,11 @@ function famOpenLearn(session) {
     m.addEventListener("click", (e) => {
       const b = e.target.closest("[data-seg] [data-val]"); if (!b) return;
       const which = b.parentElement.getAttribute("data-seg");
+      if (which === "rating") {
+        rating = +b.getAttribute("data-val");
+        b.parentElement.querySelectorAll("[data-val]").forEach((x) => { x.classList.toggle("btn-primary", x === b); x.classList.toggle("btn-ghost", x !== b); });
+        update(); return;
+      }
       if (which === "cat") { cat = b.getAttribute("data-val"); sub = "new"; } else sub = b.getAttribute("data-val");
       drawFields();
     });
