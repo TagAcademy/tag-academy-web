@@ -10424,17 +10424,21 @@ const TANYA_PEREK_BOUNDS = { // first and last line of each Perek we have the pa
   2: { start: { f: 6, v: 0, line: 10 }, end: { f: 7, v: 0, line: 18 } },
   3: { start: { f: 7, v: 0, line: 19 } },
   32: { start: { f: 41, v: 0, line: 8 }, end: { f: 41, v: 1, line: 20 } },
+  // Only the opening of פרק מא is learned, up to "בעומד לפני המלך" (two lines into its second page).
+  41: { start: { f: 56, v: 0, line: 12 }, end: { f: 56, v: 1, line: 2 } },
 };
 function famPosIdx(p) { return p ? (p.f * 2 + p.v) * TANYA_LINES_PER_PAGE + p.line : null; }
 function famPageLabel(p) { const h = famHebNum(p.f); return p.v ? "עמ׳ " + (p.f * 2) : "דף " + (h.length > 1 ? h.slice(0, -1) + "״" + h.slice(-1) : h + "׳"); }
 function famPosLabel(p) { return p ? famPageLabel(p) + " שורה " + p.line : ""; }
 function famPerekLines(perek) { const b = TANYA_PEREK_BOUNDS[perek]; return b && b.end ? famPosIdx(b.end) - famPosIdx(b.start) + 1 : null; }
 // Older items keep their place as text, e.g. "דף ז׳ שורה 13 לבוש" or "ע׳ 10 שורה 14 שאין". A bare
-// "שורה 20" (no page) means that line on the Perek's first page.
+// "שורה 20" (no page) means that line on the Perek's first page, "2nd page, שורה 2" on its next one.
 function famParsePos(text, perek) {
   const m = String(text || "").match(/(?:דף|ע[׳']|עמ[׳']?)\s*([א-ת]{1,3}|\d{1,3})[׳']?\s*,?\s*שורה\s*(\d{1,2})/);
   if (!m) {
     const b = TANYA_PEREK_BOUNDS[perek], l = String(text || "").match(/^\s*שורה\s*(\d{1,2})(?!\d)/);
+    const second = String(text || "").match(/^\s*2nd page,?\s*שורה\s*(\d{1,2})(?!\d)/i);
+    if (b && second && +second[1] <= TANYA_LINES_PER_PAGE) return b.start.v ? { f: b.start.f + 1, v: 0, line: +second[1] } : { f: b.start.f, v: 1, line: +second[1] };
     return b && l && +l[1] >= b.start.line && +l[1] <= TANYA_LINES_PER_PAGE ? { f: b.start.f, v: b.start.v, line: +l[1] } : null;
   }
   const line = +m[2];
