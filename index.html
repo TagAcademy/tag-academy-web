@@ -701,6 +701,8 @@ td.num, th.num { font-family: var(--font-mono); text-align: right; }
 .coin-hero .coin-hero-label { font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 700; }
 .coin-hero .coin-hero-value { font-family: var(--font-mono); font-size: 2.6rem; font-weight: 700; color: var(--gold); line-height: 1.1; margin-top: 2px; }
 .coin-hero .coin-hero-sub { font-size: 0.8rem; color: var(--muted); margin-top: 3px; }
+.coin-hero .coin-hero-earned { font-size: 0.95rem; color: var(--ink); margin-top: 4px; font-weight: 600; }
+.coin-hero .coin-hero-earned strong { font-family: var(--font-mono); color: var(--gold); font-size: 1.1rem; }
 .coin-inline { display: inline-flex; align-items: center; gap: 6px; }
 
 /* TAG Coins page: a grid of tappable student "coin cards" (balance + avatar), multi-selectable
@@ -2727,13 +2729,22 @@ function computeStats(studentId, opts) {
   const pointsPerCoin = state.settings.pointsPerCoin || 10;
   const coinsEarned = Math.floor((attPts + partPts) / pointsPerCoin);
   let ledgerNet = 0;
+  // Split out of ledgerNet for "total earned": coins staff awarded (grants, Chazzan, GC bonus) count
+  // as earned; spending never takes earned coins away; transfers between students are neither
+  // (counting a gift as "earned" would let two students pass coins back and forth up the board).
+  let awarded = 0, spent = 0, transfersNet = 0;
   if (!scoped) {
     for (const tx of state.ledger) {
       if (tx.studentId !== studentId) continue;
       if (from && tx.date < from) continue;
       if (to && tx.date > to) continue;
+      const amt = Number(tx.amount || 0);
       const sign = (tx.type === "Spent/Redeemed" || tx.type === "Transfer Out") ? -1 : 1;
-      ledgerNet += sign * Number(tx.amount || 0);
+      ledgerNet += sign * amt;
+      if (tx.type === "Spent/Redeemed") spent += amt;
+      else if (tx.type === "Transfer Out") transfersNet -= amt;
+      else if (tx.type === "Transfer In") transfersNet += amt;
+      else awarded += amt;
     }
   }
   const blendedPoss = attPoss + partPoss;
@@ -2750,9 +2761,18 @@ function computeStats(studentId, opts) {
     // leaderboards, where a single combined score per category reads more cleanly than two.
     blendedPct: blendedPoss ? (attPts + partPts) / blendedPoss : null,
     coinsEarned, ledgerNet, balance: coinsEarned + ledgerNet,
+    awarded, spent, transfersNet, earnedTotal: coinsEarned + awarded,
   };
 }
 function studentStats(studentId) { return computeStats(studentId, {}); }
+// "58 from classes · +1.5 from staff · −5 spent · +2 transfers" -- only the parts that apply.
+function coinBreakdownText(st) {
+  const parts = [num2(st.coinsEarned) + " from classes"];
+  if (st.awarded) parts.push("+" + num2(st.awarded) + " from staff");
+  if (st.spent) parts.push("−" + num2(st.spent) + " spent");
+  if (st.transfersNet) parts.push((st.transfersNet > 0 ? "+" : "−") + num2(Math.abs(st.transfersNet)) + " transfers");
+  return parts.join(" · ");
+}
 // Staff/teacher TAG coins -- earned the exact same way a student's are (Attendance +
 // Participation points, divided by the shared "points per coin" setting -- see
 // Admin > Privileges), just computed from a staff member's own private self-mark records
@@ -2788,7 +2808,7 @@ function computeStaffStats(staffId, opts) {
     attCount, partCount,
     points: attPts + partPts,
     blendedPct: blendedPoss ? (attPts + partPts) / blendedPoss : null,
-    coinsEarned, balance: coinsEarned,
+    coinsEarned, balance: coinsEarned, earnedTotal: coinsEarned,
   };
 }
 function staffStats(staffId) { return computeStaffStats(staffId, {}); }
@@ -7149,7 +7169,7 @@ const LEADERBOARD_CATEGORIES = [
   { id: "torah", label: "Torah" },
   { id: "avoda", label: "Avoda" },
   { id: "gc", label: "Gemilas Chassidim" },
-  { id: "coins", label: "TAG Coins" },
+  { id: "coins", label: "TAG Coins Earned" },
 ];
 let lbCategory = "attendance";
 let lbScope = "all"; // "all" | "week" | "hmonth" | "custom"
@@ -7216,7 +7236,9 @@ function lbRange() { return lbRangeFor(lbScope, lbAnchor, lbFrom, lbTo); }
 function leaderboardEntryFor(studentId, catId, range) {
   if (catId === "attendance") { const st = computeStats(studentId, { from: range.from, to: range.to }); return { value: st.attPct, display: pct(st.attPct) }; }
   if (catId === "participation") { const st = computeStats(studentId, { from: range.from, to: range.to }); return { value: st.partPct, display: pct(st.partPct) }; }
-  if (catId === "coins") { const st = computeStats(studentId, { from: range.from, to: range.to }); return { value: st.balance, display: num2(st.balance) }; }
+  // Ranked by coins EARNED, not the current balance -- spending coins on a privilege shouldn't
+  // drop a student down the board.
+  if (catId === "coins") { const st = computeStats(studentId, { from: range.from, to: range.to }); return { value: st.earnedTotal, display: num2(st.earnedTotal) }; }
   // torah / avoda / gc — a blended attendance+participation percentage across every class
   // tagged with that category (see categoryFor / PERIOD_CATEGORIES, set in Admin > Schedule).
   const st = computeStats(studentId, { from: range.from, to: range.to, category: catId });
@@ -9584,7 +9606,8 @@ function renderStudentSelfBalance(root, student) {
 
   html += '<div class="card card-pad coin-hero" style="margin-bottom:16px;">' + coinBadge("lg") +
     '<div><div class="coin-hero-label">TAG Coin Balance</div><div class="coin-hero-value">' + num2(allTimeSt.balance) + '</div>' +
-    '<div class="coin-hero-sub">' + allTimeSt.coinsEarned + ' earned from classes · ' + (allTimeSt.ledgerNet >= 0 ? "+" : "") + num2(allTimeSt.ledgerNet) + ' from staff &amp; transfers</div></div></div>';
+    '<div class="coin-hero-earned">Total earned: <strong>' + num2(allTimeSt.earnedTotal) + "</strong></div>" +
+    '<div class="coin-hero-sub">' + coinBreakdownText(allTimeSt) + "</div></div></div>";
 
   const toggleHtml = '<div class="bubble-group" style="flex-shrink:0;">' +
     [["week", "This week"], ["month", "Month"]].map(([v, label]) =>
@@ -9717,7 +9740,8 @@ function renderStudentDetail(root, student, opts) {
 
   html += '<div class="card card-pad coin-hero" style="margin-bottom:16px;">' + coinBadge("lg") +
     '<div><div class="coin-hero-label">TAG Coin Balance</div><div class="coin-hero-value">' + num2(allTimeSt.balance) + '</div>' +
-    '<div class="coin-hero-sub">' + allTimeSt.coinsEarned + ' earned from classes · ' + (allTimeSt.ledgerNet >= 0 ? "+" : "") + num2(allTimeSt.ledgerNet) + ' from staff &amp; transfers</div></div></div>';
+    '<div class="coin-hero-earned">Total earned: <strong>' + num2(allTimeSt.earnedTotal) + "</strong></div>" +
+    '<div class="coin-hero-sub">' + coinBreakdownText(allTimeSt) + "</div></div></div>";
 
   html += '<div class="card card-pad" style="margin-bottom:16px;"><div class="field-row">' +
     '<div class="field" style="min-width:190px;"><label for="sd-scope">Attendance &amp; participation for</label><select id="sd-scope">' +
