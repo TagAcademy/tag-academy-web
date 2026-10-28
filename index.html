@@ -11461,6 +11461,8 @@ const TV = {
   cfg: tvDefaults(), photos: [], uploaded: [], posters: [], layout: null, lastLayoutCheck: 0,
   drive: { folder: "", photos: [], fetchedAt: 0, error: null },
   photoIdx: -1, photoSlide: 0, lbIdx: 0, lbStamp: 0,
+  // Drive originals already turned and shrunk for the screen (see tvPrepareOriginal).
+  prepared: new Map(), prepFailed: new Set(), prepBusy: null, thumbPreTurned: {},
   cal: { events: [], fetchedAt: 0, ok: null },
   stamps: { photo: 0, lb: 0, cal: 0, drive: 0, hb: 0, shift: 0, nightly: 0 },
   exitHandled: false, started: false, dirty: true,
@@ -11557,10 +11559,13 @@ function tvTick() {
     if (now - S.lb >= Math.max(5, Number(TV.cfg.leaderboard.secsPerCategory) || 12) * 1000) { S.lb = now; TV.lbIdx++; tvUpdateLeaderboard(); }
     else if (TV.dirty) tvUpdateLeaderboard();
   }
+  // The calendar is fetched for the "no photos during davening" rule too, even with no calendar on screen.
   if (TV.zones.calendar || (TV.cfg.quiet && TV.cfg.quiet.enabled)) {
     if (now - S.cal >= 300000) { S.cal = now; tvRefreshCalendar(); }
-    else if (TV.dirty || (TV.zones.calendar.lastMin !== Math.floor(now / 60000))) tvUpdateCalendar();
-    else tvUpdateCountdown(now);
+    else if (TV.zones.calendar) {
+      if (TV.dirty || TV.zones.calendar.lastMin !== Math.floor(now / 60000)) tvUpdateCalendar();
+      else tvUpdateCountdown(now);
+    }
   }
   tvUpdateTicker(now);
   tvUpdateAnnouncePanel(now);
@@ -11659,7 +11664,7 @@ async function fetchDriveFolderPhotos(folderId, apiKey) {
   if (!apiKey) return { ok: false, reason: "no-key" };
   const q = "'" + folderId + "' in parents and mimeType contains 'image/' and trashed = false";
   const url = "https://www.googleapis.com/drive/v3/files?q=" + encodeURIComponent(q) +
-    "&fields=" + encodeURIComponent("files(id,name,description,thumbnailLink,imageMediaMetadata(rotation))") +
+    "&fields=" + encodeURIComponent("files(id,name,description,mimeType,thumbnailLink,imageMediaMetadata(rotation,width,height))") +
     "&orderBy=" + encodeURIComponent("createdTime desc") + "&pageSize=200" +
     "&supportsAllDrives=true&includeItemsFromAllDrives=true&key=" + encodeURIComponent(apiKey);
   let res;
@@ -11675,6 +11680,13 @@ async function fetchDriveFolderPhotos(folderId, apiKey) {
     // Quarter turns clockwise needed to stand the photo upright: Drive's resized copies drop the
     // camera's "which way is up" note, but Drive still reports it here.
     autoRot: ((Number(f.imageMediaMetadata && f.imageMediaMetadata.rotation) || 0) % 4 + 4) % 4,
+    // The original's own size (as stored, before any turning) -- lets the TV tell whether a
+    // thumbnail Google sent back was already turned upright (see tvThumbTurns).
+    rawW: Number(f.imageMediaMetadata && f.imageMediaMetadata.width) || 0,
+    rawH: Number(f.imageMediaMetadata && f.imageMediaMetadata.height) || 0,
+    // JPEG/PNG/WebP originals the TV can open itself (iPhone HEIC can't be, so those stay on
+    // Google's thumbnails). See tvPrepareOriginal.
+    original: /^image\/(jpeg|png|webp)$/i.test(f.mimeType || "") ? "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(f.id) + "?alt=media&key=" + encodeURIComponent(apiKey) : null,
     // Drive's public thumbnail address at TV size; the API's own thumbnailLink (asked for at the
     // same size instead of its default "=s220") is the backup.
     src: "https://drive.google.com/thumbnail?id=" + encodeURIComponent(f.id) + "&sz=w1920",
@@ -11729,6 +11741,84 @@ function tvPhotoRotation(photo, cfg) {
   const auto = cfg && cfg.photos && cfg.photos.driveAutoRotate === false ? 0 : Number(photo.autoRot) || 0;
   return ((auto + manual) % 4 + 4) % 4;
 }
+/* Upright Drive photos, without anyone turning them by hand.
+   Google's thumbnails aren't consistent: the small ones in the TV Display tab come back exactly as
+   the camera stored them, but bigger ones can come back already turned upright -- so the same
+   turn that fixes the preview flipped the TV's copy upside down. Instead, for JPEG/PNG/WebP the TV
+   downloads the original itself, reads the camera's own "which way is up" note (EXIF), and draws
+   it into a TV-sized picture turned exactly the way the preview shows it. HEIC (and anything that
+   fails) stays on the thumbnails, where tvThumbTurns works out whether Google already turned it. */
+const TV_PREP_MAX = 80; // prepared pictures kept in memory (~300 KB each)
+// Quarter turns clockwise the camera's EXIF orientation asks for (0 if none / not a JPEG).
+function exifQuarterTurns(buf) {
+  try {
+    const v = new DataView(buf);
+    if (v.getUint16(0) !== 0xffd8) return 0;
+    let off = 2;
+    while (off + 4 < v.byteLength) {
+      const marker = v.getUint16(off), len = v.getUint16(off + 2);
+      if (marker === 0xffe1 && v.getUint32(off + 4) === 0x45786966) { // "Exif"
+        const t = off + 10, le = v.getUint16(t) === 0x4949;
+        const ifd = t + v.getUint32(t + 4, le), n = v.getUint16(ifd, le);
+        for (let i = 0; i < n; i++) {
+          const e = ifd + 2 + i * 12;
+          if (v.getUint16(e, le) === 0x0112) return { 3: 2, 4: 2, 5: 1, 6: 1, 7: 3, 8: 3 }[v.getUint16(e + 8, le)] || 0;
+        }
+        return 0;
+      }
+      if ((marker & 0xff00) !== 0xff00 || marker === 0xffda) return 0;
+      off += 2 + len;
+    }
+  } catch (e) {}
+  return 0;
+}
+function tvPrepKey(photo) { return photo.fileId + "|" + tvPhotoRotation(photo, TV.cfg); }
+async function tvPrepareOriginal(photo) {
+  const key = tvPrepKey(photo);
+  if (TV.prepared.has(key) || TV.prepFailed.has(photo.fileId)) return;
+  const res = await fetch(photo.original);
+  if (!res.ok) throw new Error("Drive download " + res.status);
+  const blob = await res.blob();
+  const exif = exifQuarterTurns(await blob.slice(0, 256 * 1024).arrayBuffer());
+  const bmp = await createImageBitmap(blob, { imageOrientation: "from-image" }); // EXIF applied
+  // The preview shows the raw picture turned by tvPhotoRotation; the browser already applied
+  // `exif` turns, so add only the difference.
+  const turns = ((tvPhotoRotation(photo, TV.cfg) - exif) % 4 + 4) % 4;
+  const k = Math.min(1, 1920 / Math.max(bmp.width, bmp.height));
+  const w = Math.round(bmp.width * k), h = Math.round(bmp.height * k);
+  const c = document.createElement("canvas");
+  c.width = turns % 2 ? h : w; c.height = turns % 2 ? w : h;
+  const ctx = c.getContext("2d");
+  ctx.translate(c.width / 2, c.height / 2); ctx.rotate(turns * Math.PI / 2);
+  ctx.drawImage(bmp, -w / 2, -h / 2, w, h);
+  if (bmp.close) bmp.close();
+  const out = await new Promise((resolve) => c.toBlob(resolve, "image/jpeg", 0.88));
+  if (!out) throw new Error("encode failed");
+  TV.prepared.set(key, URL.createObjectURL(out));
+  while (TV.prepared.size > TV_PREP_MAX) { const [k0, u0] = TV.prepared.entries().next().value; URL.revokeObjectURL(u0); TV.prepared.delete(k0); }
+}
+// One download at a time; a photo that can't be prepared falls back to its thumbnail for good.
+function tvQueuePrep(photo) {
+  if (!photo || !photo.original || TV.prepBusy || TV.prepFailed.has(photo.fileId) || TV.prepared.has(tvPrepKey(photo))) return TV.prepBusy;
+  TV.prepBusy = tvPrepareOriginal(photo).catch((e) => { console.error("TV photo original:", photo.fileId, e); TV.prepFailed.add(photo.fileId); })
+    .finally(() => { TV.prepBusy = null; });
+  return TV.prepBusy;
+}
+// For a thumbnail (HEIC, or a failed original): turns still needed. If the thumbnail's shape
+// shows Google already turned it a quarter, Drive's own turn is skipped; that finding is remembered
+// for this kind of address, so upside-down (half-turn) photos -- whose shape can't tell -- follow it.
+function tvThumbTurns(photo, img, cfg) {
+  const rot = tvPhotoRotation(photo, cfg);
+  if (!photo.fileId) return rot;
+  const kind = img.src === photo.fallback ? "fallback" : "main";
+  const auto = cfg.photos.driveAutoRotate === false ? 0 : Number(photo.autoRot) || 0;
+  let pre = TV.thumbPreTurned[kind];
+  if (photo.rawW && photo.rawH && photo.rawW !== photo.rawH && (Number(photo.autoRot) || 0) % 2) {
+    pre = (photo.rawW > photo.rawH) !== (img.naturalWidth > img.naturalHeight);
+    TV.thumbPreTurned[kind] = pre;
+  }
+  return pre ? ((rot - (Number(photo.autoRot) || 0)) % 4 + 4) % 4 : rot;
+}
 // Photos are always live; a poster only until its "until" time (null = until it's removed).
 function tvPosterLive(p, now) { return !p || p.kind !== "poster" || !p.until || Number(p.until) > now; }
 function tvInitPhotos() {
@@ -11754,20 +11844,26 @@ function tvNextPhoto(keepIndex) {
   for (let n = 0; n < list.length && !tvPosterLive(list[TV.photoIdx], now); n++) TV.photoIdx = (TV.photoIdx + 1) % list.length;
   const photo = list[TV.photoIdx];
   const poster = photo.kind === "poster";
+  // A Drive original not ready yet: leave the current picture up until it is (usually a second).
+  if (photo.original && !TV.prepFailed.has(photo.fileId) && !TV.prepared.has(tvPrepKey(photo))) {
+    Promise.resolve(tvQueuePrep(photo) || TV.prepBusy).then(() => { if (TV.photos[TV.photoIdx] === photo) tvNextPhoto(true); });
+    return;
+  }
+  const preparedUrl = photo.original ? TV.prepared.get(tvPrepKey(photo)) : null;
   TV.photoSlide = TV.photoSlide ? 0 : 1;
   const slide = el.querySelector('.tv-slide[data-s="' + TV.photoSlide + '"]');
   const other = el.querySelector('.tv-slide[data-s="' + (TV.photoSlide ? 0 : 1) + '"]');
   const img = slide.querySelector(".tv-rot img"), bg = slide.querySelector(".tv-bg");
   slide.classList.toggle("is-poster", poster);
   if (poster) bg.src = photo.dataUrl; else bg.removeAttribute("src");
-  // Turn the photo upright. For a quarter turn the frame is sized to the zone's height x width
-  // before rotating, so the turned picture still fills the zone exactly.
-  const rot = tvPhotoRotation(photo, TV.cfg);
   const frame = slide.querySelector(".tv-rot");
-  frame.className = "tv-rot r" + rot;
-  frame.style.width = rot % 2 ? el.clientHeight + "px" : "";
-  frame.style.height = rot % 2 ? el.clientWidth + "px" : "";
   const show = () => {
+    // Turn the photo upright (a prepared original is already). For a quarter turn the frame is
+    // sized to the zone's height x width before rotating, so the turned picture still fills the zone.
+    const rot = preparedUrl ? 0 : tvThumbTurns(photo, img, TV.cfg);
+    frame.className = "tv-rot r" + rot;
+    frame.style.width = rot % 2 ? el.clientHeight + "px" : "";
+    frame.style.height = rot % 2 ? el.clientWidth + "px" : "";
     slide.querySelector(".tv-cap").style.display = photo.caption ? "" : "none";
     slide.querySelector(".tv-cap").textContent = photo.caption || "";
     slide.classList.remove("kb"); void slide.offsetWidth;
@@ -11782,8 +11878,10 @@ function tvNextPhoto(keepIndex) {
     if (photo.fallback && img.src !== photo.fallback) { img.src = photo.fallback; return; }
     if (list.length > 1) TV.stamps.photo = 0;
   };
-  img.src = photo.dataUrl || photo.src;
+  img.src = preparedUrl || photo.dataUrl || photo.src;
   if (img.complete && img.naturalWidth) show();
+  // Get the next Drive original ready while this one is up.
+  for (let n = 1; n < list.length; n++) { const nx = list[(TV.photoIdx + n) % list.length]; if (nx.original) { tvQueuePrep(nx); break; } }
 }
 
 /* ---------- leaderboard (reuses leaderboardEntryFor / competitionRanks / avatarHtml) ---------- */
