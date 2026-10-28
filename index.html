@@ -12034,7 +12034,15 @@ function renderTvControl(root, session) {
   // Exit
   html += collapsibleSectionHtml("tvExit", "Exit TV mode", "Return the screen to the normal app",
     '<p class="help-text">Sends the TV back to the normal app login. To put it back in TV mode, open the TV link again.</p><button type="button" class="btn btn-ghost" data-tvc-act="exit-tv">Exit TV mode on screen</button>');
+  // Re-rendering replaces the whole tab (a saved setting echoing back, a photo list update...);
+  // keep the page and the Drive photo grid scrolled where they were.
+  const pageY = window.scrollY;
+  const oldGrid = root.querySelector(".tvc-drive-grid");
+  const gridY = oldGrid ? oldGrid.scrollTop : 0;
   root.innerHTML = '<div class="tvc">' + html + "</div>";
+  const newGrid = root.querySelector(".tvc-drive-grid");
+  if (newGrid && gridY) newGrid.scrollTop = gridY;
+  if (window.scrollY !== pageY) window.scrollTo(0, pageY);
   tvcWire(root);
 }
 
@@ -12135,13 +12143,33 @@ function tvcDriveHtml() {
 }
 // Turn several Drive photos at once by `turns` quarter turns clockwise (3 = one to the left), in a
 // single save. The previews update immediately; the TV follows within a few seconds.
-function tvcTurnDrivePhotos(fileIds, turns) {
+function tvcTurnDrivePhotos(fileIds, turns, root) {
   const cur = Object.assign({}, (TVC.cfg.photos && TVC.cfg.photos.driveRotate) || {});
   const patch = {};
   fileIds.forEach((fid) => { patch[fid] = ((Number(cur[fid]) || 0) + turns) % 4; cur[fid] = patch[fid]; });
   TVC.cfg.photos = Object.assign({}, TVC.cfg.photos, { driveRotate: cur });
-  refreshViewOrDefer();
+  tvcSyncDriveGrid(root);
   tvcWrite({ photos: { driveRotate: patch } }, "Turned " + fileIds.length + " photo" + (fileIds.length === 1 ? "" : "s") + ".");
+}
+// Bring the Drive grid's selection outlines, turned previews and the selection buttons up to date
+// in place.
+function tvcSyncDriveGrid(root) {
+  const chk = TVC.driveCheck;
+  if (!root || !chk || !chk.photos) return;
+  let n = 0;
+  chk.photos.forEach((p) => {
+    const tile = root.querySelector('[data-tvc-drive-sel="' + (window.CSS && CSS.escape ? CSS.escape(p.fileId) : p.fileId) + '"]');
+    if (!tile) return;
+    const on = TVC.driveSel.has(p.fileId);
+    if (on) n++;
+    tile.classList.toggle("selected", on);
+    tile.setAttribute("aria-pressed", on ? "true" : "false");
+    const img = tile.querySelector("img");
+    if (img) img.className = "tvc-r" + tvPhotoRotation(p, TVC.cfg);
+  });
+  const count = root.querySelector(".tvc-rot-count");
+  if (count) count.textContent = n ? n + " selected" : "None selected";
+  root.querySelectorAll('[data-tvc-drive-turn], [data-tvc-act="drive-sel-none"]').forEach((b) => { b.disabled = !n; });
 }
 async function tvcCheckDrive(input) {
   const id = driveFolderId(input);
@@ -12217,9 +12245,9 @@ function tvcWire(root) {
       TVC.annText = null;
       tvcWrite({ announcement: { text, style: TVC.annStyle, until } }, "Posted to the TV.");
     } else if (act === "drive-sel-all") {
-      ((TVC.driveCheck && TVC.driveCheck.photos) || []).forEach((p) => TVC.driveSel.add(p.fileId)); refreshViewOrDefer();
+      ((TVC.driveCheck && TVC.driveCheck.photos) || []).forEach((p) => TVC.driveSel.add(p.fileId)); tvcSyncDriveGrid(root);
     } else if (act === "drive-sel-none") {
-      TVC.driveSel.clear(); refreshViewOrDefer();
+      TVC.driveSel.clear(); tvcSyncDriveGrid(root);
     } else if (act === "drive-rot-reset") {
       if (!window.confirm("Undo every manual turn on the Drive photos?")) return;
       TVC.cfg.photos = Object.assign({}, TVC.cfg.photos, { driveRotate: {} });
@@ -12284,13 +12312,13 @@ function tvcWire(root) {
   on("[data-tvc-drive-sel]", "click", (el) => {
     const fid = el.getAttribute("data-tvc-drive-sel");
     if (TVC.driveSel.has(fid)) TVC.driveSel.delete(fid); else TVC.driveSel.add(fid);
-    refreshViewOrDefer();
+    tvcSyncDriveGrid(root); // just this tile and the button row -- a full re-render would jump the page
   });
   on("[data-tvc-drive-turn]", "click", (el) => {
     const chk = TVC.driveCheck;
     const ids = chk && chk.photos ? chk.photos.map((p) => p.fileId).filter((f) => TVC.driveSel.has(f)) : [];
     if (!ids.length) return;
-    tvcTurnDrivePhotos(ids, Number(el.getAttribute("data-tvc-drive-turn")));
+    tvcTurnDrivePhotos(ids, Number(el.getAttribute("data-tvc-drive-turn")), root);
   });
   const driveAuto = document.getElementById("tvc-drive-auto");
   if (driveAuto) driveAuto.addEventListener("change", () => {
