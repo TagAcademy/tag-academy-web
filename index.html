@@ -1460,6 +1460,10 @@ html.tv-mode #tv-root { display: block; }
 .tv-slide { position: absolute; inset: 0; opacity: 0; transition: opacity 1.6s ease; }
 .tv-slide.show { opacity: 1; }
 .tv-slide img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* A poster is shown whole (never cropped), over a blurred, darkened copy of itself. */
+.tv-slide .tv-bg { display: none; position: absolute; inset: 0; filter: blur(40px) brightness(.45); transform: scale(1.15); }
+.tv-slide.is-poster .tv-bg { display: block; }
+.tv-slide.is-poster .tv-rot img { object-fit: contain; }
 .tv-rot { position: absolute; inset: 0; }
 .tv-rot.r1, .tv-rot.r3 { inset: auto; left: 50%; top: 50%; }
 .tv-rot.r1 { transform: translate(-50%, -50%) rotate(90deg); }
@@ -1617,7 +1621,14 @@ html.tv-mode #tv-root { display: block; }
 .tvc-photo-btns { display: flex; gap: 6px; flex-wrap: wrap; } .tvc-photo-btns .btn { min-height: 40px; }
 .tvc-del { background: var(--warn); color: #fff; }
 .tvc-upload { cursor: pointer; }
-@media (min-width: 700px) { .tvc-photos { grid-template-columns: repeat(3, 1fr); } .tvc-layouts { grid-template-columns: repeat(3, 1fr); } }
+.tvc-posters { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 10px; }
+.tvc-poster { border: 1px solid var(--line); border-radius: 12px; padding: 6px; background: var(--surface-2); display: flex; flex-direction: column; gap: 6px; }
+.tvc-poster.ended { opacity: .6; }
+.tvc-poster-img { aspect-ratio: 3/4; border-radius: 8px; overflow: hidden; background: #000; }
+.tvc-poster-img img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.tvc-poster-when { font-size: .78rem; color: var(--muted); font-weight: 600; }
+.tvc-poster .btn { min-height: 38px; }
+@media (min-width: 700px) { .tvc-posters { grid-template-columns: repeat(5, 1fr); } .tvc-photos { grid-template-columns: repeat(3, 1fr); } .tvc-layouts { grid-template-columns: repeat(3, 1fr); } }
 /* Family ledger (see VIEW: FAMILY) */
 .fam-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 16px; }
 .fam-list { display: flex; flex-direction: column; }
@@ -11367,7 +11378,9 @@ function tvDefaults() {
     rotate: [{ layout: "all", secs: 60 }, { layout: "leaderboard", secs: 30 }, { layout: "photos", secs: 30 }],
     schedule: [], fallback: "all",
     override: null, announcement: null,
-    photos: { intervalSecs: 12, kenBurns: true, driveFolder: "", driveRotate: {} },
+    // posterEvery: a poster (see tvRebuildPhotos) after every this-many photos; posterSecs: how
+    // long each poster stays up.
+    photos: { intervalSecs: 12, kenBurns: true, driveFolder: "", driveRotate: {}, posterEvery: 2, posterSecs: 15 },
     leaderboard: { categories: LEADERBOARD_CATEGORIES.map((c) => c.id), scope: "week", places: 8, secsPerCategory: 12 },
     exitTvNonce: null,
     // No photos while one of these classes is on the calendar (see tvQuietNow): the TV shows
@@ -11445,7 +11458,7 @@ function tvLayoutLabel(id) { const l = TV_LAYOUTS.find((x) => x.id === id); retu
 
 /* ---------- the TV screen ---------- */
 const TV = {
-  cfg: tvDefaults(), photos: [], uploaded: [], layout: null, lastLayoutCheck: 0,
+  cfg: tvDefaults(), photos: [], uploaded: [], posters: [], layout: null, lastLayoutCheck: 0,
   drive: { folder: "", photos: [], fetchedAt: 0, error: null },
   photoIdx: -1, photoSlide: 0, lbIdx: 0, lbStamp: 0,
   cal: { events: [], fetchedAt: 0, ok: null },
@@ -11489,7 +11502,9 @@ function tvSubscribe() {
   listen("state", () => STATE_DOC, (snap) => { if (snap.exists) tvApplyState(snap.data()); });
   listen("display", () => DISPLAY_DOC, (snap) => { TV.cfg = tvMergeCfg(snap.exists ? snap.data() : null); tvCheckExit(snap.exists ? snap.data() : null); TV.dirty = true; tvTick(); });
   listen("photos", () => DISPLAY_PHOTOS.where("enabled", "==", true), (snap) => {
-    TV.uploaded = snap.docs.map((d) => Object.assign({ id: d.id }, d.data())).filter((p) => p.dataUrl).sort((a, b) => (a.order || 0) - (b.order || 0));
+    const docs = snap.docs.map((d) => Object.assign({ id: d.id }, d.data())).filter((p) => p.dataUrl);
+    TV.uploaded = docs.filter((p) => p.kind !== "poster").sort((a, b) => (a.order || 0) - (b.order || 0));
+    TV.posters = docs.filter((p) => p.kind === "poster").sort((a, b) => (a.addedAt || 0) - (b.addedAt || 0));
     tvRebuildPhotos();
   });
   // The live listener above already pushes every change, so on the TV (which is always on and
@@ -11535,7 +11550,9 @@ function tvTick() {
     const folder = driveFolderId(TV.cfg.photos.driveFolder);
     if (folder !== TV.drive.folder || (folder && now - S.drive >= 300000)) { S.drive = now; tvRefreshDrivePhotos(folder); }
   }
-  if (TV.layout && TV.zones.photos && now - S.photo >= Math.max(4, Number(TV.cfg.photos.intervalSecs) || 12) * 1000) { S.photo = now; tvNextPhoto(); }
+  const onScreen = TV.photos[TV.photoIdx];
+  const slideSecs = Math.max(4, Number(TV.cfg.photos.intervalSecs) || 12, onScreen && onScreen.kind === "poster" ? Number(TV.cfg.photos.posterSecs) || 15 : 0);
+  if (TV.layout && TV.zones.photos && now - S.photo >= slideSecs * 1000) { S.photo = now; tvNextPhoto(); }
   if (TV.zones.leaderboard) {
     if (now - S.lb >= Math.max(5, Number(TV.cfg.leaderboard.secsPerCategory) || 12) * 1000) { S.lb = now; TV.lbIdx++; tvUpdateLeaderboard(); }
     else if (TV.dirty) tvUpdateLeaderboard();
@@ -11685,10 +11702,18 @@ async function tvRefreshDrivePhotos(folder) {
   else { TV.drive.error = r.reason; console.error("TV Drive photos:", r); } // keep showing the last good list
   tvRebuildPhotos();
 }
-// Photos uploaded in the TV Display tab first (in their chosen order), then the Drive folder's.
+// Photos uploaded in the TV Display tab first (in their chosen order), then the Drive folder's,
+// with a poster (posted from the Announcement card) slipped in after every few photos -- and
+// every poster at least once per round, however few photos there are.
 function tvRebuildPhotos() {
   const cur = TV.photos[TV.photoIdx];
-  TV.photos = TV.uploaded.concat(TV.drive.photos);
+  const photos = TV.uploaded.concat(TV.drive.photos), posters = TV.posters || [];
+  const every = Math.max(1, Number(TV.cfg.photos.posterEvery) || 2);
+  const list = [];
+  let pi = 0;
+  photos.forEach((p, i) => { list.push(p); if (posters.length && (i + 1) % every === 0) list.push(posters[pi++ % posters.length]); });
+  while (pi < posters.length) list.push(posters[pi++]);
+  TV.photos = list;
   const keep = cur ? TV.photos.findIndex((p) => p.id === cur.id) : -1;
   TV.photoIdx = keep >= 0 ? keep : -1;
   if (TV.zones && TV.zones.photos) tvNextPhoto(keep >= 0);
@@ -11704,11 +11729,13 @@ function tvPhotoRotation(photo, cfg) {
   const auto = cfg && cfg.photos && cfg.photos.driveAutoRotate === false ? 0 : Number(photo.autoRot) || 0;
   return ((auto + manual) % 4 + 4) % 4;
 }
+// Photos are always live; a poster only until its "until" time (null = until it's removed).
+function tvPosterLive(p, now) { return !p || p.kind !== "poster" || !p.until || Number(p.until) > now; }
 function tvInitPhotos() {
   const el = TV.zones.photos.el;
   // no-referrer: Google's image hosts serve publicly shared Drive photos to anyone, but can refuse a
   // request that carries another site's address.
-  el.innerHTML = '<div class="tv-slide" data-s="0"><div class="tv-rot"><img alt="" referrerpolicy="no-referrer"></div><div class="tv-cap"></div></div><div class="tv-slide" data-s="1"><div class="tv-rot"><img alt="" referrerpolicy="no-referrer"></div><div class="tv-cap"></div></div>' +
+  el.innerHTML = [0, 1].map((n) => '<div class="tv-slide" data-s="' + n + '"><img class="tv-bg" alt=""><div class="tv-rot"><img alt="" referrerpolicy="no-referrer"></div><div class="tv-cap"></div></div>').join("") +
     '<div class="tv-photo-empty" style="display:none;"><img src="' + LOGO_DATA_URI + '" alt=""><div>Photos coming soon</div></div>';
   TV.stamps.photo = 0;
   tvNextPhoto(true);
@@ -11717,16 +11744,22 @@ function tvInitPhotos() {
 function tvNextPhoto(keepIndex) {
   const zone = TV.zones.photos; if (!zone) return;
   const el = zone.el, empty = el.querySelector(".tv-photo-empty");
-  const list = TV.photos;
-  if (!list.length) { empty.style.display = ""; el.querySelectorAll(".tv-slide").forEach((s) => s.classList.remove("show")); return; }
+  const list = TV.photos, now = Date.now();
+  const live = list.some((p) => tvPosterLive(p, now));
+  if (!live) { empty.style.display = ""; el.querySelectorAll(".tv-slide").forEach((s) => s.classList.remove("show")); return; }
   empty.style.display = "none";
   if (!keepIndex || TV.photoIdx < 0) TV.photoIdx = (TV.photoIdx + 1) % list.length;
   if (TV.photoIdx >= list.length) TV.photoIdx = 0;
+  // Step past any poster whose time is up.
+  for (let n = 0; n < list.length && !tvPosterLive(list[TV.photoIdx], now); n++) TV.photoIdx = (TV.photoIdx + 1) % list.length;
   const photo = list[TV.photoIdx];
+  const poster = photo.kind === "poster";
   TV.photoSlide = TV.photoSlide ? 0 : 1;
   const slide = el.querySelector('.tv-slide[data-s="' + TV.photoSlide + '"]');
   const other = el.querySelector('.tv-slide[data-s="' + (TV.photoSlide ? 0 : 1) + '"]');
-  const img = slide.querySelector("img");
+  const img = slide.querySelector(".tv-rot img"), bg = slide.querySelector(".tv-bg");
+  slide.classList.toggle("is-poster", poster);
+  if (poster) bg.src = photo.dataUrl; else bg.removeAttribute("src");
   // Turn the photo upright. For a quarter turn the frame is sized to the zone's height x width
   // before rotating, so the turned picture still fills the zone exactly.
   const rot = tvPhotoRotation(photo, TV.cfg);
@@ -11739,7 +11772,7 @@ function tvNextPhoto(keepIndex) {
     slide.querySelector(".tv-cap").textContent = photo.caption || "";
     slide.classList.remove("kb"); void slide.offsetWidth;
     slide.style.setProperty("--kb-dur", ((Number(TV.cfg.photos.intervalSecs) || 12) + 3) + "s");
-    if (TV.cfg.photos.kenBurns) slide.classList.add("kb");
+    if (TV.cfg.photos.kenBurns && !poster) slide.classList.add("kb");
     slide.classList.add("show");
     if (other) other.classList.remove("show");
   };
@@ -11972,7 +12005,10 @@ const TVC = {
   cfg: tvDefaults(), cfgLoaded: false, status: null, photos: [], photosLoaded: false,
   unsubs: {}, duration: 15 * 60000, annStyle: "info", annExpiry: 60 * 60000, annText: null,
   uploading: null, deleteConfirm: null, seenTimer: null, driveInput: null, driveCheck: null, driveSel: new Set(),
+  posters: [], postersLoaded: false, posterExpiry: 7 * 86400000, posterUploading: null,
 };
+const TV_MAX_POSTERS = 12;
+const TVC_POSTER_EXPIRY = [[-1, "End of day"], [7 * 86400000, "1 week"], [0, "Until I remove it"]];
 function tvcWho() { const s = currentSession(); return (s && s.record && s.record.name) || "admin"; }
 function tvcSync(route) {
   const wantMain = route === "tvdisplay" && !TV_MODE;
@@ -11981,14 +12017,18 @@ function tvcSync(route) {
   if (wantMain && !TVC.unsubs.cfg) {
     TVC.unsubs.cfg = DISPLAY_DOC.onSnapshot((snap) => { TVC.cfg = tvMergeCfg(snap.exists ? snap.data() : null); TVC.cfgLoaded = true; refresh(); }, (e) => console.error("display listener:", e));
     TVC.unsubs.status = DISPLAY_STATUS_DOC.onSnapshot((snap) => { TVC.status = snap.exists ? snap.data() : null; refresh(); }, (e) => console.error("status listener:", e));
+    TVC.unsubs.posters = DISPLAY_PHOTOS.where("kind", "==", "poster").onSnapshot((snap) => {
+      TVC.posters = snap.docs.map((d) => Object.assign({ id: d.id }, d.data())).sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
+      TVC.postersLoaded = true; refresh();
+    }, (e) => console.error("posters listener:", e));
     TVC.seenTimer = setInterval(tvcTickSeen, 1000);
   } else if (!wantMain && TVC.unsubs.cfg) {
-    TVC.unsubs.cfg(); TVC.unsubs.status(); TVC.unsubs.cfg = TVC.unsubs.status = null;
-    clearInterval(TVC.seenTimer); TVC.seenTimer = null; TVC.cfgLoaded = false;
+    TVC.unsubs.cfg(); TVC.unsubs.status(); TVC.unsubs.posters(); TVC.unsubs.cfg = TVC.unsubs.status = TVC.unsubs.posters = null;
+    clearInterval(TVC.seenTimer); TVC.seenTimer = null; TVC.cfgLoaded = false; TVC.postersLoaded = false; TVC.posters = [];
   }
   if (wantPhotos && !TVC.unsubs.photos) {
     TVC.unsubs.photos = DISPLAY_PHOTOS.onSnapshot((snap) => {
-      TVC.photos = snap.docs.map((d) => Object.assign({ id: d.id }, d.data())).sort((a, b) => (a.order || 0) - (b.order || 0));
+      TVC.photos = snap.docs.map((d) => Object.assign({ id: d.id }, d.data())).filter((p) => p.kind !== "poster").sort((a, b) => (a.order || 0) - (b.order || 0));
       TVC.photosLoaded = true; refresh();
     }, (e) => console.error("photos listener:", e));
   } else if (!wantPhotos && TVC.unsubs.photos) {
@@ -12077,7 +12117,8 @@ function renderTvControl(root, session) {
     '<textarea id="tvc-ann-text" class="tvc-textarea" rows="2" maxlength="240" placeholder="e.g. Mazal tov to Sruly on his bar mitzvah!">' + escapeHtml(annText) + "</textarea>" +
     '<div class="tvc-sub">Style</div><div class="tvc-chips">' + TVC_ANN_STYLES.map(([v, l]) => '<button type="button" class="tvc-chip' + (TVC.annStyle === v ? " active" : "") + '" data-tvc-annstyle="' + v + '">' + l + "</button>").join("") + "</div>" +
     '<div class="tvc-sub">Show for</div><div class="tvc-chips">' + TVC_ANN_EXPIRY.map(([ms, l]) => '<button type="button" class="tvc-chip' + (TVC.annExpiry === ms ? " active" : "") + '" data-tvc-annexp="' + ms + '">' + l + "</button>").join("") + "</div>" +
-    '<div class="tvc-row"><button type="button" class="btn btn-primary" data-tvc-act="post-ann">Post</button><button type="button" class="btn btn-ghost" data-tvc-act="clear-ann"' + (ann ? "" : " disabled") + ">Clear</button></div></div>";
+    '<div class="tvc-row"><button type="button" class="btn btn-primary" data-tvc-act="post-ann">Post</button><button type="button" class="btn btn-ghost" data-tvc-act="clear-ann"' + (ann ? "" : " disabled") + ">Clear</button></div>" +
+    tvcPostersHtml() + "</div>";
 
   // Photos (collapsible; the photo list is only downloaded while this is open)
   const driveOn = !!(cfg.photos && cfg.photos.driveFolder);
@@ -12104,6 +12145,26 @@ function renderTvControl(root, session) {
   tvcWire(root);
 }
 
+function tvcPosterWhen(p, now) {
+  if (!p.until) return "Until you remove it";
+  if (Number(p.until) <= now) return "Ended";
+  const d = new Date(Number(p.until));
+  return "Until " + (tvCalDayStart(d.getTime()) === tvCalDayStart(now) ? "tonight" : d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }));
+}
+function tvcPostersHtml() {
+  const now = Date.now();
+  let h = '<div class="tvc-sub" style="margin-top:18px;">Posters</div>' +
+    '<p class="help-text">A flyer or poster picture. It shows whole (not cropped) in the photo slideshow, after every ' + (Number(TVC.cfg.photos.posterEvery) || 2) + " photos, for " + (Number(TVC.cfg.photos.posterSecs) || 15) + " seconds.</p>" +
+    '<div class="tvc-sub">Show for</div><div class="tvc-chips">' + TVC_POSTER_EXPIRY.map(([ms, l]) => '<button type="button" class="tvc-chip' + (TVC.posterExpiry === ms ? " active" : "") + '" data-tvc-posterexp="' + ms + '">' + l + "</button>").join("") + "</div>" +
+    '<div class="tvc-row"><label class="btn btn-primary tvc-upload">+ Add poster<input type="file" id="tvc-poster-file" accept="image/*" multiple hidden></label>' +
+    (TVC.posterUploading ? '<span class="tvc-unit">' + escapeHtml(TVC.posterUploading) + "</span>" : "") + "</div>";
+  if (!TVC.postersLoaded) return h + '<p class="help-text">Loading posters…</p>';
+  if (!TVC.posters.length) return h;
+  return h + '<div class="tvc-posters">' + TVC.posters.map((p) =>
+    '<div class="tvc-poster' + (p.until && Number(p.until) <= now ? " ended" : "") + '"><div class="tvc-poster-img"><img loading="lazy" decoding="async" alt="" src="' + escapeHtml(p.thumb || p.dataUrl) + '"></div>' +
+    '<div class="tvc-poster-when">' + escapeHtml(tvcPosterWhen(p, now)) + "</div>" +
+    (TVC.deleteConfirm === p.id ? '<button type="button" class="btn btn-sm tvc-del" data-tvc-del="' + p.id + '">Really remove?</button>' : '<button type="button" class="btn btn-ghost btn-sm" data-tvc-askdel="' + p.id + '">Remove</button>') + "</div>").join("") + "</div>";
+}
 function tvcQuietHtml() {
   const q = TVC.cfg.quiet || {};
   const chosen = new Set(q.classes || []);
@@ -12294,6 +12355,28 @@ async function tvcUploadFiles(files) {
   toast(failed ? "Added " + done + ", " + failed + " didn’t work." : "Added " + done + " photo" + (done === 1 ? "" : "s") + ".", failed ? "warn" : "good");
 }
 
+async function tvcUploadPosters(files) {
+  if (!canWrite) { toast("Can’t save right now — not connected.", "warn"); return; }
+  files = Array.from(files).filter((f) => /^image\//.test(f.type));
+  if (!files.length) return;
+  const room = TV_MAX_POSTERS - TVC.posters.length;
+  if (room <= 0) { toast("That’s the maximum (" + TV_MAX_POSTERS + " posters). Remove a few first.", "warn"); return; }
+  if (files.length > room) { toast("Only room for " + room + " more — adding the first " + room + ".", "warn"); files = files.slice(0, room); }
+  let until = null;
+  if (TVC.posterExpiry > 0) until = Date.now() + TVC.posterExpiry;
+  else if (TVC.posterExpiry === -1) { const d = new Date(); d.setHours(23, 59, 0, 0); until = d.getTime(); }
+  let done = 0, failed = 0;
+  for (const f of files) {
+    TVC.posterUploading = "Adding " + (done + 1) + " of " + files.length + "…"; refreshViewOrDefer();
+    try {
+      const r = await tvcResizePhoto(f);
+      await DISPLAY_PHOTOS.add({ kind: "poster", dataUrl: r.dataUrl, thumb: r.thumb, until, caption: "", order: 0, enabled: true, addedAt: Date.now(), addedBy: tvcWho() });
+      done++;
+    } catch (e) { console.error("poster upload failed:", e); failed++; }
+  }
+  TVC.posterUploading = null; refreshViewOrDefer();
+  toast(failed ? "Added " + done + ", " + failed + " didn’t work." : "Poster" + (done === 1 ? "" : "s") + " posted to the TV.", failed ? "warn" : "good");
+}
 function tvcWire(root) {
   const on = (sel, ev, fn) => root.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, (e) => fn(el, e)));
   const cfg = TVC.cfg;
@@ -12384,6 +12467,9 @@ function tvcWire(root) {
   if (kb) kb.addEventListener("change", () => tvcWrite({ photos: { kenBurns: kb.checked } }));
   const file = document.getElementById("tvc-file");
   if (file) file.addEventListener("change", () => { const fl = file.files; if (fl && fl.length) tvcUploadFiles(fl); file.value = ""; });
+  const pfile = document.getElementById("tvc-poster-file");
+  if (pfile) pfile.addEventListener("change", () => { const fl = pfile.files; if (fl && fl.length) tvcUploadPosters(fl); pfile.value = ""; });
+  on("[data-tvc-posterexp]", "click", (el) => { TVC.posterExpiry = Number(el.getAttribute("data-tvc-posterexp")); refreshViewOrDefer(); });
   on("[data-tvc-caption]", "change", (el) => DISPLAY_PHOTOS.doc(el.getAttribute("data-tvc-caption")).update({ caption: el.value.trim() }).catch((e) => toast("Couldn’t save the caption.", "warn")));
   on("[data-tvc-rotate]", "click", (el) => { const p = TVC.photos.find((x) => x.id === el.getAttribute("data-tvc-rotate")); if (p) DISPLAY_PHOTOS.doc(p.id).update({ rotate: ((Number(p.rotate) || 0) + 1) % 4 }).catch(() => toast("Couldn’t rotate that photo.", "warn")); });
   on("[data-tvc-drive-sel]", "click", (el) => {
@@ -12414,7 +12500,7 @@ function tvcWire(root) {
     batch.commit().catch(() => toast("Couldn’t reorder.", "warn"));
   });
   on("[data-tvc-askdel]", "click", (el) => { TVC.deleteConfirm = el.getAttribute("data-tvc-askdel"); refreshViewOrDefer(); });
-  on("[data-tvc-del]", "click", (el) => { TVC.deleteConfirm = null; DISPLAY_PHOTOS.doc(el.getAttribute("data-tvc-del")).delete().then(() => toast("Photo deleted.", "good")).catch(() => toast("Couldn’t delete.", "warn")); });
+  on("[data-tvc-del]", "click", (el) => { TVC.deleteConfirm = null; DISPLAY_PHOTOS.doc(el.getAttribute("data-tvc-del")).delete().then(() => toast("Removed.", "good")).catch(() => toast("Couldn’t delete.", "warn")); });
 }
 
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
