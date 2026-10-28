@@ -1508,12 +1508,15 @@ html.tv-mode #tv-root { display: block; }
 .tv-cd-time.has-hours { font-size: 3.6rem; }
 .tv-day-list { list-style: none; margin: 0; padding: 0; flex: 1; min-width: 0; min-height: 0; display: grid; grid-auto-flow: column; grid-template-rows: repeat(var(--rows, 6), minmax(0, 1fr)); grid-auto-columns: minmax(0, 1fr); gap: .35rem 1.2rem; container-type: size; }
 .tv-day-ev { display: flex; align-items: center; gap: 1rem; min-height: 0; padding: 0 .9rem; border-radius: .6rem; font-size: min(1.9rem, calc(100cqh / var(--rows, 6) * .55)); border-left: .35rem solid transparent; }
-.tv-day-ev time { flex: none; width: 4.6em; color: var(--tv-muted); font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.tv-day-ev time { flex: none; width: 3.7em; color: var(--tv-muted); font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
 .tv-day-ev time.is-since { display: flex; flex-direction: column; line-height: 1; }
+/* AM/PM in small type, so the time column is narrower and the class name gets the room. */
+.tv-day-ev time .tv-ampm { font-size: .62em; margin-left: .2em; letter-spacing: .03em; }
 .tv-day-ev time.is-since small { font-size: .55em; text-transform: uppercase; letter-spacing: .08em; }
-.tv-day-ev span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+.tv-day-ev > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
 .tv-day-ev.is-past { opacity: .4; }
-.tv-day-ev.is-past span { font-weight: 500; }
+.tv-day-ev.is-past > span { font-weight: 500; }
+.tv-day-ev > span.is-wrapped { white-space: normal; line-height: 1; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .tv-day-ev.is-now { background: linear-gradient(90deg, rgba(79,209,154,.22), rgba(79,209,154,.04)); border-left-color: var(--tv-good); }
 .tv-day-ev.is-now time { color: var(--tv-good); }
 .tv-day-ev.is-next { background: var(--tv-panel-2); border-left-color: var(--tv-brand); }
@@ -1524,7 +1527,7 @@ html.tv-mode #tv-root { display: block; }
 .tv-layout-calendar .tv-cd-title { font-size: 4.4rem; }
 .tv-layout-calendar .tv-cd-time { font-size: 8rem; }
 /* Rows are tall here, so a long class name gets a second line instead of being cut off. */
-.tv-layout-calendar .tv-day-ev span { white-space: normal; line-height: 1.1; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.tv-layout-calendar .tv-day-ev > span { white-space: normal; line-height: 1.1; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .tv-layout-calendar .tv-cd-time small { font-size: 2.2rem; }
 .tv-layout-calendar .tv-cd-time.has-hours { font-size: 6.4rem; }
 .tv-layout-calendar .tv-cd-time.is-later { font-size: 5rem; }
@@ -1532,12 +1535,14 @@ html.tv-mode #tv-root { display: block; }
 .tv-cd > * { flex: none; }
 /* No room for the "Now" line in the combined layout's short strip -- the list's green row shows it. */
 .tv-layout-all .tv-cd-now { display: none; }
-.tv-layout-all .tv-cd { width: 34%; padding: .7rem 1.1rem; }
+.tv-layout-all .tv-cd { width: 25%; padding: .7rem 1.1rem; }
 .tv-layout-all .tv-cd-title { font-size: 2.1rem; -webkit-line-clamp: 1; }
 .tv-layout-all .tv-cd-time { font-size: 3.6rem; }
 .tv-layout-all .tv-cd-time.has-hours, .tv-layout-all .tv-cd-time.is-later { font-size: 2.8rem; }
 .tv-cal-note { color: var(--tv-muted); font-size: 1.6rem; margin: auto; text-align: center; }
 .tv-layout-all .tv-zone-calendar { flex: 1; padding: 1rem 1.4rem; }
+.tv-layout-all .tv-day-list { gap: .35rem .8rem; }
+.tv-layout-all .tv-day-ev { gap: .7rem; padding: 0 .6rem; }
 .tv-layout-all .tv-zone-calendar .tv-zone-head { display: none; }
 /* ticker */
 .tv-ticker { flex: none; border-radius: 1rem; overflow: hidden; background: var(--tv-info); font-size: 2.6rem; font-weight: 800; padding: .7rem 2rem; white-space: nowrap; position: relative; }
@@ -11807,6 +11812,18 @@ async function tvRefreshCalendar() {
   tvUpdateCalendar();
 }
 function tvTimeStr(ms) { return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
+// Same time, with the AM/PM wrapped so the schedule list can set it in small type.
+function tvTimeHtml(ms) { return escapeHtml(tvTimeStr(ms)).replace(/\s*([AP]\.?M\.?)$/i, '<span class="tv-ampm">$1</span>'); }
+// Shrinks any class name in the schedule list that doesn't fit its column (down to 75%) instead
+// of cutting it off; a name still too long goes onto two smaller lines, and only something
+// extremely long still ends in "…".
+function tvFitDayList(root) {
+  root.querySelectorAll(".tv-day-ev > span").forEach((sp) => {
+    sp.classList.remove("is-wrapped"); sp.style.fontSize = "";
+    for (let pct = 95; pct >= 75 && sp.scrollWidth > sp.clientWidth; pct -= 5) sp.style.fontSize = pct + "%";
+    if (sp.scrollWidth > sp.clientWidth) { sp.style.fontSize = "70%"; sp.classList.add("is-wrapped"); }
+  });
+}
 function tvDayLabel(ms, nowMs) {
   const d0 = new Date(nowMs); d0.setHours(0, 0, 0, 0);
   const d1 = new Date(ms); d1.setHours(0, 0, 0, 0);
@@ -11873,7 +11890,7 @@ function tvUpdateCalendar() {
     const kind = e.end <= now ? " is-past" : e.start <= now ? " is-now" : e === next ? " is-next" : "";
     // Something that began yesterday (e.g. last night's Lights out, still running) would otherwise
     // sit at the top of today's list with a "10:45 PM" that reads like tonight.
-    const when = e.start < todayStart ? '<time class="is-since"><small>since</small>' + tvTimeStr(e.start) + "</time>" : "<time>" + tvTimeStr(e.start) + "</time>";
+    const when = e.start < todayStart ? '<time class="is-since"><small>since</small>' + tvTimeHtml(e.start) + "</time>" : "<time>" + tvTimeHtml(e.start) + "</time>";
     return '<li class="tv-day-ev' + kind + '">' + when + "<span>" + escapeHtml(e.title) + "</span></li>";
   };
   // Two columns whenever the day allows, so class names have room to be read; a third column only
@@ -11888,7 +11905,8 @@ function tvUpdateCalendar() {
     (TV.cal.ok === "stale" ? '<span class="tv-idle-badge">may be out of date</span>' : "") +
     (allDayToday.length ? '<span class="tv-scope">' + allDayToday.map((e) => escapeHtml(e.title)).join(" · ") + "</span>" : "") + "</div>";
   html += '<div class="tv-cal-body">' + countdown + list + "</div>";
-  if (zone.html !== html) { zone.html = html; zone.el.innerHTML = html; }
+  if (zone.html !== html) { zone.html = html; zone.el.innerHTML = html; tvFitDayList(zone.el);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => tvFitDayList(zone.el)); }
 }
 
 /* ---------- ticker (announcement) ---------- */
