@@ -11380,7 +11380,7 @@ function tvDefaults() {
     override: null, announcement: null,
     // posterEvery: a poster (see tvRebuildPhotos) after every this-many photos; posterSecs: how
     // long each poster stays up.
-    photos: { intervalSecs: 12, kenBurns: true, driveFolder: "", driveRotate: {}, posterEvery: 2, posterSecs: 15 },
+    photos: { intervalSecs: 12, kenBurns: true, shuffle: true, driveFolder: "", driveRotate: {}, posterEvery: 2, posterSecs: 15 },
     leaderboard: { categories: LEADERBOARD_CATEGORIES.map((c) => c.id), scope: "week", places: 8, secsPerCategory: 12 },
     exitTvNonce: null,
     // No photos while one of these classes is on the calendar (see tvQuietNow): the TV shows
@@ -11460,9 +11460,10 @@ function tvLayoutLabel(id) { const l = TV_LAYOUTS.find((x) => x.id === id); retu
 const TV = {
   cfg: tvDefaults(), photos: [], uploaded: [], posters: [], layout: null, lastLayoutCheck: 0,
   drive: { folder: "", photos: [], fetchedAt: 0, error: null },
-  photoIdx: -1, photoSlide: 0, lbIdx: 0, lbStamp: 0,
+  photoIdx: -1, photoSlide: 0, lbIdx: 0, lbStamp: 0, shuffleKeys: new Map(),
   // Drive originals already turned and shrunk for the screen (see tvPrepareOriginal).
   prepared: new Map(), prepFailed: new Set(), prepBusy: null, thumbPreTurned: {},
+  photoStats: { originals: 0, lastError: null, previewUpright: null, thumbOnly: new Set() }, // reported in the heartbeat
   cal: { events: [], fetchedAt: 0, ok: null },
   stamps: { photo: 0, lb: 0, cal: 0, drive: 0, hb: 0, shift: 0, nightly: 0 },
   exitHandled: false, started: false, dirty: true,
@@ -11586,6 +11587,8 @@ function tvHeartbeat() {
   DISPLAY_STATUS_DOC.set({
     lastSeen: firebase.firestore.FieldValue.serverTimestamp(), screen: "hallway",
     layout: TV.layout || null, source: TV.eff ? TV.eff.source : null, quietFor: (TV.eff && TV.eff.quietFor) || null,
+    // How the Drive photos are being drawn (shown in the TV Display tab's Photos section).
+    photoInfo: { originals: TV.photoStats.originals, failed: TV.prepFailed.size, thumbOnly: TV.photoStats.thumbOnly.size, lastError: TV.photoStats.lastError, previewUpright: TV.photoStats.previewUpright },
   }, { merge: true }).catch((e) => console.error("TV heartbeat failed:", e));
 }
 function tvMaybeNightlyReload(now) {
@@ -11719,16 +11722,28 @@ async function tvRefreshDrivePhotos(folder) {
 // every poster at least once per round, however few photos there are.
 function tvRebuildPhotos() {
   const cur = TV.photos[TV.photoIdx];
-  const photos = TV.uploaded.concat(TV.drive.photos), posters = TV.posters || [];
+  TV.photos = tvPhotoList();
+  const keep = cur ? TV.photos.findIndex((p) => p.id === cur.id) : -1;
+  TV.photoIdx = keep >= 0 ? keep : -1;
+  if (TV.zones && TV.zones.photos) tvNextPhoto(keep >= 0);
+}
+// Shuffle (photos.shuffle, on by default): every photo gets a random place for the round, kept
+// when the Drive folder is re-checked mid-round (so nothing repeats early); a new round deals a
+// fresh order (tvNextPhoto).
+function tvShuffleKey(id) {
+  if (!TV.shuffleKeys.has(id)) TV.shuffleKeys.set(id, Math.random());
+  return TV.shuffleKeys.get(id);
+}
+function tvPhotoList() {
+  let photos = TV.uploaded.concat(TV.drive.photos);
+  const posters = TV.posters || [];
+  if (TV.cfg.photos.shuffle !== false) photos = photos.slice().sort((a, b) => tvShuffleKey(a.id) - tvShuffleKey(b.id));
   const every = Math.max(1, Number(TV.cfg.photos.posterEvery) || 2);
   const list = [];
   let pi = 0;
   photos.forEach((p, i) => { list.push(p); if (posters.length && (i + 1) % every === 0) list.push(posters[pi++ % posters.length]); });
   while (pi < posters.length) list.push(posters[pi++]);
-  TV.photos = list;
-  const keep = cur ? TV.photos.findIndex((p) => p.id === cur.id) : -1;
-  TV.photoIdx = keep >= 0 ? keep : -1;
-  if (TV.zones && TV.zones.photos) tvNextPhoto(keep >= 0);
+  return list;
 }
 
 /* ---------- photos ---------- */
@@ -11742,12 +11757,14 @@ function tvPhotoRotation(photo, cfg) {
   return ((auto + manual) % 4 + 4) % 4;
 }
 /* Upright Drive photos, without anyone turning them by hand.
-   Google's thumbnails aren't consistent: the small ones in the TV Display tab come back exactly as
-   the camera stored them, but bigger ones can come back already turned upright -- so the same
-   turn that fixes the preview flipped the TV's copy upside down. Instead, for JPEG/PNG/WebP the TV
-   downloads the original itself, reads the camera's own "which way is up" note (EXIF), and draws
-   it into a TV-sized picture turned exactly the way the preview shows it. HEIC (and anything that
-   fails) stays on the thumbnails, where tvThumbTurns works out whether Google already turned it. */
+   Google's thumbnails aren't consistent: the small ones in the TV Display tab and the big ones the
+   TV used don't come back turned the same way -- so the same turn that fixes the preview can leave
+   the TV's copy upside down. Instead, for JPEG/PNG/WebP the TV downloads the original itself, reads
+   the camera's own "which way is up" note (EXIF), and draws a TV-sized picture that matches the
+   preview exactly. Whether the small previews come back already turned upright or exactly as the
+   camera stored them is worked out from the photos themselves (see tvPreviewIsUpright), so it
+   doesn't depend on guessing what Google does. HEIC (and anything that fails) stays on the
+   thumbnails, where tvThumbTurns works out whether Google already turned it. */
 const TV_PREP_MAX = 80; // prepared pictures kept in memory (~300 KB each)
 // Quarter turns clockwise the camera's EXIF orientation asks for (0 if none / not a JPEG).
 function exifQuarterTurns(buf) {
@@ -11773,6 +11790,36 @@ function exifQuarterTurns(buf) {
   return 0;
 }
 function tvPrepKey(photo) { return photo.fileId + "|" + tvPhotoRotation(photo, TV.cfg); }
+const TV_PREVIEW_KEY = "tagTvPreviewUpright";
+function tvLoadImageSize(src, ms) {
+  return new Promise((resolve) => {
+    const im = new Image(); im.referrerPolicy = "no-referrer";
+    const t = setTimeout(() => resolve(null), ms);
+    im.onload = () => { clearTimeout(t); resolve({ w: im.naturalWidth, h: im.naturalHeight }); };
+    im.onerror = () => { clearTimeout(t); resolve(null); };
+    im.src = src;
+  });
+}
+// Does the small preview (photo.thumb) come back already turned upright, or exactly as the camera
+// stored it? A photo the camera stored a quarter turn off answers it from the preview's shape
+// (portrait vs landscape); the answer is remembered on this TV for photos whose shape can't tell
+// (upside down = a half turn). Unknown yet: assume upright, which is how Google usually sends them.
+async function tvPreviewIsUpright(photo, uprightW, uprightH, exif) {
+  let known = null;
+  try { known = localStorage.getItem(TV_PREVIEW_KEY); } catch (e) {}
+  if (exif % 2 && uprightW !== uprightH && photo.thumb) {
+    const t = await tvLoadImageSize(photo.thumb, 8000);
+    if (t && t.w !== t.h) {
+      const upright = (t.w > t.h) === (uprightW > uprightH);
+      try { localStorage.setItem(TV_PREVIEW_KEY, upright ? "1" : "0"); } catch (e) {}
+      // Learned something new: pictures already drawn on the old assumption get redrawn.
+      if ((known !== "0") !== upright) { TV.prepared.forEach((u) => URL.revokeObjectURL(u)); TV.prepared.clear(); }
+      TV.photoStats.previewUpright = upright;
+      return upright;
+    }
+  }
+  return known !== "0";
+}
 async function tvPrepareOriginal(photo) {
   const key = tvPrepKey(photo);
   if (TV.prepared.has(key) || TV.prepFailed.has(photo.fileId)) return;
@@ -11781,9 +11828,11 @@ async function tvPrepareOriginal(photo) {
   const blob = await res.blob();
   const exif = exifQuarterTurns(await blob.slice(0, 256 * 1024).arrayBuffer());
   const bmp = await createImageBitmap(blob, { imageOrientation: "from-image" }); // EXIF applied
-  // The preview shows the raw picture turned by tvPhotoRotation; the browser already applied
-  // `exif` turns, so add only the difference.
-  const turns = ((tvPhotoRotation(photo, TV.cfg) - exif) % 4 + 4) % 4;
+  // The preview is Google's small picture turned by tvPhotoRotation. If that small picture already
+  // came upright, so is `bmp`: give it the same turn. If it came as the camera stored it, the
+  // browser has already applied `exif` of that turn here.
+  const upright = !exif || await tvPreviewIsUpright(photo, bmp.width, bmp.height, exif);
+  const turns = ((tvPhotoRotation(photo, TV.cfg) - (upright ? 0 : exif)) % 4 + 4) % 4;
   const k = Math.min(1, 1920 / Math.max(bmp.width, bmp.height));
   const w = Math.round(bmp.width * k), h = Math.round(bmp.height * k);
   const c = document.createElement("canvas");
@@ -11795,12 +11844,13 @@ async function tvPrepareOriginal(photo) {
   const out = await new Promise((resolve) => c.toBlob(resolve, "image/jpeg", 0.88));
   if (!out) throw new Error("encode failed");
   TV.prepared.set(key, URL.createObjectURL(out));
+  TV.photoStats.originals++;
   while (TV.prepared.size > TV_PREP_MAX) { const [k0, u0] = TV.prepared.entries().next().value; URL.revokeObjectURL(u0); TV.prepared.delete(k0); }
 }
 // One download at a time; a photo that can't be prepared falls back to its thumbnail for good.
 function tvQueuePrep(photo) {
   if (!photo || !photo.original || TV.prepBusy || TV.prepFailed.has(photo.fileId) || TV.prepared.has(tvPrepKey(photo))) return TV.prepBusy;
-  TV.prepBusy = tvPrepareOriginal(photo).catch((e) => { console.error("TV photo original:", photo.fileId, e); TV.prepFailed.add(photo.fileId); })
+  TV.prepBusy = tvPrepareOriginal(photo).catch((e) => { console.error("TV photo original:", photo.fileId, e); TV.prepFailed.add(photo.fileId); TV.photoStats.lastError = String((e && e.message) || e).slice(0, 120); })
     .finally(() => { TV.prepBusy = null; });
   return TV.prepBusy;
 }
@@ -11838,6 +11888,15 @@ function tvNextPhoto(keepIndex) {
   const live = list.some((p) => tvPosterLive(p, now));
   if (!live) { empty.style.display = ""; el.querySelectorAll(".tv-slide").forEach((s) => s.classList.remove("show")); return; }
   empty.style.display = "none";
+  // End of a round with shuffle on: deal a new order (not starting on the photo just shown).
+  if (!keepIndex && TV.photoIdx >= list.length - 1 && TV.cfg.photos.shuffle !== false && list.length > 2) {
+    const last = list[TV.photoIdx];
+    TV.shuffleKeys.clear();
+    TV.photos = tvPhotoList();
+    if (last && TV.photos[0] && TV.photos[0].id === last.id) TV.photos.push(TV.photos.shift());
+    TV.photoIdx = -1;
+    return tvNextPhoto(false);
+  }
   if (!keepIndex || TV.photoIdx < 0) TV.photoIdx = (TV.photoIdx + 1) % list.length;
   if (TV.photoIdx >= list.length) TV.photoIdx = 0;
   // Step past any poster whose time is up.
@@ -11861,6 +11920,7 @@ function tvNextPhoto(keepIndex) {
     // Turn the photo upright (a prepared original is already). For a quarter turn the frame is
     // sized to the zone's height x width before rotating, so the turned picture still fills the zone.
     const rot = preparedUrl ? 0 : tvThumbTurns(photo, img, TV.cfg);
+    if (!preparedUrl && photo.fileId) TV.photoStats.thumbOnly.add(photo.fileId);
     frame.className = "tv-rot r" + rot;
     frame.style.width = rot % 2 ? el.clientHeight + "px" : "";
     frame.style.height = rot % 2 ? el.clientWidth + "px" : "";
@@ -12310,6 +12370,7 @@ function tvcPhotosHtml() {
     '<p class="help-text">Pick from your camera roll. Photos are shrunk automatically (max ' + TV_MAX_PHOTOS + " photos).</p>" +
     tvcDriveHtml() +
     '<div class="tvc-sub">Seconds per photo</div><div class="tvc-chips">' + [6, 10, 15, 25].map((n) => '<button type="button" class="tvc-chip sm' + (Number(cfg.photos.intervalSecs) === n ? " active" : "") + '" data-tvc-interval="' + n + '">' + n + "</button>").join("") + "</div>" +
+    '<label class="tvc-check"><input type="checkbox" id="tvc-shuffle"' + (cfg.photos.shuffle !== false ? " checked" : "") + "> Shuffle the photos (a new random order each time through)</label>" +
     '<label class="tvc-check"><input type="checkbox" id="tvc-kb"' + (cfg.photos.kenBurns ? " checked" : "") + "> Slow zoom on photos</label>";
   if (!TVC.photosLoaded) return h + '<p class="help-text">Loading photos…</p>';
   if (!TVC.photos.length) return h + '<p class="help-text">No photos yet.</p>';
@@ -12340,6 +12401,11 @@ function tvcDriveHtml() {
   else if (chk && chk.ok) {
     h += '<p class="help-text" style="color:var(--good);font-weight:700;">Found ' + chk.photos.length + " photo" + (chk.photos.length === 1 ? "" : "s") + " in the folder." +
       (chk.photos.length ? "" : " If you’ve added some, make sure the folder is shared as “Anyone with the link — Viewer”.") + "</p>";
+    // What the TV reported in its last heartbeat (see tvHeartbeat): photos it drew from the
+    // original file (turned automatically) vs ones it had to show from Google's thumbnail.
+    const pi = TVC.status && TVC.status.photoInfo;
+    if (pi) h += '<p class="help-text" style="margin-top:2px;">On the TV so far: ' + (Number(pi.originals) || 0) + " turned automatically from the original file" +
+      (pi.thumbOnly ? ", " + pi.thumbOnly + " shown from Google’s preview instead (iPhone HEIC photos, or the original couldn’t be opened" + (pi.lastError ? ": " + escapeHtml(pi.lastError) : "") + ")" : "") + ".</p>";
     if (chk.photos.length) {
       // Tap photos to select them, then turn the whole selection at once (one save).
       const sel = TVC.driveSel;
@@ -12561,6 +12627,8 @@ function tvcWire(root) {
   // photos
   on("[data-tvc-interval]", "click", (el) => tvcWrite({ photos: { intervalSecs: Number(el.getAttribute("data-tvc-interval")) } }));
   on("#tvc-drive", "input", (el) => { TVC.driveInput = el.value; });
+  const shuf = document.getElementById("tvc-shuffle");
+  if (shuf) shuf.addEventListener("change", () => tvcWrite({ photos: { shuffle: shuf.checked } }));
   const kb = document.getElementById("tvc-kb");
   if (kb) kb.addEventListener("change", () => tvcWrite({ photos: { kenBurns: kb.checked } }));
   const file = document.getElementById("tvc-file");
