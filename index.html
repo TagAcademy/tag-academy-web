@@ -7247,7 +7247,7 @@ function lbRange() { return lbRangeFor(lbScope, lbAnchor, lbFrom, lbTo); }
 
 /* One student's raw value + a formatted display string for a given leaderboard category —
    the single place that ties each category id to the stat that ranks it. */
-function leaderboardEntryFor(studentId, catId, range) {
+function leaderboardEntryFor(studentId, catId, range, asPercent) {
   if (catId === "attendance") { const st = computeStats(studentId, { from: range.from, to: range.to }); return { value: st.attPct, display: pct(st.attPct) }; }
   if (catId === "participation") { const st = computeStats(studentId, { from: range.from, to: range.to }); return { value: st.partPct, display: pct(st.partPct) }; }
   // Ranked by coins EARNED, not the current balance -- spending coins on a privilege shouldn't
@@ -7256,6 +7256,16 @@ function leaderboardEntryFor(studentId, catId, range) {
   // torah / avoda / gc — a blended attendance+participation percentage across every class
   // tagged with that category (see categoryFor / PERIOD_CATEGORIES, set in Admin > Schedule).
   const st = computeStats(studentId, { from: range.from, to: range.to, category: catId });
+  // Gemilas Chassidim is ranked by points instead: most of it is bonus credit for acts of
+  // kindness (wireGcGrant), which adds points but no "out of" -- as a percentage, a student
+  // whose GC was all bonus credit (no GC-tagged class held in the range) had nothing to divide
+  // by and was left off the board entirely.
+  // (asPercent: the student progress chart plots every category as a 0-100% line, so it keeps
+  // getting GC's percentage.)
+  if (catId === "gc" && !asPercent) {
+    const pts = st.attPts + st.partPts;
+    return { value: pts > 0 ? pts : null, display: num2(pts) + " pts" };
+  }
   return { value: st.blendedPct, display: pct(st.blendedPct) };
 }
 /* A student's avatar -- initials in a colored circle today, but built so a real photo can
@@ -7496,7 +7506,7 @@ function progressChartHtml(student) {
   const roster = activeRoster();
   const seriesData = LEADERBOARD_CATEGORIES.filter((c) => c.id !== "coins").map((cat) => ({
     cat: cat,
-    points: buckets.map((b) => leaderboardEntryFor(student.id, cat.id, b).value),
+    points: buckets.map((b) => leaderboardEntryFor(student.id, cat.id, b, true).value),
     places: buckets.map((b) => podiumPlaceFor(student.id, cat.id, b, roster)),
   }));
   const coinPoints = buckets.map((b) => leaderboardEntryFor(student.id, "coins", b).value);
@@ -7627,7 +7637,7 @@ function wireProgressChart(root, student) {
   const buckets = progressBuckets(student.id, lbProgressGrain);
   const seriesData = LEADERBOARD_CATEGORIES.filter((c) => c.id !== "coins").map((cat) => ({
     cat: cat,
-    points: buckets.map((b) => leaderboardEntryFor(student.id, cat.id, b).value),
+    points: buckets.map((b) => leaderboardEntryFor(student.id, cat.id, b, true).value),
   }));
   const coinPoints = buckets.map((b) => leaderboardEntryFor(student.id, "coins", b).value);
 
