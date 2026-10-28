@@ -1578,9 +1578,14 @@ html.tv-mode #tv-root { display: block; }
 .tvc-sub { font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 700; margin-top: 12px; }
 .tvc-text { width: 100%; font: inherit; padding: 12px; min-height: 46px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); color: var(--ink); margin-top: 8px; }
 .tvc-drive-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 8px; margin-top: 8px; max-height: 360px; overflow-y: auto; }
-.tvc-drive-item { display: flex; flex-direction: column; gap: 4px; align-items: stretch; }
-.tvc-drive-item .btn { min-height: 34px; }
-.tvc-drive-thumb { aspect-ratio: 1; border-radius: 6px; overflow: hidden; background: #000; display: flex; align-items: center; justify-content: center; }
+.tvc-drive-item { position: relative; display: block; padding: 0; border: 3px solid transparent; border-radius: 9px; background: none; cursor: pointer; }
+.tvc-drive-item.selected { border-color: var(--brand); }
+.tvc-drive-check { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 50%; background: var(--brand); color: #fff; font-size: 0.8rem; font-weight: 800; display: none; align-items: center; justify-content: center; }
+.tvc-drive-item.selected .tvc-drive-check { display: flex; }
+.tvc-rot-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+.tvc-rot-bar .btn { min-height: 40px; }
+.tvc-rot-count { font-weight: 700; font-size: 0.9rem; margin-right: auto; }
+.tvc-drive-thumb { display: flex; aspect-ratio: 1; border-radius: 6px; overflow: hidden; background: #000; display: flex; align-items: center; justify-content: center; }
 .tvc-drive-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .tvc-howto { margin-top: 10px; font-size: .88rem; }
 .tvc-howto summary { cursor: pointer; font-weight: 700; min-height: 32px; }
@@ -11655,7 +11660,9 @@ function tvRebuildPhotos() {
 // photos.driveRotate, keyed by file id). `cfg` is TV.cfg on the TV, TVC.cfg in the control tab.
 function tvPhotoRotation(photo, cfg) {
   const manual = photo.fileId ? Number(((cfg && cfg.photos && cfg.photos.driveRotate) || {})[photo.fileId]) || 0 : Number(photo.rotate) || 0;
-  return (((Number(photo.autoRot) || 0) + manual) % 4 + 4) % 4;
+  // photos.driveAutoRotate (default on) can switch off using Drive's own orientation reading.
+  const auto = cfg && cfg.photos && cfg.photos.driveAutoRotate === false ? 0 : Number(photo.autoRot) || 0;
+  return ((auto + manual) % 4 + 4) % 4;
 }
 function tvInitPhotos() {
   const el = TV.zones.photos.el;
@@ -11911,7 +11918,7 @@ function tvUpdateTicker(now) {
 const TVC = {
   cfg: tvDefaults(), cfgLoaded: false, status: null, photos: [], photosLoaded: false,
   unsubs: {}, duration: 15 * 60000, annStyle: "info", annExpiry: 60 * 60000, annText: null,
-  uploading: null, deleteConfirm: null, seenTimer: null, driveInput: null, driveCheck: null,
+  uploading: null, deleteConfirm: null, seenTimer: null, driveInput: null, driveCheck: null, driveSel: new Set(),
 };
 function tvcWho() { const s = currentSession(); return (s && s.record && s.record.name) || "admin"; }
 function tvcSync(route) {
@@ -12097,9 +12104,26 @@ function tvcDriveHtml() {
   else if (chk && chk.ok) {
     h += '<p class="help-text" style="color:var(--good);font-weight:700;">Found ' + chk.photos.length + " photo" + (chk.photos.length === 1 ? "" : "s") + " in the folder." +
       (chk.photos.length ? "" : " If you’ve added some, make sure the folder is shared as “Anyone with the link — Viewer”.") + "</p>";
-    if (chk.photos.length) h += '<p class="help-text" style="margin:2px 0 0;">Sideways or upside down? Tap ⟳ under it to turn it.</p><div class="tvc-drive-grid">' + chk.photos.map((p) =>
-      '<div class="tvc-drive-item"><div class="tvc-drive-thumb"><img loading="lazy" alt="" referrerpolicy="no-referrer" class="tvc-r' + tvPhotoRotation(p, TVC.cfg) + '" src="' + escapeHtml(p.thumb) + '"></div>' +
-      '<button type="button" class="btn btn-ghost btn-sm" data-tvc-drive-rotate="' + escapeHtml(p.fileId) + '" aria-label="Rotate">⟳ Rotate</button></div>').join("") + "</div>";
+    if (chk.photos.length) {
+      // Tap photos to select them, then turn the whole selection at once (one save).
+      const sel = TVC.driveSel;
+      const n = chk.photos.filter((p) => sel.has(p.fileId)).length;
+      const dis = n ? "" : " disabled";
+      const autoOn = !(TVC.cfg.photos && TVC.cfg.photos.driveAutoRotate === false);
+      h += '<p class="help-text" style="margin:6px 0 4px;">Sideways or upside down? Tap the photos to select them, then turn them all at once. The previews show exactly how the TV shows them.</p>' +
+        '<div class="tvc-rot-bar"><span class="tvc-rot-count">' + (n ? n + " selected" : "None selected") + "</span>" +
+        '<button type="button" class="btn btn-ghost btn-sm" data-tvc-act="drive-sel-all">Select all</button>' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-tvc-act="drive-sel-none"' + dis + ">Clear</button></div>" +
+        '<div class="tvc-rot-bar"><button type="button" class="btn btn-primary btn-sm" data-tvc-drive-turn="3"' + dis + '>⟲ Left</button>' +
+        '<button type="button" class="btn btn-primary btn-sm" data-tvc-drive-turn="1"' + dis + '>⟳ Right</button>' +
+        '<button type="button" class="btn btn-primary btn-sm" data-tvc-drive-turn="2"' + dis + ">↻ 180°</button></div>" +
+        '<div class="tvc-drive-grid">' + chk.photos.map((p) =>
+          '<button type="button" class="tvc-drive-item' + (sel.has(p.fileId) ? " selected" : "") + '" data-tvc-drive-sel="' + escapeHtml(p.fileId) + '" aria-pressed="' + (sel.has(p.fileId) ? "true" : "false") + '">' +
+          '<span class="tvc-drive-thumb"><img loading="lazy" alt="" referrerpolicy="no-referrer" class="tvc-r' + tvPhotoRotation(p, TVC.cfg) + '" src="' + escapeHtml(p.thumb) + '"></span>' +
+          '<span class="tvc-drive-check" aria-hidden="true">✓</span></button>').join("") + "</div>" +
+        '<label class="tvc-check" style="margin-top:8px;"><input type="checkbox" id="tvc-drive-auto"' + (autoOn ? " checked" : "") + "> Turn photos automatically using Google Drive’s orientation info</label>" +
+        '<button type="button" class="diag-link" data-tvc-act="drive-rot-reset" style="font-size:0.85rem;">Reset all turns</button>';
+    }
   } else if (chk && chk.error) h += '<p class="help-text" style="color:var(--warn);font-weight:700;">' + escapeHtml(chk.error) + "</p>";
   h += '<details class="tvc-howto"><summary>How to set up the folder</summary><ol>' +
     "<li>In Google Drive, create a folder (e.g. “TV photos”) and put pictures in it.</li>" +
@@ -12108,6 +12132,16 @@ function tvcDriveHtml() {
     "<li>One-time: in Google Cloud Console, open <b>APIs &amp; Services → Library</b>, enable the <b>Google Drive API</b> in the same project as your calendar key. Then under <b>Credentials</b>, edit that API key and, if it’s limited to certain APIs, add Google Drive API to the list.</li>" +
     "<li>To give a staff member access to add photos, share the folder with them as an Editor.</li></ol></details>";
   return h;
+}
+// Turn several Drive photos at once by `turns` quarter turns clockwise (3 = one to the left), in a
+// single save. The previews update immediately; the TV follows within a few seconds.
+function tvcTurnDrivePhotos(fileIds, turns) {
+  const cur = Object.assign({}, (TVC.cfg.photos && TVC.cfg.photos.driveRotate) || {});
+  const patch = {};
+  fileIds.forEach((fid) => { patch[fid] = ((Number(cur[fid]) || 0) + turns) % 4; cur[fid] = patch[fid]; });
+  TVC.cfg.photos = Object.assign({}, TVC.cfg.photos, { driveRotate: cur });
+  refreshViewOrDefer();
+  tvcWrite({ photos: { driveRotate: patch } }, "Turned " + fileIds.length + " photo" + (fileIds.length === 1 ? "" : "s") + ".");
 }
 async function tvcCheckDrive(input) {
   const id = driveFolderId(input);
@@ -12182,6 +12216,16 @@ function tvcWire(root) {
       else if (TVC.annExpiry === -1) { const d = new Date(); d.setHours(23, 59, 0, 0); until = d.getTime(); }
       TVC.annText = null;
       tvcWrite({ announcement: { text, style: TVC.annStyle, until } }, "Posted to the TV.");
+    } else if (act === "drive-sel-all") {
+      ((TVC.driveCheck && TVC.driveCheck.photos) || []).forEach((p) => TVC.driveSel.add(p.fileId)); refreshViewOrDefer();
+    } else if (act === "drive-sel-none") {
+      TVC.driveSel.clear(); refreshViewOrDefer();
+    } else if (act === "drive-rot-reset") {
+      if (!window.confirm("Undo every manual turn on the Drive photos?")) return;
+      TVC.cfg.photos = Object.assign({}, TVC.cfg.photos, { driveRotate: {} });
+      refreshViewOrDefer();
+      // Replace (not merge) the whole map: a merge-set can't remove keys.
+      tvcWrite({ photos: { driveRotate: firebase.firestore.FieldValue.delete() } }, "All turns reset.");
     } else if (act === "drive-check") {
       const inp = document.getElementById("tvc-drive");
       tvcCheckDrive(inp ? inp.value : "");
@@ -12237,14 +12281,22 @@ function tvcWire(root) {
   if (file) file.addEventListener("change", () => { const fl = file.files; if (fl && fl.length) tvcUploadFiles(fl); file.value = ""; });
   on("[data-tvc-caption]", "change", (el) => DISPLAY_PHOTOS.doc(el.getAttribute("data-tvc-caption")).update({ caption: el.value.trim() }).catch((e) => toast("Couldn’t save the caption.", "warn")));
   on("[data-tvc-rotate]", "click", (el) => { const p = TVC.photos.find((x) => x.id === el.getAttribute("data-tvc-rotate")); if (p) DISPLAY_PHOTOS.doc(p.id).update({ rotate: ((Number(p.rotate) || 0) + 1) % 4 }).catch(() => toast("Couldn’t rotate that photo.", "warn")); });
-  on("[data-tvc-drive-rotate]", "click", (el) => {
-    const fid = el.getAttribute("data-tvc-drive-rotate");
-    const cur = Number(((TVC.cfg.photos && TVC.cfg.photos.driveRotate) || {})[fid]) || 0;
-    const next = (cur + 1) % 4;
-    // Show the turn right away; the TV picks up the saved setting within a few seconds.
-    TVC.cfg.photos = Object.assign({}, TVC.cfg.photos, { driveRotate: Object.assign({}, (TVC.cfg.photos || {}).driveRotate, { [fid]: next }) });
+  on("[data-tvc-drive-sel]", "click", (el) => {
+    const fid = el.getAttribute("data-tvc-drive-sel");
+    if (TVC.driveSel.has(fid)) TVC.driveSel.delete(fid); else TVC.driveSel.add(fid);
     refreshViewOrDefer();
-    tvcWrite({ photos: { driveRotate: { [fid]: next } } });
+  });
+  on("[data-tvc-drive-turn]", "click", (el) => {
+    const chk = TVC.driveCheck;
+    const ids = chk && chk.photos ? chk.photos.map((p) => p.fileId).filter((f) => TVC.driveSel.has(f)) : [];
+    if (!ids.length) return;
+    tvcTurnDrivePhotos(ids, Number(el.getAttribute("data-tvc-drive-turn")));
+  });
+  const driveAuto = document.getElementById("tvc-drive-auto");
+  if (driveAuto) driveAuto.addEventListener("change", () => {
+    TVC.cfg.photos = Object.assign({}, TVC.cfg.photos, { driveAutoRotate: driveAuto.checked });
+    refreshViewOrDefer();
+    tvcWrite({ photos: { driveAutoRotate: driveAuto.checked } });
   });
   on("[data-tvc-toggle]", "click", (el) => { const p = TVC.photos.find((x) => x.id === el.getAttribute("data-tvc-toggle")); if (p) DISPLAY_PHOTOS.doc(p.id).update({ enabled: p.enabled === false }).catch(() => toast("Couldn’t update.", "warn")); });
   on("[data-tvc-move]", "click", (el) => {
