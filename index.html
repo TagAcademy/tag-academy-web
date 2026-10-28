@@ -11365,13 +11365,16 @@ function tvDefaults() {
     photos: { intervalSecs: 12, kenBurns: true, driveFolder: "", driveRotate: {} },
     leaderboard: { categories: LEADERBOARD_CATEGORIES.map((c) => c.id), scope: "week", places: 8, secsPerCategory: 12 },
     exitTvNonce: null,
+    // No photos while one of these classes is on the calendar (see tvQuietNow): the TV shows
+    // `layout` instead of any layout that has the photo slideshow.
+    quiet: { enabled: true, classes: ["Shacharis", "Mincha", "Maariv", "Musaf", "Selichos", "Eagle"], layout: "calendar" },
   };
 }
 function tvMergeCfg(raw) {
   const d = tvDefaults();
   if (!raw || typeof raw !== "object") return d;
   const out = Object.assign({}, d, raw);
-  ["photos", "leaderboard"].forEach((k) => { out[k] = Object.assign({}, d[k], raw[k] || {}); });
+  ["photos", "leaderboard", "quiet"].forEach((k) => { out[k] = Object.assign({}, d[k], raw[k] || {}); });
   if (!Array.isArray(out.rotate)) out.rotate = d.rotate;
   if (!Array.isArray(out.schedule)) out.schedule = [];
   if (!Array.isArray(out.leaderboard.categories) || !out.leaderboard.categories.length) out.leaderboard.categories = d.leaderboard.categories;
@@ -11381,11 +11384,32 @@ function tvValidLayout(id) { return TV_LAYOUT_IDS.includes(id) ? id : "all"; }
 // What should be on screen at this instant: a live override first, then the "normal" mode
 // (fixed / rotation / schedule). Pure function of (config, time) so the control tab and every TV
 // compute the identical answer without any write -- an expired override simply stops mattering.
-function tvEffectiveLayout(cfg, nowMs) {
+const TV_PHOTO_LAYOUTS = ["all", "photos", "split"];
+// The calendar event happening right now whose title names one of the "no photos" classes
+// (whole word, any case -- so "Mincha & Maariv" counts for both), or null.
+function tvQuietNow(cfg, events, nowMs) {
+  const q = cfg.quiet;
+  if (!q || !q.enabled || !Array.isArray(q.classes) || !q.classes.length || !events) return null;
+  const names = q.classes.map((c) => String(c).trim().toLowerCase()).filter(Boolean);
+  const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return events.find((e) => !e.allDay && e.start <= nowMs && nowMs < e.end &&
+    names.some((n) => new RegExp("(^|[^a-z0-9])" + esc(n) + "([^a-z0-9]|$)", "i").test(e.title || ""))) || null;
+}
+// What the TV should show at nowMs. `events` (the TV's calendar events) is optional: without it
+// the "no photos during davening/Eagle" rule can't apply (the control tab's own preview).
+function tvEffectiveLayout(cfg, nowMs, events) {
   const ov = cfg.override;
   if (ov && ov.layout && (ov.until === null || ov.until === undefined || Number(ov.until) > nowMs)) {
     return { layout: tvValidLayout(ov.layout), source: "override", until: ov.until === undefined ? null : ov.until };
   }
+  const base = tvBaseLayout(cfg, nowMs);
+  if (TV_PHOTO_LAYOUTS.includes(base.layout)) {
+    const quiet = tvQuietNow(cfg, events, nowMs);
+    if (quiet) return { layout: tvValidLayout(cfg.quiet.layout || "calendar"), source: "quiet", quietFor: quiet.title, until: quiet.end };
+  }
+  return base;
+}
+function tvBaseLayout(cfg, nowMs) {
   if (cfg.mode === "rotate" && cfg.rotate.length) {
     const items = cfg.rotate.map((r) => ({ layout: tvValidLayout(r.layout), secs: Math.max(5, Number(r.secs) || 30) }));
     const total = items.reduce((s, r) => s + r.secs, 0);
@@ -11497,7 +11521,7 @@ function tvWireHiddenExit() {
 function tvTick() {
   if (!TV.started) return;
   const now = Date.now();
-  const eff = tvEffectiveLayout(TV.cfg, now);
+  const eff = tvEffectiveLayout(TV.cfg, now, TV.cal.events);
   TV.eff = eff;
   if (eff.layout !== TV.layout) tvBuildLayout(eff.layout);
   tvUpdateClock();
@@ -11511,7 +11535,7 @@ function tvTick() {
     if (now - S.lb >= Math.max(5, Number(TV.cfg.leaderboard.secsPerCategory) || 12) * 1000) { S.lb = now; TV.lbIdx++; tvUpdateLeaderboard(); }
     else if (TV.dirty) tvUpdateLeaderboard();
   }
-  if (TV.zones.calendar) {
+  if (TV.zones.calendar || (TV.cfg.quiet && TV.cfg.quiet.enabled)) {
     if (now - S.cal >= 300000) { S.cal = now; tvRefreshCalendar(); }
     else if (TV.dirty || (TV.zones.calendar.lastMin !== Math.floor(now / 60000))) tvUpdateCalendar();
     else tvUpdateCountdown(now);
@@ -11534,7 +11558,7 @@ function tvHeartbeat() {
   // look offline.
   DISPLAY_STATUS_DOC.set({
     lastSeen: firebase.firestore.FieldValue.serverTimestamp(), screen: "hallway",
-    layout: TV.layout || null, source: TV.eff ? TV.eff.source : null,
+    layout: TV.layout || null, source: TV.eff ? TV.eff.source : null, quietFor: (TV.eff && TV.eff.quietFor) || null,
   }, { merge: true }).catch((e) => console.error("TV heartbeat failed:", e));
 }
 function tvMaybeNightlyReload(now) {
@@ -11570,7 +11594,8 @@ function tvBuildLayout(layout) {
   canvas.querySelectorAll("[data-zone]").forEach((el) => { TV.zones[el.getAttribute("data-zone")] = { el }; });
   if (TV.zones.photos) tvInitPhotos();
   TV.dirty = true;
-  TV.stamps.lb = Date.now(); TV.stamps.cal = Date.now();
+  TV.stamps.lb = Date.now();
+  if (TV.zones.calendar) TV.stamps.cal = Date.now(); // (it fetches right below; otherwise leave the timer alone)
   if (TV.zones.calendar) { tvUpdateCalendar(); tvRefreshCalendar(); }
   if (TV.zones.leaderboard) tvUpdateLeaderboard();
   TV.tickerKey = null;
@@ -11995,6 +12020,7 @@ function tvcSourceText(eff) {
   if (eff.source === "rotate") return "Rotating through your layouts";
   if (eff.source === "schedule") return "Following your schedule";
   if (eff.source === "fallback") return "Schedule fallback";
+  if (eff.source === "quiet") return "No photos during " + (eff.quietFor || "davening");
   return "Fixed layout";
 }
 const TVC_DURATIONS = [[5 * 60000, "5 min"], [15 * 60000, "15 min"], [60 * 60000, "1 hr"], [0, "Until I change it"]];
@@ -12016,7 +12042,8 @@ function renderTvControl(root, session) {
   html += '<div class="card card-pad tvc-card"><div class="tvc-status"><span id="tvc-dot" class="tvc-dot ' + (seen.online ? "on" : "off") + '"></span><span id="tvc-seen" class="tvc-seen">' + escapeHtml(seen.text) + "</span></div>" +
     '<div class="tvc-now">' + tvcMiniPreview(eff.layout) + '<div class="tvc-now-text"><div class="tvc-now-label">Showing now</div><div class="tvc-now-layout">' + escapeHtml(tvLayoutLabel(eff.layout)) + "</div>" +
     '<div class="tvc-now-src">' + escapeHtml(tvcSourceText(eff)) + "</div>" +
-    (seen.online && reportedLayout && reportedLayout !== eff.layout ? '<div class="tvc-now-src">TV reports: ' + escapeHtml(tvLayoutLabel(reportedLayout)) + "</div>" : "") + "</div></div>" +
+    (seen.online && TVC.status && TVC.status.source === "quiet" ? '<div class="tvc-now-src">On the TV now: ' + escapeHtml(tvLayoutLabel(reportedLayout)) + " — no photos during " + escapeHtml(TVC.status.quietFor || "davening") + "</div>"
+      : seen.online && reportedLayout && reportedLayout !== eff.layout ? '<div class="tvc-now-src">TV reports: ' + escapeHtml(tvLayoutLabel(reportedLayout)) + "</div>" : "") + "</div></div>" +
     (!TVC.cfgLoaded ? '<p class="help-text">Loading settings…</p>' : "") + "</div>";
 
   // Show now
@@ -12039,6 +12066,9 @@ function renderTvControl(root, session) {
   html += collapsibleSectionHtml("tvPhotos", "Photos", (TVC.photosLoaded ? TVC.photos.length + " uploaded" : "Slideshow pictures") + (driveOn ? " + Drive folder" : ""), tvcPhotosHtml());
   // Normal mode
   html += collapsibleSectionHtml("tvNormal", "Normal mode", { fixed: "Fixed layout", rotate: "Rotation", schedule: "Schedule" }[cfg.mode] || "", tvcNormalHtml());
+  // No photos during davening / Eagle
+  const q = cfg.quiet || {};
+  html += collapsibleSectionHtml("tvQuiet", "No photos during davening", q.enabled ? (q.classes || []).length + " classes · shows " + tvLayoutLabel(q.layout || "calendar") : "Off", tvcQuietHtml());
   // Leaderboard settings
   html += collapsibleSectionHtml("tvLb", "Leaderboard settings", cfg.leaderboard.categories.length + " categories · " + ({ week: "this week", hmonth: "Hebrew month", all: "all time" }[cfg.leaderboard.scope] || ""), tvcLeaderboardHtml());
   // Exit
@@ -12056,6 +12086,17 @@ function renderTvControl(root, session) {
   tvcWire(root);
 }
 
+function tvcQuietHtml() {
+  const q = TVC.cfg.quiet || {};
+  const chosen = new Set(q.classes || []);
+  const periods = Array.from(new Set(((state && state.settings && state.settings.periods) || []).concat(q.classes || [])));
+  return '<label class="tvc-check"><input type="checkbox" id="tvc-quiet-on"' + (q.enabled ? " checked" : "") + "> Hide the photos while one of these is on the calendar</label>" +
+    '<div class="tvc-sub">Classes</div><div class="tvc-chips">' + periods.map((p) =>
+      '<button type="button" class="tvc-chip sm' + (chosen.has(p) ? " active" : "") + '" data-tvc-quiet-class="' + escapeHtml(p) + '">' + escapeHtml(p) + "</button>").join("") + "</div>" +
+    '<div class="tvc-sub">Show instead</div><div class="tvc-chips">' + TV_LAYOUTS.filter((l) => !TV_PHOTO_LAYOUTS.includes(l.id)).map((l) =>
+      '<button type="button" class="tvc-chip' + ((q.layout || "calendar") === l.id ? " active" : "") + '" data-tvc-quiet-layout="' + l.id + '">' + escapeHtml(l.label) + "</button>").join("") + "</div>" +
+    '<p class="help-text">Uses the same Google Calendar as the schedule: while an event whose name includes one of these classes is happening, the TV switches to the layout above, then back to photos when it ends. A “Show now” choice still wins.</p>';
+}
 function tvcNormalHtml() {
   const cfg = TVC.cfg;
   const layoutSel = (cls, val, attr) => '<select class="' + cls + '" ' + attr + ">" + TV_LAYOUTS.map((l) => '<option value="' + l.id + '"' + (val === l.id ? " selected" : "") + ">" + escapeHtml(l.label) + "</option>").join("") + "</select>";
@@ -12301,6 +12342,14 @@ function tvcWire(root) {
   on("[data-tvc-sch-layout]", "change", (el) => { const a = sch(); a[Number(el.getAttribute("data-tvc-sch-layout"))].layout = el.value; tvcWrite({ schedule: a }); });
   on("[data-tvc-sch-del]", "click", (el) => { const a = sch(); a.splice(Number(el.getAttribute("data-tvc-sch-del")), 1); tvcWrite({ schedule: a }); });
   // leaderboard settings
+  const quietOn = document.getElementById("tvc-quiet-on");
+  if (quietOn) quietOn.addEventListener("change", () => tvcWrite({ quiet: { enabled: quietOn.checked } }));
+  on("[data-tvc-quiet-class]", "click", (el) => {
+    const c = el.getAttribute("data-tvc-quiet-class");
+    const cur = ((TVC.cfg.quiet && TVC.cfg.quiet.classes) || []).slice();
+    tvcWrite({ quiet: { classes: cur.includes(c) ? cur.filter((x) => x !== c) : cur.concat([c]) } });
+  });
+  on("[data-tvc-quiet-layout]", "click", (el) => tvcWrite({ quiet: { layout: el.getAttribute("data-tvc-quiet-layout") } }));
   on("[data-tvc-cat]", "click", (el) => {
     const id = el.getAttribute("data-tvc-cat"); const cur = cfg.leaderboard.categories.slice();
     const next = cur.includes(id) ? cur.filter((x) => x !== id) : LEADERBOARD_CATEGORIES.map((c) => c.id).filter((x) => cur.includes(x) || x === id);
