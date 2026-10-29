@@ -11901,10 +11901,12 @@ async function tvPreparePhoto(photo) {
   const big = await tvLoadImageSize(photo.src, 15000) || await tvLoadImageSize(photo.fallback, 15000);
   if (E % 2 && prev && big && prev.w !== prev.h && big.w !== big.h) {
     const differ = isLandscape(prev) !== isLandscape(big);
-    if (L.previewRaw !== null) tvLearn("bigRaw", differ ? !L.previewRaw : L.previewRaw);
-    else if (differ) tvLearn("bigRaw", true); // usually the big one is the raw one
+    if (L.previewRaw !== null && L.previewRaw !== undefined) tvLearn("bigRaw", differ ? !L.previewRaw : L.previewRaw);
+    else if (differ) tvLearn("bigRaw", true); // the preview is upright unless learned otherwise
   }
-  const pRaw = L.previewRaw === true, bRaw = L.bigRaw === null ? pRaw : L.bigRaw;
+  // Not learned yet: assume what this school's own photos showed -- the preview comes back upright
+  // and the big thumbnail as the camera stored it (an upside-down iPhone photo: preview fine, TV not).
+  const pRaw = L.previewRaw === true, bRaw = L.bigRaw === null || L.bigRaw === undefined ? !pRaw : L.bigRaw;
   // Preview on screen = upright - (pRaw ? E) + R; big thumbnail = upright - (bRaw ? E), so turn it by:
   const turns = ((((R - (pRaw ? E || 0 : 0) + (bRaw ? E || 0 : 0)) % 4) + 4) % 4);
   Object.assign(info, { how: "thumb", t: turns, p: pRaw ? 1 : 0, b: bRaw ? 1 : 0 });
