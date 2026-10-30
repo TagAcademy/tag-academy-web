@@ -11390,6 +11390,7 @@ function tvDefaults() {
     photos: { intervalSecs: 12, kenBurns: true, shuffle: true, driveFolder: "", driveRotate: {}, posterEvery: 2, posterSecs: 15 },
     leaderboard: { categories: LEADERBOARD_CATEGORIES.map((c) => c.id), scope: "week", places: 8, secsPerCategory: 12 },
     exitTvNonce: null,
+    refreshTvNonce: null, // changed by "Refresh the TV" in the TV Display tab (see tvCheckRefresh)
     // No photos while one of these classes is on the calendar (see tvQuietNow): the TV shows
     // `layout` instead of any layout that has the photo slideshow.
     quiet: { enabled: true, classes: ["Shacharis", "Mincha", "Maariv", "Musaf", "Selichos", "Eagle"], layout: "calendar" },
@@ -11474,6 +11475,7 @@ const TV = {
   cal: { events: [], fetchedAt: 0, ok: null },
   stamps: { photo: 0, lb: 0, cal: 0, drive: 0, hb: 0, shift: 0, nightly: 0 },
   exitHandled: false, started: false, dirty: true,
+  refreshSeen: null, pageHash: null, loadedAt: Date.now(),
 };
 
 async function initTv() {
@@ -11498,6 +11500,8 @@ async function initTv() {
   TV.started = true;
   tvTick();
   setInterval(tvTick, 1000);
+  tvCheckForUpdate();
+  setInterval(tvCheckForUpdate, 10 * 60000);
 }
 function tvSubscribe() {
   function listen(label, makeRef, onData) {
@@ -11510,7 +11514,7 @@ function tvSubscribe() {
     })();
   }
   listen("state", () => STATE_DOC, (snap) => { if (snap.exists) tvApplyState(snap.data()); });
-  listen("display", () => DISPLAY_DOC, (snap) => { TV.cfg = tvMergeCfg(snap.exists ? snap.data() : null); tvCheckExit(snap.exists ? snap.data() : null); TV.dirty = true; tvTick(); });
+  listen("display", () => DISPLAY_DOC, (snap) => { TV.cfg = tvMergeCfg(snap.exists ? snap.data() : null); tvCheckExit(snap.exists ? snap.data() : null); tvCheckRefresh(snap.exists ? snap.data() : null); TV.dirty = true; tvTick(); });
   listen("photos", () => DISPLAY_PHOTOS.where("enabled", "==", true), (snap) => {
     const docs = snap.docs.map((d) => Object.assign({ id: d.id }, d.data())).filter((p) => p.dataUrl);
     TV.uploaded = docs.filter((p) => p.kind !== "poster").sort((a, b) => (a.order || 0) - (b.order || 0));
@@ -11534,6 +11538,27 @@ function tvCheckExit(raw) {
   try { seen = localStorage.getItem(TV_EXIT_SEEN_KEY); } catch (e) {}
   if (seen === null) { try { localStorage.setItem(TV_EXIT_SEEN_KEY, nonce); } catch (e) {} return; }
   if (nonce && nonce !== seen) { try { localStorage.setItem(TV_EXIT_SEEN_KEY, nonce); } catch (e) {} tvExitToApp(); }
+}
+// "Refresh the TV" from a phone: whatever value is there when this page loads is remembered, and a
+// new one reloads the page (which then remembers that one).
+function tvCheckRefresh(raw) {
+  const nonce = raw && raw.refreshTvNonce ? String(raw.refreshTvNonce) : "";
+  if (TV.refreshSeen === null) { TV.refreshSeen = nonce; return; }
+  if (nonce !== TV.refreshSeen) location.reload();
+}
+// Picks up a new version of the app by itself: every 10 minutes the TV re-downloads this page and,
+// if it changed since the TV loaded it (an update was published), reloads.
+async function tvCheckForUpdate() {
+  let text;
+  try {
+    const res = await fetch(location.pathname + "?v=" + Date.now(), { cache: "no-store" });
+    if (!res.ok) return;
+    text = await res.text();
+  } catch (e) { return; }
+  let h = 0;
+  for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) | 0;
+  if (TV.pageHash === null) { TV.pageHash = h; return; }
+  if (h !== TV.pageHash) { console.log("TV: new version published -- reloading"); location.reload(); }
 }
 // Hidden escape hatch on the device itself: press and hold the top-left corner for 4 seconds.
 function tvWireHiddenExit() {
@@ -11593,7 +11618,7 @@ function tvHeartbeat() {
   // look offline.
   DISPLAY_STATUS_DOC.set({
     lastSeen: firebase.firestore.FieldValue.serverTimestamp(), screen: "hallway",
-    layout: TV.layout || null, source: TV.eff ? TV.eff.source : null, quietFor: (TV.eff && TV.eff.quietFor) || null,
+    layout: TV.layout || null, source: TV.eff ? TV.eff.source : null, loadedAt: TV.loadedAt, quietFor: (TV.eff && TV.eff.quietFor) || null,
     // How the Drive photos are being drawn (shown in the TV Display tab's Photos section).
     photoInfo: { originals: TV.photoStats.originals, thumbOnly: TV.photoStats.thumbOnly.size, lastError: TV.photoStats.lastError, learned: tvLearned(), recent: TV.recent || [] },
   }, { merge: true }).catch((e) => console.error("TV heartbeat failed:", e));
@@ -12272,6 +12297,10 @@ function tvcSeenInfo() {
   const ago = age < 90 ? age + "s ago" : age < 5400 ? Math.round(age / 60) + " min ago" : Math.round(age / 3600) + " hr ago";
   return { online: age <= 150, text: (age <= 150 ? "TV online" : "TV offline") + " · last seen " + ago, ms };
 }
+function tvcWhen(ms) {
+  const d = new Date(ms), t = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return tvCalDayStart(ms) === tvCalDayStart(Date.now()) ? "today " + t : d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) + " " + t;
+}
 function tvcTickSeen() {
   const el = document.getElementById("tvc-seen"); if (!el) return;
   const i = tvcSeenInfo();
@@ -12331,7 +12360,10 @@ function renderTvControl(root, session) {
     '<div class="tvc-now-src">' + escapeHtml(tvcSourceText(eff)) + "</div>" +
     (seen.online && TVC.status && TVC.status.source === "quiet" ? '<div class="tvc-now-src">On the TV now: ' + escapeHtml(tvLayoutLabel(reportedLayout)) + " — no photos during " + escapeHtml(TVC.status.quietFor || "davening") + "</div>"
       : seen.online && reportedLayout && reportedLayout !== eff.layout ? '<div class="tvc-now-src">TV reports: ' + escapeHtml(tvLayoutLabel(reportedLayout)) + "</div>" : "") + "</div></div>" +
-    (!TVC.cfgLoaded ? '<p class="help-text">Loading settings…</p>' : "") + "</div>";
+    (!TVC.cfgLoaded ? '<p class="help-text">Loading settings…</p>' : "") +
+    '<div class="tvc-row" style="align-items:center;"><button type="button" class="btn btn-ghost btn-sm" data-tvc-act="refresh-tv">⟳ Refresh the TV</button>' +
+    (TVC.status && TVC.status.loadedAt ? '<span class="tvc-unit">Last refreshed ' + escapeHtml(tvcWhen(Number(TVC.status.loadedAt))) + "</span>" : "") + "</div>" +
+    '<p class="help-text" style="margin:4px 0 0;">The TV also refreshes by itself within 10 minutes of an update, and every night at 3 AM.</p></div>';
 
   // Show now
   html += '<div class="card card-pad tvc-card"><div class="section-title">Show now</div>' +
@@ -12667,6 +12699,7 @@ function tvcWire(root) {
     } else if (act === "drive-clear") {
       if (await tvcWrite({ photos: { driveFolder: "" } }, "Folder disconnected.")) { TVC.driveInput = null; TVC.driveCheck = null; }
     } else if (act === "clear-ann") { TVC.annText = null; tvcWrite({ announcement: null }, "Announcement cleared."); }
+    else if (act === "refresh-tv") tvcWrite({ refreshTvNonce: String(Date.now()) + "-" + Math.random().toString(36).slice(2, 6) }, "Told the TV to refresh — it takes a few seconds.");
     else if (act === "exit-tv") tvcWrite({ exitTvNonce: String(Date.now()) + "-" + Math.random().toString(36).slice(2, 6) }, "Told the TV to exit TV mode.");
     else if (act === "rot-add") tvcWrite({ rotate: cfg.rotate.concat([{ layout: "all", secs: 30 }]) });
     else if (act === "sch-add") tvcWrite({ schedule: cfg.schedule.concat([{ days: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday"], start: "08:00", end: "09:00", layout: "leaderboard" }]) });
