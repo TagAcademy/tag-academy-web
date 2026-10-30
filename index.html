@@ -11416,10 +11416,12 @@ const TV_PHOTO_LAYOUTS = ["all", "photos", "split"];
 function tvQuietNow(cfg, events, nowMs) {
   const q = cfg.quiet;
   if (!q || !q.enabled || !Array.isArray(q.classes) || !q.classes.length || !events) return null;
-  const names = q.classes.map((c) => String(c).trim().toLowerCase()).filter(Boolean);
-  const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return events.find((e) => !e.allDay && e.start <= nowMs && nowMs < e.end &&
-    names.some((n) => new RegExp("(^|[^a-z0-9])" + esc(n) + "([^a-z0-9]|$)", "i").test(e.title || ""))) || null;
+  const names = new Set(q.classes.map((c) => String(c).trim().toLowerCase()).filter(Boolean));
+  // The event has to BE one of these classes -- "Mincha & Maariv" counts (each part is one), but
+  // "Shacharis prep" isn't Shacharis.
+  const isQuiet = (title) => String(title || "").toLowerCase().split(/\s*(?:&|\+|\/|,|\band\b)\s*/).map((p) => p.trim()).filter(Boolean)
+    .some((p) => names.has(p));
+  return events.find((e) => !e.allDay && e.start <= nowMs && nowMs < e.end && isQuiet(e.title)) || null;
 }
 // What the TV should show at nowMs. `events` (the TV's calendar events) is optional: without it
 // the "no photos during davening/Eagle" rule can't apply (the control tab's own preview).
@@ -12435,7 +12437,7 @@ function tvcQuietHtml() {
       '<button type="button" class="tvc-chip sm' + (chosen.has(p) ? " active" : "") + '" data-tvc-quiet-class="' + escapeHtml(p) + '">' + escapeHtml(p) + "</button>").join("") + "</div>" +
     '<div class="tvc-sub">Show instead</div><div class="tvc-chips">' + TV_LAYOUTS.filter((l) => !TV_PHOTO_LAYOUTS.includes(l.id)).map((l) =>
       '<button type="button" class="tvc-chip' + ((q.layout || "calendar") === l.id ? " active" : "") + '" data-tvc-quiet-layout="' + l.id + '">' + escapeHtml(l.label) + "</button>").join("") + "</div>" +
-    '<p class="help-text">Uses the same Google Calendar as the schedule: while an event whose name includes one of these classes is happening, the TV switches to the layout above, then back to photos when it ends. A “Show now” choice still wins.</p>';
+    '<p class="help-text">Uses the same Google Calendar as the schedule: while an event named one of these classes is happening (“Mincha &amp; Maariv” counts; “Shacharis prep” doesn’t), the TV switches to the layout above, then back to photos when it ends. A “Show now” choice still wins.</p>';
 }
 function tvcNormalHtml() {
   const cfg = TVC.cfg;
