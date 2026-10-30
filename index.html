@@ -2434,6 +2434,12 @@ function seedState() {
    screen, just how the page proves to Firestore's security rules that it's
    allowed to read/write at all. The app's own username/password login (below,
    under AUTH) is the real sign-in a person sees and uses; it's unrelated to this. */
+// Keep Firebase's sign-in away from the browser's IndexedDB storage. On iPhones that storage can
+// freeze for one site (a WebKit bug) -- opening it then never answers, and Firebase's sign-in
+// waits on it forever, leaving "Loading TAG Academy…" up for good, through every refresh, until
+// the browser is fully closed. Hidden like this, Firebase keeps its sign-in in localStorage instead
+// (the page signs in again on every load anyway), and nothing else here uses IndexedDB.
+try { Object.defineProperty(window, "indexedDB", { value: undefined, configurable: true }); } catch (e) {}
 const firebaseApp = firebase.initializeApp(FIREBASE_CONFIG);
 const firebaseAuth = firebase.auth();
 const db = firebase.firestore();
@@ -11239,12 +11245,21 @@ async function migrateShabbosShacharisChazzan() {
 async function init() {
   if (TV_MODE) { initTv(); return; } // hallway TV: read-only, no login, no migrations, no sheet timers (see TV DISPLAY below)
   renderAll(); // shows the "Loading..." screen (state is still null at this point)
+  // If loading ever stalls anyway, say so and offer a reload instead of a silent wait.
+  const stallTimer = setTimeout(() => {
+    const loginEl = document.getElementById("login-root");
+    if (!state && loginEl) loginEl.innerHTML = '<div class="login-wrap"><div class="login-card"><p class="sub" style="text-align:center;">Still loading TAG Academy… This is taking longer than usual.</p>' +
+      '<p class="sub" style="text-align:center;font-size:.9rem;">Check the internet connection. If it stays stuck, close the browser app completely (swipe it away) and open it again.</p>' +
+      '<button type="button" class="btn btn-primary" style="width:100%;margin-top:12px;" onclick="location.reload()">Reload</button></div></div>';
+  }, 15000);
   try {
     const loadStartedAt = performance.now();
     await loadState();
+    clearTimeout(stallTimer);
     diagStats.loadMs = performance.now() - loadStartedAt;
     if (diagStats.loadMs > 5000) logProblem("slow-load", "Loading the shared data took " + (diagStats.loadMs / 1000).toFixed(1) + " s", true);
   } catch (e) {
+    clearTimeout(stallTimer);
     console.error("Could not connect to Firebase:", e);
     logProblem("load-failed", (e && e.code ? e.code + ": " : "") + (e && e.message ? e.message : "unknown"));
     canWrite = false;
