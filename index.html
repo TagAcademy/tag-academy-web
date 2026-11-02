@@ -11898,6 +11898,50 @@ function tvLearn(field, val) {
 }
 const isLandscape = (d) => d.w > d.h;
 function tvPrepKey(photo) { return photo.fileId + "|" + tvPhotoRotation(photo, TV.cfg); }
+// Picture matching: shrink two pictures to a 24x24 grey grid and find the quarter turn that makes
+// the first look like the second. Resizing to a square grid commutes with quarter turns, so shape
+// differences don't matter. Needs the pixels, so Google's pictures are loaded with CORS; if Google
+// won't allow that, this answers null and the orientation-note logic below decides instead.
+const TV_GRID = 24;
+function tvGridFrom(source) {
+  const c = document.createElement("canvas"); c.width = c.height = TV_GRID;
+  const ctx = c.getContext("2d");
+  ctx.drawImage(source, 0, 0, TV_GRID, TV_GRID);
+  const d = ctx.getImageData(0, 0, TV_GRID, TV_GRID).data; // throws if the picture didn't allow CORS
+  const g = new Float32Array(TV_GRID * TV_GRID);
+  let sum = 0;
+  for (let i = 0; i < g.length; i++) { g[i] = d[i * 4] * 0.3 + d[i * 4 + 1] * 0.59 + d[i * 4 + 2] * 0.11; sum += g[i]; }
+  const mean = sum / g.length;
+  for (let i = 0; i < g.length; i++) g[i] -= mean;
+  return g;
+}
+function tvLoadGrid(src, ms) {
+  return new Promise((resolve) => {
+    if (!src) { resolve(null); return; }
+    const im = new Image(); im.crossOrigin = "anonymous"; im.referrerPolicy = "no-referrer";
+    const t = setTimeout(() => resolve(null), ms);
+    im.onload = () => { clearTimeout(t); try { resolve(tvGridFrom(im)); } catch (e) { resolve(null); } };
+    im.onerror = () => { clearTimeout(t); resolve(null); };
+    im.src = src;
+  });
+}
+// Quarter turns clockwise that make grid `a` look like grid `b`, or null if it isn't clear-cut.
+function tvMatchTurns(a, b) {
+  if (!a || !b) return null;
+  const N = TV_GRID, diffs = [];
+  for (let t = 0; t < 4; t++) {
+    let d = 0;
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      // pixel (x, y) of `a` turned t quarter turns clockwise
+      const sx = t === 0 ? x : t === 1 ? y : t === 2 ? N - 1 - x : N - 1 - y;
+      const sy = t === 0 ? y : t === 1 ? N - 1 - x : t === 2 ? N - 1 - y : x;
+      d += Math.abs(a[sy * N + sx] - b[y * N + x]);
+    }
+    diffs.push(d / (N * N));
+  }
+  const order = [0, 1, 2, 3].sort((i, j) => diffs[i] - diffs[j]);
+  return diffs[order[0]] < diffs[order[1]] * 0.75 ? order[0] : null;
+}
 async function tvPreparePhoto(photo) {
   const R = tvPhotoRotation(photo, TV.cfg);
   const info = { id: photo.fileId, mime: (photo.mime || "").replace("image/", ""), r: R };
@@ -11913,6 +11957,7 @@ async function tvPreparePhoto(photo) {
   const E = head ? orientationTurns(head) : null;
   info.e = E;
   const prev = await tvLoadImageSize(photo.thumb, 10000);
+  const prevGrid = await tvLoadGrid(photo.thumb, 10000);
   const L = tvLearned();
   if (blob) {
     let bmp;
@@ -11922,8 +11967,12 @@ async function tvPreparePhoto(photo) {
       // The decoded picture is upright. A quarter-turned photo tells whether the preview is too.
       if (E % 2 && prev && prev.w !== prev.h && bmp.width !== bmp.height) tvLearn("previewRaw", isLandscape(prev) !== (bmp.width > bmp.height));
       const pRaw = L.previewRaw === true;
-      // Preview on screen = upright picture, minus E if the preview is raw, plus the preview turn R.
-      const turns = (((R - (pRaw ? E || 0 : 0)) % 4) + 4) % 4;
+      // Best: compare this picture with the preview itself. Otherwise: preview on screen = upright
+      // picture, minus E if the preview is raw, plus the preview turn R.
+      let match = null;
+      try { match = tvMatchTurns(tvGridFrom(bmp), prevGrid); } catch (e) {}
+      info.m = match === null ? (prevGrid ? "unclear" : "no-cors") : match;
+      const turns = match !== null ? (match + R) % 4 : (((R - (pRaw ? E || 0 : 0)) % 4) + 4) % 4;
       const k = Math.min(1, 1920 / Math.max(bmp.width, bmp.height));
       const w = Math.round(bmp.width * k), h = Math.round(bmp.height * k);
       const c = document.createElement("canvas");
@@ -11950,9 +11999,17 @@ async function tvPreparePhoto(photo) {
   }
   // Not learned yet: assume what this school's own photos showed -- the preview comes back upright
   // and the big thumbnail as the camera stored it (an upside-down iPhone photo: preview fine, TV not).
-  const pRaw = L.previewRaw === true, bRaw = L.bigRaw === null || L.bigRaw === undefined ? !pRaw : L.bigRaw;
-  // Preview on screen = upright - (pRaw ? E) + R; big thumbnail = upright - (bRaw ? E), so turn it by:
-  const turns = ((((R - (pRaw ? E || 0 : 0) + (bRaw ? E || 0 : 0)) % 4) + 4) % 4);
+  // What's learned about the big picture comes from quarter-turned photos only; Google doesn't
+  // necessarily treat upside-down ones the same way (this school's upside-down iPhone photos came
+  // back raw), so for those the big picture is taken to be the opposite of the preview.
+  const pRaw = L.previewRaw === true;
+  const bRaw = E % 2 && L.bigRaw !== null && L.bigRaw !== undefined ? L.bigRaw : !pRaw;
+  // Best: compare the big picture with the preview itself and turn it to match, then by the
+  // preview's own turn R. Otherwise: preview on screen = upright - (pRaw ? E) + R; big thumbnail =
+  // upright - (bRaw ? E).
+  const match = tvMatchTurns(await tvLoadGrid(photo.src, 15000), prevGrid);
+  info.m = match === null ? (prevGrid ? "unclear" : "no-cors") : match;
+  const turns = match !== null ? (match + R) % 4 : ((((R - (pRaw ? E || 0 : 0) + (bRaw ? E || 0 : 0)) % 4) + 4) % 4);
   Object.assign(info, { how: "thumb", t: turns, p: pRaw ? 1 : 0, b: bRaw ? 1 : 0 });
   TV.photoStats.thumbOnly.add(photo.fileId);
   return { src: photo.src, turns, info };
@@ -12567,7 +12624,7 @@ function tvcRecentHtml(pi) {
       '<span class="tvc-recent-btns"><button type="button" class="btn btn-ghost btn-sm" data-tvc-recent-turn="' + escapeHtml(r.id) + ':3" aria-label="Turn left">⟲</button>' +
       '<button type="button" class="btn btn-ghost btn-sm" data-tvc-recent-turn="' + escapeHtml(r.id) + ':2" aria-label="Turn 180">↻</button>' +
       '<button type="button" class="btn btn-ghost btn-sm" data-tvc-recent-turn="' + escapeHtml(r.id) + ':1" aria-label="Turn right">⟳</button></span>' +
-      '<span class="tvc-recent-diag">' + escapeHtml([r.how, r.mime, "cam " + yn(r.e, r.e, r.e), "pv " + r.r, "tv " + r.t, "p" + (r.p ? 1 : 0) + (r.how === "thumb" ? " b" + (r.b ? 1 : 0) : ""), r.err || ""].filter(Boolean).join(" · ")) + "</span></div>").join("") + "</div>" +
+      '<span class="tvc-recent-diag">' + escapeHtml([r.how, r.mime, "cam " + yn(r.e, r.e, r.e), "pv " + r.r, "tv " + r.t, "match " + (r.m === undefined ? "?" : r.m), "p" + (r.p ? 1 : 0) + (r.how === "thumb" ? " b" + (r.b ? 1 : 0) : ""), r.err || ""].filter(Boolean).join(" · ")) + "</span></div>").join("") + "</div>" +
     '<p class="help-text tvc-recent-diag">Learned: preview ' + yn(L.previewRaw, "raw", "upright") + ", big " + yn(L.bigRaw, "raw", "upright") + "</p>";
 }
 // Turn several Drive photos at once by `turns` quarter turns clockwise (3 = one to the left), in a
