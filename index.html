@@ -1765,7 +1765,7 @@ const CHAZZAN_PERIODS = ["Shacharis", "Musaf", "Mincha", "Maariv"];
 const STAFF_ROSTER_PERIODS = ["Eagle"];
 function staffRosterForPeriod(period) {
   if (!STAFF_ROSTER_PERIODS.includes(period)) return [];
-  return (state.staff || []).filter((s) => s.role === "admin" || s.role === "teacher").sort((a, b) => a.name.localeCompare(b.name));
+  return currentStaff().filter((s) => s.role === "admin" || s.role === "teacher").sort((a, b) => a.name.localeCompare(b.name));
 }
 const CHAZZAN_COIN_TABLE = { Shacharis: 1, Mincha: 0.5, Maariv: 0.25, Musaf: 1 };
 // Sentinel "student id" for the second Chazzan slot meaning "a non-student (guest, staff,
@@ -2491,7 +2491,7 @@ function participationState() { return state.participation || newParticipationSt
 // candidate list participationRows filters down, and also what backs the "Removed from Lists"
 // section's names (a hidden person still needs their name looked up to show "Add Antonio back").
 function participationCandidates() {
-  const staffRows = state.staff.filter((s) => s.role !== "family").sort((a, b) => a.name.localeCompare(b.name))
+  const staffRows = currentStaff().filter((s) => s.role !== "family").sort((a, b) => a.name.localeCompare(b.name))
     .map((s) => ({ id: s.id, name: s.name, isStaff: true, isHeadStaff: isHeadStaffRecord(s) }));
   const studentRows = activeRoster().map((s) => ({ id: s.id, name: s.first + " " + s.last, isStaff: false, isHeadStaff: false }));
   return staffRows.concat(studentRows);
@@ -3880,13 +3880,22 @@ function renderAdminSheet(root) {
 /* ================================================================
    AUTH
    ================================================================ */
+/* Graduating: a student or staff member who's left is taken off everything current (lists, Today,
+   leaderboards, Lists, Time Clock pickers) and can't sign in -- but their record and all their
+   history stay, so their report is still there and Re-enroll brings them straight back. A student's
+   flag is the long-standing `active: false`; staff use `graduated: true`. Both get `graduatedAt`
+   (YYYY-MM-DD) and every graduation/re-enrollment is kept in `enrollmentLog`. */
+function isGraduatedStudent(s) { return !!s && s.active === false; }
+function isGraduatedStaff(s) { return !!s && s.graduated === true; }
+function currentStaff() { return (state.staff || []).filter((s) => !isGraduatedStaff(s)); }
+function graduatedSince(rec) { return rec && rec.graduatedAt ? " " + fmtDateShort(rec.graduatedAt) : ""; }
 function findByCreds(username, password) {
   const u = String(username || "").trim().toLowerCase();
   if (!u || !password) return null;
   const staffMatch = state.staff.find((s) => (s.username || "").toLowerCase() === u && s.password === password);
-  if (staffMatch) return { type: "staff", id: staffMatch.id };
+  if (staffMatch) return isGraduatedStaff(staffMatch) ? { graduated: true } : { type: "staff", id: staffMatch.id };
   const studentMatch = state.roster.find((s) => (s.username || "").toLowerCase() === u && s.password === password);
-  if (studentMatch) return { type: "student", id: studentMatch.id };
+  if (studentMatch) return isGraduatedStudent(studentMatch) ? { graduated: true } : { type: "student", id: studentMatch.id };
   return null;
 }
 function currentSession() {
@@ -3894,8 +3903,9 @@ function currentSession() {
     const raw = localStorage.getItem(SESSION_KEY);
     if (!raw) return null;
     const s = JSON.parse(raw);
-    if (s.type === "staff") { const rec = staffById(s.id); return rec ? { type: "staff", record: rec } : null; }
-    if (s.type === "student") { const rec = studentById(s.id); return rec ? { type: "student", record: rec } : null; }
+    // A graduated account is signed out wherever it was still signed in.
+    if (s.type === "staff") { const rec = staffById(s.id); return rec && !isGraduatedStaff(rec) ? { type: "staff", record: rec } : null; }
+    if (s.type === "student") { const rec = studentById(s.id); return rec && !isGraduatedStudent(rec) ? { type: "student", record: rec } : null; }
     return null;
   } catch (e) { return null; }
 }
@@ -4976,7 +4986,11 @@ function renderLogin(root) {
       const username = document.getElementById("lg-username").value;
       const password = document.getElementById("lg-password").value;
       const match = findByCreds(username, password);
-      if (!match) { document.getElementById("login-error").style.display = "block"; return; }
+      const errEl = document.getElementById("login-error");
+      if (!match || match.graduated) {
+        errEl.textContent = match ? "This account has graduated, so it can’t sign in. An admin can re-enroll it." : "Username or password not recognized.";
+        errEl.style.display = "block"; return;
+      }
       setSession(match.type, match.id);
       goToRoute(match.type === "student" ? "balance" : "today");
       renderAll();
@@ -8237,6 +8251,7 @@ let confirmDeleteStaffId = null;
 // "limited" account) which class it's restricted to. Password isn't part of this form; that's
 // still the separate "Reset password" action, same as before.
 let editingStaffId = null;
+let showGraduatedStaff = false;
 function renderAdminStaff(root) {
   let html = '<div class="card card-pad"><div class="section-title">Add a staff account</div><div class="field-row">' +
     '<div class="field"><label for="st-name">Name</label><input type="text" id="st-name"></div>' +
@@ -8274,7 +8289,7 @@ function renderAdminStaff(root) {
   }
 
   html += '<div class="card card-pad"><div class="table-wrap"><table><thead><tr><th>Name</th><th>Username</th><th>Password</th><th>Role</th><th class="num" title="Earned from their own self-marked attendance &amp; participation -- never shown to students">TAG coins</th><th class="sticky-col-r"></th></tr></thead><tbody>';
-  state.staff.forEach((s) => {
+  currentStaff().forEach((s) => {
     if (editingStaffId === s.id) {
       html += "<tr><td><input type=\"text\" id=\"st-edit-name-" + s.id + "\" value=\"" + escapeHtml(s.name) + "\"></td>" +
         "<td class=\"num\"><input type=\"text\" id=\"st-edit-username-" + s.id + "\" value=\"" + escapeHtml(s.username) + "\"></td>" +
@@ -8304,6 +8319,7 @@ function renderAdminStaff(root) {
         '<button class="btn btn-ghost btn-sm" data-reset-staff="' + s.id + '">Reset password</button>' +
         '<button class="btn btn-ghost btn-sm" data-toggle-clock="' + s.id + '">' + (s.canClockInOut ? "Remove Time Clock access" : "Allow Time Clock access") + '</button>' +
         (s.role === "family" ? "" : '<button class="btn btn-ghost btn-sm" data-toggle-family="' + s.id + '">' + (s.familyAccess ? "Remove Family tab" : "Allow Family tab") + '</button>') +
+        '<button class="btn btn-ghost btn-sm" data-graduate-staff="' + s.id + '">Graduate</button>' +
         '<button class="btn btn-ghost btn-sm" data-delete-staff="' + s.id + '" style="color:var(--warn);">Delete</button>';
     html += "<tr><td>" + escapeHtml(s.name) + '</td><td class="num">' + escapeHtml(s.username) + '</td><td class="num">' + passwordCellHtml(s.password, "staff:" + s.id) +
       '</td><td>' + (s.role === "admin" ? '<span class="pill pill-gold">Admin</span>'
@@ -8315,9 +8331,45 @@ function renderAdminStaff(root) {
       '</td><td class="num">' + num2(staffStats(s.id).balance) + "</td>" +
       '<td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' + actions + "</td></tr>";
   });
-  html += "</tbody></table></div></div>";
+  html += "</tbody></table></div>";
+  // Graduated staff: off every current list and can't sign in, but everything they logged is kept.
+  const gradStaff = state.staff.filter(isGraduatedStaff).sort((a, b) => a.name.localeCompare(b.name));
+  html += '<button class="btn btn-ghost btn-sm" id="grad-staff-toggle" style="margin-top:12px;">' + (showGraduatedStaff ? "Hide" : "Show") + " graduated staff (" + gradStaff.length + ")</button>";
+  if (showGraduatedStaff) {
+    html += '<div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Graduated</th><th class="sticky-col-r"></th></tr></thead><tbody>' +
+      (gradStaff.length ? gradStaff.map((s) => "<tr><td>" + escapeHtml(s.name) + '</td><td class="num">' + escapeHtml(s.username) + "</td><td>" + escapeHtml(s.role || "") + "</td><td>" +
+        '<span class="pill pill-muted">Graduated' + escapeHtml(graduatedSince(s)) + "</span></td>" +
+        '<td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;"><button class="btn btn-ghost btn-sm" data-reenroll-staff="' + s.id + '">Re-enroll</button></td></tr>').join("")
+        : '<tr><td colspan="5" class="help-text">No graduated staff.</td></tr>') + "</tbody></table></div>" +
+      '<p class="help-text">Their attendance, TAG coins and Time Clock history stay in Reports and the Time Clock log. Re-enroll gives them back their same account.</p>';
+  }
+  html += "</div>";
   root.innerHTML = html;
   wirePasswordToggles(root);
+  const gradToggle = document.getElementById("grad-staff-toggle");
+  if (gradToggle) gradToggle.addEventListener("click", () => { showGraduatedStaff = !showGraduatedStaff; renderAdminStaff(root); });
+  root.querySelectorAll("[data-graduate-staff], [data-reenroll-staff]").forEach((btn) => btn.addEventListener("click", async () => {
+    const id = btn.getAttribute("data-graduate-staff") || btn.getAttribute("data-reenroll-staff");
+    const graduate = btn.hasAttribute("data-graduate-staff");
+    const rec = staffById(id);
+    if (!rec) return;
+    if (graduate) {
+      const real = currentSession();
+      if (real && real.type === "staff" && real.record.id === id) { toast("You can't graduate the account you're signed in as.", "warn"); return; }
+      if (rec.role === "admin" && currentStaff().filter((x) => x.role === "admin").length <= 1) { toast("Can't graduate the only admin — make someone else an admin first.", "warn"); return; }
+      if (!window.confirm("Graduate " + rec.name + "? They'll be taken off the current staff lists and won't be able to sign in. Everything they logged is kept, and you can re-enroll them any time.")) return;
+    }
+    const today = todayISO();
+    const res = await saveEdit((ns) => {
+      const r = (ns.staff || []).find((x) => x.id === id);
+      if (!r) return ns;
+      if (graduate) { r.graduated = true; r.graduatedAt = today; }
+      else { delete r.graduated; delete r.graduatedAt; }
+      r.enrollmentLog = (r.enrollmentLog || []).concat([{ [graduate ? "graduated" : "reenrolled"]: today }]);
+      return ns;
+    });
+    if (res.ok || res.local) { toast(graduate ? rec.name + " graduated." : rec.name + " re-enrolled.", "good"); renderAll(); }
+  }));
   const roleSelect = document.getElementById("st-role");
   const restrictedPeriodWrap = document.getElementById("st-restricted-period-wrap");
   const syncRestrictedPeriodVisibility = () => { restrictedPeriodWrap.style.display = roleSelect.value === "limited" ? "" : "none"; };
@@ -8412,7 +8464,7 @@ function renderAdminStaff(root) {
     // the only admin off of "Admin", or moving the account you yourself are signed in as off of
     // it, would lock someone out of Admin entirely -- catch it here too, not just on delete.
     if (original.role === "admin" && role !== "admin") {
-      if (state.staff.filter((s) => s.role === "admin").length <= 1) {
+      if (currentStaff().filter((s) => s.role === "admin").length <= 1) {
         toast("Can't remove admin from the only admin account — make someone else an admin first.", "warn");
         return;
       }
@@ -8596,7 +8648,7 @@ function renderAdminTimeClock(root, session) {
   // Only staff who actually use the Time Clock (Admin > Staff Accounts' canClockInOut flag) ever
   // belong in this list -- the rest of the school's staff roster never clocks in/out at all, so
   // showing them here just makes the real handful of names harder to find.
-  const staffOptionsHtml = state.staff.filter((s) => s.canClockInOut).sort((a, b) => a.name.localeCompare(b.name))
+  const staffOptionsHtml = currentStaff().filter((s) => s.canClockInOut).sort((a, b) => a.name.localeCompare(b.name))
     .map((s) => '<option value="' + s.id + '">' + escapeHtml(s.name) + "</option>").join("");
   const dayOffTypeOptionsHtml = DAY_OFF_TYPES.map((t) => '<option value="' + t + '">' + t + "</option>").join("");
 
@@ -8957,7 +9009,7 @@ function studentRow(s, archived) {
       '<td><input type="text" id="edit-first-' + s.id + '" value="' + escapeHtml(s.first) + '" style="width:100%;"></td>' +
       '<td class="num">' + escapeHtml(s.username || "—") + '</td><td class="num">' + passwordCellHtml(s.password, "student:" + s.id) + "</td>" +
       '<td class="num"><input type="number" id="edit-yob-' + s.id + '" value="' + (s.yearOfBirth ? escapeHtml(String(s.yearOfBirth)) : "") + '" placeholder="e.g. 2013" style="width:88px;"></td><td>' +
-      (archived ? '<span class="pill pill-muted">Archived</span>' : '<span class="pill pill-good">Active</span>') +
+      (archived ? '<span class="pill pill-muted">Graduated' + escapeHtml(graduatedSince(s)) + "</span>" : '<span class="pill pill-good">Active</span>') +
       '</td><td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
       '<button class="btn btn-primary btn-sm" data-save-student="' + s.id + '">Save</button>' +
       '<button class="btn btn-ghost btn-sm" data-cancel-edit-student="' + s.id + '">Cancel</button>' +
@@ -8971,7 +9023,8 @@ function studentRow(s, archived) {
   } else if (openStudentActionMenu === s.id) {
     actions = '<button class="btn btn-ghost btn-sm" data-view-as-student="' + s.id + '">View as</button>' +
       '<button class="btn btn-ghost btn-sm" data-edit-student="' + s.id + '">Edit</button>' +
-      '<button class="btn btn-ghost btn-sm" data-toggle="' + s.id + '">' + (archived ? "Unarchive" : "Archive") + '</button>' +
+      '<button class="btn btn-ghost btn-sm" data-own-link data-student-link="' + s.id + '">Open record</button>' +
+      '<button class="btn btn-ghost btn-sm" data-toggle="' + s.id + '">' + (archived ? "Re-enroll" : "Graduate") + '</button>' +
       '<button class="btn btn-ghost btn-sm" data-toggle-ta="' + s.id + '">' + (s.isTA ? "Remove Chazzan-granting permission" : "Allow to grant Chazzan coins") + '</button>' +
       '<button class="btn btn-ghost btn-sm" data-reset-student="' + s.id + '">Reset pw</button>' +
       '<button class="btn btn-ghost btn-sm" data-delete-student="' + s.id + '" style="color:var(--warn);">Delete</button>' +
@@ -8980,7 +9033,7 @@ function studentRow(s, archived) {
     actions = '<button class="btn btn-ghost btn-sm" data-student-menu-toggle="' + s.id + '">Actions ' + icon("chevron") + "</button>";
   }
   return "<tr><td>" + escapeHtml(s.last) + "</td><td>" + escapeHtml(s.first) + '</td><td class="num">' + escapeHtml(s.username || "—") + '</td><td class="num">' + passwordCellHtml(s.password, "student:" + s.id) + '</td><td class="num">' + (s.yearOfBirth ? escapeHtml(String(s.yearOfBirth)) : "—") + "</td><td>" +
-    (archived ? '<span class="pill pill-muted">Archived</span>' : '<span class="pill pill-good">Active</span>') +
+    (archived ? '<span class="pill pill-muted">Graduated' + escapeHtml(graduatedSince(s)) + "</span>" : '<span class="pill pill-good">Active</span>') +
     (s.isTA ? ' <span class="pill pill-gold" title="Can record who led davening and grant their Chazzan bonus coins, from their own My Balance page">★ TA (Chazzan)</span>' : "") +
     '</td><td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
     actions + "</td></tr>";
@@ -9021,12 +9074,13 @@ function renderAdminStudents(root) {
   activeStudents.forEach((s) => { html += studentRow(s, false); });
   html += "</tbody></table></div>";
   html += '<button class="btn btn-ghost btn-sm" id="archived-toggle" style="margin-top:12px;">' +
-    (showArchivedStudents ? "Hide" : "Show") + " archived students (" + archivedStudents.length + ")</button>";
+    (showArchivedStudents ? "Hide" : "Show") + " graduated students (" + archivedStudents.length + ")</button>";
   if (showArchivedStudents) {
     html += '<div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>Last</th><th>First</th><th>Username</th><th>Password</th><th>Born</th><th>Status</th><th class="sticky-col-r"></th></tr></thead><tbody>';
     if (archivedStudents.length) archivedStudents.forEach((s) => { html += studentRow(s, true); });
-    else html += '<tr><td colspan="7" class="help-text">No archived students.</td></tr>';
-    html += "</tbody></table></div>";
+    else html += '<tr><td colspan="7" class="help-text">No graduated students.</td></tr>';
+    html += "</tbody></table></div>" +
+      '<p class="help-text">Graduated students are off Today, the leaderboards, Lists and the TV, and can’t sign in. Their attendance, TAG coins and report stay — open a record from its Actions menu. Re-enroll brings them back with the same account.</p>';
   }
   html += "</div>";
   root.innerHTML = html;
@@ -9060,6 +9114,12 @@ function renderAdminStudents(root) {
     const res = await saveState(newState);
     if (res.ok || res.local) { toast("Added " + first + " " + last + " — username: " + username + ", password: " + password, "good"); renderAll(); }
   });
+  // "Open record" (Actions menu) -- this view redraws itself when the menu opens, so wire it here.
+  root.querySelectorAll(".sticky-col-r [data-student-link]").forEach((btn) => btn.addEventListener("click", () => {
+    viewingStudentId = btn.getAttribute("data-student-link"); openStudentActionMenu = null;
+    sdScope = "all"; sdAnchor = todayISO(); sdFrom = todayISO(); sdTo = todayISO(); sdClassFilter = null; sdCalAnchor = todayISO();
+    renderAll();
+  }));
   root.querySelectorAll("[data-view-as-student]").forEach((btn) => btn.addEventListener("click", () => {
     const id = btn.getAttribute("data-view-as-student");
     const rec = studentById(id);
@@ -9070,11 +9130,20 @@ function renderAdminStudents(root) {
   }));
   root.querySelectorAll("[data-toggle]").forEach((btn) => btn.addEventListener("click", async () => {
     const id = btn.getAttribute("data-toggle");
-    const newState = JSON.parse(JSON.stringify(state));
-    const s = newState.roster.find((x) => x.id === id);
-    s.active = !(s.active !== false);
-    const res = await saveState(newState);
-    if (res.ok || res.local) renderAll();
+    const rec = studentById(id);
+    if (!rec) return;
+    const graduate = !isGraduatedStudent(rec);
+    if (graduate && !window.confirm("Graduate " + rec.first + " " + rec.last + "? They'll be taken off Today, the leaderboards, Lists and the TV, and won't be able to sign in. Their record is kept, and you can re-enroll them any time.")) return;
+    const today = todayISO();
+    const res = await saveEdit((ns) => {
+      const s = (ns.roster || []).find((x) => x.id === id);
+      if (!s) return ns;
+      s.active = !graduate;
+      if (graduate) s.graduatedAt = today; else delete s.graduatedAt;
+      s.enrollmentLog = (s.enrollmentLog || []).concat([{ [graduate ? "graduated" : "reenrolled"]: today }]);
+      return ns;
+    });
+    if (res.ok || res.local) { openStudentActionMenu = null; toast(rec.first + " " + rec.last + (graduate ? " graduated." : " re-enrolled."), "good"); renderAll(); }
   }));
   root.querySelectorAll("[data-toggle-ta]").forEach((btn) => btn.addEventListener("click", async () => {
     const id = btn.getAttribute("data-toggle-ta");
@@ -9425,7 +9494,7 @@ function renderChazzanTab(root, session) {
   }));
 }
 function wireStudentLinks(root) {
-  root.querySelectorAll("[data-student-link]").forEach((el) => el.addEventListener("click", () => {
+  root.querySelectorAll("[data-student-link]:not([data-own-link])").forEach((el) => el.addEventListener("click", () => {
     viewingStudentId = el.getAttribute("data-student-link");
     sdScope = "all"; sdAnchor = todayISO(); sdFrom = todayISO(); sdTo = todayISO();
     sdClassFilter = null; sdCalAnchor = todayISO();
@@ -9853,7 +9922,7 @@ function renderStudentDetail(root, student, opts) {
   let html = '<div class="page-head"><div>' +
     '<button type="button" class="btn btn-ghost btn-sm" id="sd-back" style="margin-bottom:10px;">&larr; Back</button>' +
     '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="eyebrow">Student</span>' +
-    (student.active === false ? '<span class="pill pill-muted">Inactive</span>' : "") + "</div>" +
+    (student.active === false ? '<span class="pill pill-muted">Graduated' + escapeHtml(graduatedSince(student)) + "</span>" : "") + "</div>" +
     "<h1>" + escapeHtml(student.first) + " " + escapeHtml(student.last) + "</h1>" +
     "<p>Username: " + escapeHtml(student.username || "—") + " · TAG coins are always a running total; pick a day, week, month, or custom range below to see attendance and participation for that window.</p></div></div>";
 
