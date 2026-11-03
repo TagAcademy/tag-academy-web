@@ -1623,6 +1623,39 @@ html.tv-mode #tv-root { display: block; }
 .tvc-photo-btns { display: flex; gap: 6px; flex-wrap: wrap; } .tvc-photo-btns .btn { min-height: 40px; }
 .tvc-del { background: var(--warn); color: #fff; }
 .tvc-upload { cursor: pointer; }
+/* Pools (TAG Coins page / a student's My Balance) */
+.pool-list { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+.pool-card { border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: var(--surface); display: flex; flex-direction: column; gap: 8px; }
+.pool-card.pool-closed { opacity: .75; }
+.pool-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 1.02rem; }
+.pool-bar { height: 12px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+.pool-bar span { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--gold), #e8b93a); }
+.pool-nums { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: .9rem; }
+.pool-done { color: var(--good); font-weight: 800; }
+.pool-mine { font-size: .88rem; color: var(--muted); }
+.pool-who { display: flex; flex-wrap: wrap; gap: 6px; }
+.pool-chip { font-size: .8rem; padding: 3px 9px; border-radius: 99px; background: var(--surface-2); }
+.pool-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.pool-row input, .pool-row select { flex: 1; min-width: 120px; }
+.pool-form { border: 1px dashed var(--line-strong); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 4px; }
+.pool-kind { display: flex; gap: 8px; align-items: flex-start; font-weight: 400; margin: 6px 0; }
+/* Admin > Staff Accounts: each person's options as one vertical list behind "Actions"; on a phone,
+   full-width cards instead of a table. */
+.act-list { display: flex; flex-direction: column; align-items: stretch; gap: 6px; min-width: 200px; }
+.act-list .btn { justify-content: flex-start; text-align: left; }
+.act-list .act-close { justify-content: center; text-align: center; }
+.staff-cards { display: flex; flex-direction: column; gap: 10px; }
+.staff-card { border: 1px solid var(--line); border-radius: 12px; padding: 12px; background: var(--surface); display: flex; flex-direction: column; gap: 8px; }
+.staff-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 1rem; }
+.staff-card-head b { margin-right: 4px; }
+.staff-card-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: .85rem; color: var(--muted); }
+.staff-card-meta b { color: var(--ink); }
+.staff-card-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.staff-card-actions .act-list { width: 100%; min-width: 0; }
+.staff-card-actions .act-list .btn { min-height: 44px; }
+.staff-card .field { margin: 0; }
+/* Phone: no box around the list, so each card gets the screen's full width. */
+@media (max-width: 700px) { .staff-list-card { padding: 0; border: none; background: none; box-shadow: none; } }
 /* Time Clock full log, editing a row: the "For" cell's fields stacked full width. */
 .tc-edit-for { min-width: 230px; }
 .tc-edit-for select, .tc-edit-for input { display: block; width: 100%; box-sizing: border-box; }
@@ -1733,6 +1766,148 @@ const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Frid
 // -- it's a bonus Gemilas Chassidim attendance credit now, not a TAG Coin grant) but stays
 // listed here since old ledger exports/history may still reference it.
 const TX_TYPES = ["Manual Grant", "Spent/Redeemed", "Transfer Out", "Transfer In", "Chazzan Bonus", "GC Bonus"];
+/* ---------- Pools: students chipping in together for something ----------
+   state.pools: [{ id, title, price, kind, status, createdAt, createdBy, closedAt, refunds }].
+   kind "own": the students pay the full price and it's theirs. kind "half": they pay half, TAG pays
+   the rest, and it belongs to TAG. A contribution is an ordinary "Spent/Redeemed" ledger entry
+   tagged with the pool's id -- so balances, coin history and "earned" totals need nothing new.
+   Cancelling a pool removes its contributions (everyone gets exactly their coins back) and keeps a
+   copy in `refunds`. status: "open" (collecting; "funded" once the goal is reached) -> "bought"
+   or "cancelled". */
+let poolForm = false;        // admin's "New pool" form open
+let poolAddFor = null;       // pool id whose "Add for a student" row is open
+let poolConfirmCancel = null;
+function poolGoal(p) { return p.kind === "half" ? Math.round(p.price * 50) / 100 : p.price; }
+function poolContribs(p) {
+  const by = new Map();
+  (state.ledger || []).forEach((tx) => { if (tx.poolId === p.id) by.set(tx.studentId, (by.get(tx.studentId) || 0) + (Number(tx.amount) || 0)); });
+  return by;
+}
+function poolRaised(p) { let t = 0; poolContribs(p).forEach((v) => { t += v; }); return Math.round(t * 100) / 100; }
+function poolKindText(p) { return p.kind === "half" ? "TAG pays half · belongs to TAG" : "Students' own · they pay the full price"; }
+function poolBarHtml(p) {
+  const raised = poolRaised(p), goal = poolGoal(p);
+  const pctDone = goal ? Math.min(100, Math.round(raised / goal * 100)) : 0;
+  return '<div class="pool-bar"><span style="width:' + pctDone + '%"></span></div>' +
+    '<div class="pool-nums">' + coinBadge("sm") + " <b>" + num2(raised) + "</b> of " + num2(goal) + (raised > goal ? ' · <span class="pool-done">Fully funded — ' + num2(raised - goal) + " extra!</span>" : raised >= goal ? ' · <span class="pool-done">Fully funded!</span>' : " · " + num2(goal - raised) + " to go") +
+    (p.kind === "half" ? ' <span class="help-text">(price ' + num2(p.price) + ", TAG adds the other half)</span>" : "") + "</div>";
+}
+function poolCardHtml(p, session) {
+  const staff = session.type === "staff", admin = staff && roleOf(session) === "admin";
+  const contribs = Array.from(poolContribs(p).entries()).sort((a, b) => b[1] - a[1]);
+  const open = p.status === "open", funded = poolRaised(p) >= poolGoal(p);
+  let h = '<div class="pool-card' + (open ? "" : " pool-closed") + '"><div class="pool-head"><b>' + escapeHtml(p.title) + "</b>" +
+    '<span class="pill ' + (p.kind === "half" ? "pill-gold" : "pill-good") + '">' + escapeHtml(poolKindText(p)) + "</span>" +
+    (p.status === "bought" ? '<span class="pill pill-good">Bought ' + escapeHtml(fmtDateShort(p.closedAt || "")) + "</span>" : p.status === "cancelled" ? '<span class="pill pill-muted">Cancelled — coins refunded</span>' : "") + "</div>";
+  h += p.status === "cancelled" ? "" : poolBarHtml(p);
+  if (session.type === "student") {
+    const mine = poolContribs(p).get(session.record.id) || 0;
+    h += '<div class="pool-mine">You’ve put in <b>' + num2(mine) + "</b>" + (contribs.length ? " · " + contribs.length + " student" + (contribs.length === 1 ? "" : "s") + " chipped in so far" : "") + "</div>";
+    if (open) {
+      h += '<div class="pool-row"><input type="number" min="0" step="any" inputmode="decimal" placeholder="How many coins? (you have ' + num2(studentStats(session.record.id).balance) + ')" id="pool-amt-' + p.id + '">' +
+        '<button type="button" class="btn btn-primary btn-sm" data-pool-chip="' + p.id + '">Chip in</button></div>';
+    }
+  } else {
+    const list = p.status === "cancelled" ? (p.refunds || []).map((r) => [r.studentId, r.amount]) : contribs;
+    h += '<div class="pool-who">' + (list.length ? list.map(([sid, amt]) => { const st = studentById(sid); return '<span class="pool-chip">' + escapeHtml(st ? st.first + " " + st.last : "(removed)") + " <b>" + num2(amt) + "</b></span>"; }).join("") : '<span class="help-text">Nobody has chipped in yet.</span>') + "</div>";
+    if (open && staff) {
+      if (poolAddFor === p.id) {
+        h += '<div class="pool-row"><select id="pool-for-' + p.id + '"><option value="">Student…</option>' + activeRoster().map((st) => '<option value="' + st.id + '">' + escapeHtml(st.first + " " + st.last) + " (" + num2(studentStats(st.id).balance) + ")</option>").join("") + "</select>" +
+          '<input type="number" min="0" step="any" inputmode="decimal" placeholder="Coins" id="pool-amt-' + p.id + '">' +
+          '<button type="button" class="btn btn-primary btn-sm" data-pool-add="' + p.id + '">Add</button><button type="button" class="btn btn-ghost btn-sm" data-pool-add-open="">Cancel</button></div>';
+      }
+      h += '<div class="pool-row">' + (poolAddFor === p.id ? "" : '<button type="button" class="btn btn-ghost btn-sm" data-pool-add-open="' + p.id + '">Add for a student</button>') +
+        (admin && funded ? '<button type="button" class="btn btn-primary btn-sm" data-pool-bought="' + p.id + '">Mark as bought</button>' : "") +
+        (admin ? (poolConfirmCancel === p.id
+          ? '<span style="color:var(--warn);font-weight:600;">Cancel and give everyone their coins back?</span><button type="button" class="btn btn-danger btn-sm" data-pool-cancel-yes="' + p.id + '">Yes, cancel</button><button type="button" class="btn btn-ghost btn-sm" data-pool-cancel="">No</button>'
+          : '<button type="button" class="btn btn-ghost btn-sm" data-pool-cancel="' + p.id + '" style="color:var(--warn);">Cancel &amp; refund</button>') : "") + "</div>";
+    }
+  }
+  return h + "</div>";
+}
+function poolsHtml(session) {
+  const pools = state.pools || [];
+  const staff = session.type === "staff", admin = staff && roleOf(session) === "admin";
+  const open = pools.filter((p) => p.status === "open");
+  const past = pools.filter((p) => p.status !== "open").sort((a, b) => (b.closedAt || "").localeCompare(a.closedAt || "")).slice(0, 5);
+  if (!staff && !open.length) return "";
+  let h = '<div class="card card-pad" style="margin-top:16px;"><div class="section-title">' + (staff ? "Pools" : "Chip in together") + "</div>" +
+    '<p class="help-text" style="margin-top:-6px;">' + (staff ? "Students pool their TAG coins toward something together." : "Put some of your TAG coins toward something with everyone else.") + "</p>";
+  if (admin) {
+    h += poolForm
+      ? '<div class="pool-form"><div class="field"><label for="pool-title">What for?</label><input type="text" id="pool-title" maxlength="80" placeholder="e.g. PlayStation controllers"></div>' +
+        '<div class="field"><label for="pool-price">Price in TAG coins</label><input type="number" id="pool-price" min="1" step="1" inputmode="decimal"></div>' +
+        '<div class="field"><label>Deal</label><label class="pool-kind"><input type="radio" name="pool-kind" value="own" checked> <span><b>Theirs</b> — the students pay the full price and it belongs to them</span></label>' +
+        '<label class="pool-kind"><input type="radio" name="pool-kind" value="half"> <span><b>Half</b> — the students pay half, TAG pays the rest, and it belongs to TAG</span></label></div>' +
+        '<div class="pool-row"><button type="button" class="btn btn-primary btn-sm" id="pool-create">Start the pool</button><button type="button" class="btn btn-ghost btn-sm" id="pool-form-close">Cancel</button></div></div>'
+      : '<button type="button" class="btn btn-ghost btn-sm" id="pool-form-open">+ New pool</button>';
+  }
+  h += open.length ? '<div class="pool-list">' + open.map((p) => poolCardHtml(p, session)).join("") + "</div>" : (staff ? '<p class="help-text">No pools open right now.</p>' : "");
+  if (staff && past.length) h += '<div class="tvc-sub" style="margin-top:14px;">Past pools</div><div class="pool-list">' + past.map((p) => poolCardHtml(p, session)).join("") + "</div>";
+  return h + "</div>";
+}
+async function poolContribute(session, poolId, studentId, amountRaw) {
+  const p = (state.pools || []).find((x) => x.id === poolId);
+  const amount = Math.round(Number(amountRaw) * 100) / 100;
+  if (!p || p.status !== "open") { toast("That pool isn’t open anymore.", "warn"); return; }
+  if (!studentId) { toast("Choose a student.", "warn"); return; }
+  if (!(amount > 0)) { toast("Enter how many coins.", "warn"); return; }
+  // Any amount they like -- even past the goal -- as long as they have the coins.
+  const bal = studentStats(studentId).balance;
+  if (amount > bal) { toast((session.type === "student" ? "You only have " : "They only have ") + num2(bal) + " TAG coins.", "warn"); return; }
+  if (session.type === "student" && !window.confirm("Put " + num2(amount) + " TAG coins toward " + p.title + "? This comes out of your balance now.")) return;
+  const txId = uid("l"), today = todayISO(), now = Date.now();
+  const res = await saveEdit((ns) => {
+    if ((ns.ledger || []).some((t) => t.id === txId)) return ns;
+    const pool = (ns.pools || []).find((x) => x.id === poolId);
+    if (!pool || pool.status !== "open") return ns;
+    ns.ledger.push({ id: txId, date: today, studentId, type: "Spent/Redeemed", amount, poolId, note: "Chipped in: " + pool.title, enteredBy: session.type === "student" ? session.record.first + " " + session.record.last : session.record.name, enteredAt: now });
+    return ns;
+  });
+  if (res.ok || res.local) { poolAddFor = null; toast("Chipped in " + num2(amount) + " toward " + p.title + ".", "good"); renderAll(); }
+}
+function wirePools(root, session) {
+  const $ = (id) => document.getElementById(id);
+  const on = (sel, fn) => root.querySelectorAll(sel).forEach((b) => b.addEventListener("click", () => fn(b)));
+  if ($("pool-form-open")) $("pool-form-open").addEventListener("click", () => { poolForm = true; renderAll(); });
+  if ($("pool-form-close")) $("pool-form-close").addEventListener("click", () => { poolForm = false; renderAll(); });
+  if ($("pool-create")) $("pool-create").addEventListener("click", async () => {
+    const title = $("pool-title").value.trim(), price = Math.round(Number($("pool-price").value) * 100) / 100;
+    const kindEl = root.querySelector('input[name="pool-kind"]:checked'), kind = kindEl ? kindEl.value : "own";
+    if (!title) { toast("Say what the pool is for.", "warn"); return; }
+    if (!(price > 0)) { toast("Enter the price in TAG coins.", "warn"); return; }
+    const id = uid("pool");
+    const res = await saveEdit((ns) => {
+      ns.pools = ns.pools || [];
+      if (!ns.pools.some((x) => x.id === id)) ns.pools.push({ id, title, price, kind, status: "open", createdAt: todayISO(), createdBy: session.record.name });
+      return ns;
+    });
+    if (res.ok || res.local) { poolForm = false; toast("Pool started: " + title + ".", "good"); renderAll(); }
+  });
+  on("[data-pool-chip]", (b) => { const id = b.getAttribute("data-pool-chip"); poolContribute(session, id, session.record.id, ($("pool-amt-" + id) || {}).value); });
+  on("[data-pool-add-open]", (b) => { poolAddFor = b.getAttribute("data-pool-add-open") || null; renderAll(); });
+  on("[data-pool-add]", (b) => { const id = b.getAttribute("data-pool-add"); poolContribute(session, id, ($("pool-for-" + id) || {}).value, ($("pool-amt-" + id) || {}).value); });
+  on("[data-pool-cancel]", (b) => { poolConfirmCancel = b.getAttribute("data-pool-cancel") || null; renderAll(); });
+  on("[data-pool-bought], [data-pool-cancel-yes]", async (b) => {
+    const id = b.getAttribute("data-pool-bought") || b.getAttribute("data-pool-cancel-yes");
+    const cancel = b.hasAttribute("data-pool-cancel-yes");
+    const res = await saveEdit((ns) => {
+      const pool = (ns.pools || []).find((x) => x.id === id);
+      if (!pool || pool.status !== "open") return ns;
+      pool.status = cancel ? "cancelled" : "bought";
+      pool.closedAt = todayISO();
+      if (cancel) {
+        const by = new Map();
+        ns.ledger.forEach((t) => { if (t.poolId === id) by.set(t.studentId, (by.get(t.studentId) || 0) + (Number(t.amount) || 0)); });
+        pool.refunds = Array.from(by.entries()).map(([studentId, amount]) => ({ studentId, amount }));
+        ns.ledger = ns.ledger.filter((t) => t.poolId !== id);
+      }
+      return ns;
+    });
+    if (res.ok || res.local) { poolConfirmCancel = null; toast(cancel ? "Pool cancelled — everyone got their coins back." : "Marked as bought.", "good"); renderAll(); }
+  });
+}
+
 /* Chazzan (leading davening) bonus coins -- student.isTA is a PERMISSION, not an eligibility
    flag: admin grants it (Admin > Students > "Allow to grant Chazzan coins") to a student who's
    effectively the teacher's helper/gabbai, and that one student can then record who led davening
@@ -6775,6 +6950,7 @@ function renderLedger(root, session) {
     html += collapsibleSectionHtml("ledgerPrivs", "Privilege price list", null, privBody);
   }
 
+  html += poolsHtml(session);
   const rows = state.ledger.slice().sort((a, b) => (b.enteredAt || 0) - (a.enteredAt || 0));
   html += '<div class="card card-pad" style="margin-top:16px;"><div class="section-title">All entries (' + rows.length + ")</div>";
   if (rows.length === 0) {
@@ -6791,6 +6967,7 @@ function renderLedger(root, session) {
   }
   html += "</div>";
   root.innerHTML = html;
+  wirePools(root, session);
 
   root.querySelectorAll("[data-coin-student]").forEach((btn) => {
     if (btn.disabled) return;
@@ -8252,6 +8429,56 @@ let confirmDeleteStaffId = null;
 // still the separate "Reset password" action, same as before.
 let editingStaffId = null;
 let showGraduatedStaff = false;
+let openStaffActionMenu = null; // which staff member's Actions list is open
+function staffRolePillsHtml(s) {
+  return (s.role === "admin" ? '<span class="pill pill-gold">Admin</span>'
+      : s.role === "limited" ? '<span class="pill pill-muted">Limited: ' + escapeHtml(s.restrictedPeriod || "?") + "</span>"
+      : s.role === "family" ? '<span class="pill pill-muted">Family only</span>'
+      : '<span class="pill pill-muted">Teacher</span>') +
+    (s.familyAccess && s.role !== "family" ? ' <span class="pill pill-good" title="Sees the Family tab">Family</span>' : "") +
+    (s.canClockInOut ? ' <span class="pill pill-good" title="Sees a clock icon next to their profile to clock in/out, plus a Time Clock tab in their own nav with the full combined log">⏱ Time Clock</span>' : "");
+}
+function staffActionsHtml(s) {
+  if (confirmDeleteStaffId === s.id) {
+    return '<div class="act-list"><span style="color:var(--warn);font-weight:600;">Delete ' + escapeHtml(s.name) + " permanently, with all their history?</span>" +
+      '<button class="btn btn-danger btn-sm" data-confirm-delete-staff="' + s.id + '">Yes, delete everything</button>' +
+      '<button class="btn btn-ghost btn-sm" data-cancel-delete-staff="' + s.id + '">Cancel</button></div>';
+  }
+  if (openStaffActionMenu !== s.id) return '<button class="btn btn-ghost btn-sm" data-staff-menu-toggle="' + s.id + '">Actions ' + icon("chevron") + "</button>";
+  return '<div class="act-list">' +
+    '<button class="btn btn-ghost btn-sm" data-view-as-staff="' + s.id + '">View as</button>' +
+    '<button class="btn btn-ghost btn-sm" data-edit-staff="' + s.id + '">Edit name, username or role</button>' +
+    '<button class="btn btn-ghost btn-sm" data-reset-staff="' + s.id + '">Reset password</button>' +
+    '<button class="btn btn-ghost btn-sm" data-toggle-clock="' + s.id + '">' + (s.canClockInOut ? "Remove Time Clock access" : "Allow Time Clock access") + "</button>" +
+    (s.role === "family" ? "" : '<button class="btn btn-ghost btn-sm" data-toggle-family="' + s.id + '">' + (s.familyAccess ? "Remove Family tab" : "Allow Family tab") + "</button>") +
+    '<button class="btn btn-ghost btn-sm" data-graduate-staff="' + s.id + '">Graduate</button>' +
+    '<button class="btn btn-ghost btn-sm" data-delete-staff="' + s.id + '" style="color:var(--warn);">Delete</button>' +
+    '<button class="btn btn-ghost btn-sm act-close" data-staff-menu-toggle="' + s.id + '">Close</button></div>';
+}
+function staffEditButtonsHtml(s) {
+  return '<button class="btn btn-primary btn-sm" data-save-edit-staff="' + s.id + '">Save</button>' +
+    '<button class="btn btn-ghost btn-sm" data-cancel-edit-staff="' + s.id + '">Cancel</button>';
+}
+// The edit form's fields: as table cells (desktop), or stacked labelled fields (phone card).
+function staffEditFieldsHtml(s, stacked) {
+  const role = '<select id="st-edit-role-' + s.id + '">' +
+    '<option value="teacher"' + (s.role === "teacher" ? " selected" : "") + ">Teacher</option>" +
+    '<option value="admin"' + (s.role === "admin" ? " selected" : "") + ">Admin</option>" +
+    '<option value="limited"' + (s.role === "limited" ? " selected" : "") + ">Limited (one class)</option>" +
+    '<option value="family"' + (s.role === "family" ? " selected" : "") + ">Family only</option></select>" +
+    '<div id="st-edit-restricted-wrap-' + s.id + '" style="margin-top:4px;display:' + (s.role === "limited" ? "" : "none") + ';">' +
+    '<select id="st-edit-restricted-' + s.id + '">' +
+    state.settings.periods.map((p) => '<option value="' + escapeHtml(p) + '"' + (s.restrictedPeriod === p ? " selected" : "") + ">" + escapeHtml(p) + "</option>").join("") + "</select></div>";
+  const name = '<input type="text" id="st-edit-name-' + s.id + '" value="' + escapeHtml(s.name) + '">';
+  const user = '<input type="text" id="st-edit-username-' + s.id + '" value="' + escapeHtml(s.username) + '">';
+  if (stacked) {
+    return '<div class="field"><label for="st-edit-name-' + s.id + '">Name</label>' + name + "</div>" +
+      '<div class="field"><label for="st-edit-username-' + s.id + '">Username</label>' + user + "</div>" +
+      '<div class="field"><label for="st-edit-role-' + s.id + '">Role</label>' + role + "</div>";
+  }
+  return "<tr><td>" + name + '</td><td class="num">' + user + '</td><td class="num">' + passwordCellHtml(s.password, "staff:" + s.id) + "</td><td>" + role + "</td>" +
+    '<td class="num">' + num2(staffStats(s.id).balance) + "</td>";
+}
 function renderAdminStaff(root) {
   let html = '<div class="card card-pad"><div class="section-title">Add a staff account</div><div class="field-row">' +
     '<div class="field"><label for="st-name">Name</label><input type="text" id="st-name"></div>' +
@@ -8288,50 +8515,30 @@ function renderAdminStaff(root) {
       '<button class="btn btn-ghost btn-sm" id="st-bulk-dismiss" style="margin-top:10px;">Dismiss</button></div>';
   }
 
-  html += '<div class="card card-pad"><div class="table-wrap"><table><thead><tr><th>Name</th><th>Username</th><th>Password</th><th>Role</th><th class="num" title="Earned from their own self-marked attendance &amp; participation -- never shown to students">TAG coins</th><th class="sticky-col-r"></th></tr></thead><tbody>';
-  currentStaff().forEach((s) => {
-    if (editingStaffId === s.id) {
-      html += "<tr><td><input type=\"text\" id=\"st-edit-name-" + s.id + "\" value=\"" + escapeHtml(s.name) + "\"></td>" +
-        "<td class=\"num\"><input type=\"text\" id=\"st-edit-username-" + s.id + "\" value=\"" + escapeHtml(s.username) + "\"></td>" +
-        '<td class="num">' + passwordCellHtml(s.password, "staff:" + s.id) + "</td>" +
-        "<td><select id=\"st-edit-role-" + s.id + "\">" +
-        "<option value=\"teacher\"" + (s.role === "teacher" ? " selected" : "") + ">Teacher</option>" +
-        "<option value=\"admin\"" + (s.role === "admin" ? " selected" : "") + ">Admin</option>" +
-        "<option value=\"limited\"" + (s.role === "limited" ? " selected" : "") + ">Limited (one class)</option>" +
-        "<option value=\"family\"" + (s.role === "family" ? " selected" : "") + ">Family only</option>" +
-        "</select>" +
-        "<div id=\"st-edit-restricted-wrap-" + s.id + "\" style=\"margin-top:4px;display:" + (s.role === "limited" ? "" : "none") + ";\">" +
-        "<select id=\"st-edit-restricted-" + s.id + "\">" +
-        state.settings.periods.map((p) => "<option value=\"" + escapeHtml(p) + "\"" + (s.restrictedPeriod === p ? " selected" : "") + ">" + escapeHtml(p) + "</option>").join("") +
-        "</select></div></td>" +
-        '<td class="num">' + num2(staffStats(s.id).balance) + "</td>" +
-        '<td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
-        '<button class="btn btn-primary btn-sm" data-save-edit-staff="' + s.id + '">Save</button>' +
-        '<button class="btn btn-ghost btn-sm" data-cancel-edit-staff="' + s.id + '">Cancel</button></td></tr>';
-      return;
-    }
-    const actions = confirmDeleteStaffId === s.id
-      ? '<span style="color:var(--warn);font-weight:600;">Delete permanently?</span> ' +
-        '<button class="btn btn-danger btn-sm" data-confirm-delete-staff="' + s.id + '">Yes, delete everything</button>' +
-        '<button class="btn btn-ghost btn-sm" data-cancel-delete-staff="' + s.id + '">Cancel</button>'
-      : '<button class="btn btn-ghost btn-sm" data-view-as-staff="' + s.id + '">View as</button>' +
-        '<button class="btn btn-ghost btn-sm" data-edit-staff="' + s.id + '">Edit</button>' +
-        '<button class="btn btn-ghost btn-sm" data-reset-staff="' + s.id + '">Reset password</button>' +
-        '<button class="btn btn-ghost btn-sm" data-toggle-clock="' + s.id + '">' + (s.canClockInOut ? "Remove Time Clock access" : "Allow Time Clock access") + '</button>' +
-        (s.role === "family" ? "" : '<button class="btn btn-ghost btn-sm" data-toggle-family="' + s.id + '">' + (s.familyAccess ? "Remove Family tab" : "Allow Family tab") + '</button>') +
-        '<button class="btn btn-ghost btn-sm" data-graduate-staff="' + s.id + '">Graduate</button>' +
-        '<button class="btn btn-ghost btn-sm" data-delete-staff="' + s.id + '" style="color:var(--warn);">Delete</button>';
-    html += "<tr><td>" + escapeHtml(s.name) + '</td><td class="num">' + escapeHtml(s.username) + '</td><td class="num">' + passwordCellHtml(s.password, "staff:" + s.id) +
-      '</td><td>' + (s.role === "admin" ? '<span class="pill pill-gold">Admin</span>'
-        : s.role === "limited" ? '<span class="pill pill-muted">Limited: ' + escapeHtml(s.restrictedPeriod || "?") + "</span>"
-        : s.role === "family" ? '<span class="pill pill-muted">Family only</span>'
-        : '<span class="pill pill-muted">Teacher</span>') +
-      (s.familyAccess && s.role !== "family" ? ' <span class="pill pill-good" title="Sees the Family tab">Family</span>' : "") +
-      (s.canClockInOut ? ' <span class="pill pill-good" title="Sees a clock icon next to their profile to clock in/out, plus a Time Clock tab in their own nav with the full combined log">⏱ Time Clock</span>' : "") +
-      '</td><td class="num">' + num2(staffStats(s.id).balance) + "</td>" +
-      '<td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' + actions + "</td></tr>";
-  });
-  html += "</tbody></table></div>";
+  // Each person's options sit behind one "Actions" button (staffActionsHtml). On a phone the list
+  // is full-width cards instead of a table whose columns get squeezed and cut off.
+  const phone = window.matchMedia("(max-width: 700px)").matches;
+  html += '<div class="card card-pad staff-list-card">';
+  if (phone) {
+    html += '<div class="staff-cards">' + currentStaff().map((s) => editingStaffId === s.id
+      ? '<div class="staff-card">' + staffEditFieldsHtml(s, true) + '<div class="staff-card-actions">' + staffEditButtonsHtml(s) + "</div></div>"
+      : '<div class="staff-card"><div class="staff-card-head"><b>' + escapeHtml(s.name) + "</b>" + staffRolePillsHtml(s) + "</div>" +
+        '<div class="staff-card-meta"><span>Username <b class="num">' + escapeHtml(s.username) + "</b></span><span>Password " + passwordCellHtml(s.password, "staff:" + s.id) + "</span>" +
+        '<span title="Earned from their own self-marked attendance &amp; participation -- never shown to students">TAG coins <b>' + num2(staffStats(s.id).balance) + "</b></span></div>" +
+        '<div class="staff-card-actions">' + staffActionsHtml(s) + "</div></div>").join("") + "</div>";
+  } else {
+    html += '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Username</th><th>Password</th><th>Role</th><th class="num" title="Earned from their own self-marked attendance &amp; participation -- never shown to students">TAG coins</th><th class="sticky-col-r"></th></tr></thead><tbody>';
+    currentStaff().forEach((s) => {
+      if (editingStaffId === s.id) {
+        html += staffEditFieldsHtml(s, false) + '<td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' + staffEditButtonsHtml(s) + "</td></tr>";
+        return;
+      }
+      html += "<tr><td>" + escapeHtml(s.name) + '</td><td class="num">' + escapeHtml(s.username) + '</td><td class="num">' + passwordCellHtml(s.password, "staff:" + s.id) +
+        "</td><td>" + staffRolePillsHtml(s) + '</td><td class="num">' + num2(staffStats(s.id).balance) + "</td>" +
+        '<td class="sticky-col-r">' + staffActionsHtml(s) + "</td></tr>";
+    });
+    html += "</tbody></table></div>";
+  }
   // Graduated staff: off every current list and can't sign in, but everything they logged is kept.
   const gradStaff = state.staff.filter(isGraduatedStaff).sort((a, b) => a.name.localeCompare(b.name));
   html += '<button class="btn btn-ghost btn-sm" id="grad-staff-toggle" style="margin-top:12px;">' + (showGraduatedStaff ? "Hide" : "Show") + " graduated staff (" + gradStaff.length + ")</button>";
@@ -8346,6 +8553,16 @@ function renderAdminStaff(root) {
   html += "</div>";
   root.innerHTML = html;
   wirePasswordToggles(root);
+  // Choosing anything from an Actions list closes it (runs before the button's own handler).
+  if (!root.__staffMenuCloser) {
+    root.__staffMenuCloser = true;
+    root.addEventListener("click", (e) => { if (e.target.closest(".act-list button:not([data-staff-menu-toggle])")) openStaffActionMenu = null; }, true);
+  }
+  root.querySelectorAll("[data-staff-menu-toggle]").forEach((btn) => btn.addEventListener("click", () => {
+    const id = btn.getAttribute("data-staff-menu-toggle");
+    openStaffActionMenu = openStaffActionMenu === id ? null : id;
+    renderAdminStaff(root);
+  }));
   const gradToggle = document.getElementById("grad-staff-toggle");
   if (gradToggle) gradToggle.addEventListener("click", () => { showGraduatedStaff = !showGraduatedStaff; renderAdminStaff(root); });
   root.querySelectorAll("[data-graduate-staff], [data-reenroll-staff]").forEach((btn) => btn.addEventListener("click", async () => {
@@ -8430,6 +8647,7 @@ function renderAdminStaff(root) {
     renderAdminStaff(root);
   }));
   root.querySelectorAll("[data-edit-staff]").forEach((btn) => btn.addEventListener("click", () => {
+    openStaffActionMenu = null;
     editingStaffId = btn.getAttribute("data-edit-staff");
     confirmDeleteStaffId = null;
     renderAdminStaff(root);
@@ -9796,6 +10014,9 @@ function renderStudentSelfBalance(root, student) {
     '<div><div class="coin-hero-label">TAG Coin Balance</div><div class="coin-hero-value">' + num2(allTimeSt.balance) + '</div>' +
     '<div class="coin-hero-earned">Total earned: <strong>' + num2(allTimeSt.earnedTotal) + "</strong></div>" +
     '<div class="coin-hero-sub">' + coinBreakdownText(allTimeSt) + "</div></div></div>";
+  // Open pools to chip in to, right under their balance (nothing shows when there are none).
+  const selfSession = currentSession();
+  if (selfSession && selfSession.type === "student") html += poolsHtml(selfSession).replace('style="margin-top:16px;"', 'style="margin-bottom:16px;"');
 
   const toggleHtml = '<div class="bubble-group" style="flex-shrink:0;">' +
     [["week", "This week"], ["month", "Month"]].map(([v, label]) =>
@@ -9859,6 +10080,7 @@ function renderStudentSelfBalance(root, student) {
   html += collapsibleSectionHtml("sdCoinActivity", "Recent coin activity", null, coinActivityBody);
 
   root.innerHTML = html;
+  if (selfSession && selfSession.type === "student") wirePools(root, selfSession);
   wireGlanceCircles(root); // lets a tap on the week grid reveal the exact number
 
   function goToDay(dateStr) {
