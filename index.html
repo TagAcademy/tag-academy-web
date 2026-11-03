@@ -1789,7 +1789,7 @@ function poolBarHtml(p) {
   const raised = poolRaised(p), goal = poolGoal(p);
   const pctDone = goal ? Math.min(100, Math.round(raised / goal * 100)) : 0;
   return '<div class="pool-bar"><span style="width:' + pctDone + '%"></span></div>' +
-    '<div class="pool-nums">' + coinBadge("sm") + " <b>" + num2(raised) + "</b> of " + num2(goal) + (raised >= goal ? ' · <span class="pool-done">Fully funded!</span>' : " · " + num2(goal - raised) + " to go") +
+    '<div class="pool-nums">' + coinBadge("sm") + " <b>" + num2(raised) + "</b> of " + num2(goal) + (raised > goal ? ' · <span class="pool-done">Fully funded — ' + num2(raised - goal) + " extra!</span>" : raised >= goal ? ' · <span class="pool-done">Fully funded!</span>' : " · " + num2(goal - raised) + " to go") +
     (p.kind === "half" ? ' <span class="help-text">(price ' + num2(p.price) + ", TAG adds the other half)</span>" : "") + "</div>";
 }
 function poolCardHtml(p, session) {
@@ -1803,8 +1803,8 @@ function poolCardHtml(p, session) {
   if (session.type === "student") {
     const mine = poolContribs(p).get(session.record.id) || 0;
     h += '<div class="pool-mine">You’ve put in <b>' + num2(mine) + "</b>" + (contribs.length ? " · " + contribs.length + " student" + (contribs.length === 1 ? "" : "s") + " chipped in so far" : "") + "</div>";
-    if (open && !funded) {
-      h += '<div class="pool-row"><input type="number" min="0.25" step="0.25" inputmode="decimal" placeholder="How many coins?" id="pool-amt-' + p.id + '">' +
+    if (open) {
+      h += '<div class="pool-row"><input type="number" min="0" step="any" inputmode="decimal" placeholder="How many coins? (you have ' + num2(studentStats(session.record.id).balance) + ')" id="pool-amt-' + p.id + '">' +
         '<button type="button" class="btn btn-primary btn-sm" data-pool-chip="' + p.id + '">Chip in</button></div>';
     }
   } else {
@@ -1813,10 +1813,10 @@ function poolCardHtml(p, session) {
     if (open && staff) {
       if (poolAddFor === p.id) {
         h += '<div class="pool-row"><select id="pool-for-' + p.id + '"><option value="">Student…</option>' + activeRoster().map((st) => '<option value="' + st.id + '">' + escapeHtml(st.first + " " + st.last) + " (" + num2(studentStats(st.id).balance) + ")</option>").join("") + "</select>" +
-          '<input type="number" min="0.25" step="0.25" inputmode="decimal" placeholder="Coins" id="pool-amt-' + p.id + '">' +
+          '<input type="number" min="0" step="any" inputmode="decimal" placeholder="Coins" id="pool-amt-' + p.id + '">' +
           '<button type="button" class="btn btn-primary btn-sm" data-pool-add="' + p.id + '">Add</button><button type="button" class="btn btn-ghost btn-sm" data-pool-add-open="">Cancel</button></div>';
       }
-      h += '<div class="pool-row">' + (poolAddFor === p.id || funded ? "" : '<button type="button" class="btn btn-ghost btn-sm" data-pool-add-open="' + p.id + '">Add for a student</button>') +
+      h += '<div class="pool-row">' + (poolAddFor === p.id ? "" : '<button type="button" class="btn btn-ghost btn-sm" data-pool-add-open="' + p.id + '">Add for a student</button>') +
         (admin && funded ? '<button type="button" class="btn btn-primary btn-sm" data-pool-bought="' + p.id + '">Mark as bought</button>' : "") +
         (admin ? (poolConfirmCancel === p.id
           ? '<span style="color:var(--warn);font-weight:600;">Cancel and give everyone their coins back?</span><button type="button" class="btn btn-danger btn-sm" data-pool-cancel-yes="' + p.id + '">Yes, cancel</button><button type="button" class="btn btn-ghost btn-sm" data-pool-cancel="">No</button>'
@@ -1852,9 +1852,7 @@ async function poolContribute(session, poolId, studentId, amountRaw) {
   if (!p || p.status !== "open") { toast("That pool isn’t open anymore.", "warn"); return; }
   if (!studentId) { toast("Choose a student.", "warn"); return; }
   if (!(amount > 0)) { toast("Enter how many coins.", "warn"); return; }
-  const left = Math.round((poolGoal(p) - poolRaised(p)) * 100) / 100;
-  if (left <= 0) { toast("This pool is already fully funded.", "warn"); return; }
-  if (amount > left) { toast("Only " + num2(left) + " more is needed.", "warn"); return; }
+  // Any amount they like -- even past the goal -- as long as they have the coins.
   const bal = studentStats(studentId).balance;
   if (amount > bal) { toast((session.type === "student" ? "You only have " : "They only have ") + num2(bal) + " TAG coins.", "warn"); return; }
   if (session.type === "student" && !window.confirm("Put " + num2(amount) + " TAG coins toward " + p.title + "? This comes out of your balance now.")) return;
