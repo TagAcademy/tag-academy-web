@@ -1623,6 +1623,9 @@ html.tv-mode #tv-root { display: block; }
 .tvc-photo-btns { display: flex; gap: 6px; flex-wrap: wrap; } .tvc-photo-btns .btn { min-height: 40px; }
 .tvc-del { background: var(--warn); color: #fff; }
 .tvc-upload { cursor: pointer; }
+/* Time Clock full log, editing a row: the "For" cell's fields stacked full width. */
+.tc-edit-for { min-width: 230px; }
+.tc-edit-for select, .tc-edit-for input { display: block; width: 100%; box-sizing: border-box; }
 .tvc-recent { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 8px; }
 .tvc-recent-item { display: flex; flex-direction: column; gap: 4px; }
 .tvc-recent-item .tvc-drive-thumb img { object-fit: contain; }
@@ -8726,9 +8729,15 @@ function renderAdminTimeClock(root, session) {
           return "<tr><td>" + name + '</td><td><input type="datetime-local" id="tc-edit-in-' + e.id + '" value="' + msToLocalInputValue(e.clockInAt) + '"></td>' +
             '<td><input type="datetime-local" id="tc-edit-out-' + e.id + '" value="' + (e.clockOutAt ? msToLocalInputValue(e.clockOutAt) : "") + '"><div class="help-text">Blank keeps it open</div></td>' +
             '<td class="help-text">—</td>' +
-            '<td><select id="tc-edit-category-' + e.id + '">' + timeClockCategoryOptionsHtml(e.category || "", "—") + "</select>" +
+            '<td class="tc-edit-for"><select id="tc-edit-category-' + e.id + '">' + timeClockCategoryOptionsHtml(e.category || "", "—") + "</select>" +
             timeClockCategoryCustomInputHtml("tc-edit-category-custom-" + e.id, e.category || "") +
-            '<input type="text" id="tc-edit-note-' + e.id + '" value="' + escapeHtml(e.note || "") + '" placeholder="Details" style="margin-top:4px;"></td>' +
+            '<input type="text" id="tc-edit-note-' + e.id + '" value="' + escapeHtml(e.note || "") + '" placeholder="Details" style="margin-top:4px;">' +
+            // Split this session where what they were doing changed: everything before the time
+            // stays under the category above, everything after goes under this one.
+            '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);"><div class="help-text" style="margin:0 0 4px;">Switched partway? From this time:</div>' +
+            '<input type="datetime-local" id="tc-edit-split-at-' + e.id + '" value="">' +
+            '<select id="tc-edit-split-cat-' + e.id + '" style="margin-top:4px;">' + timeClockCategoryOptionsHtml("", "it was for…") + "</select>" +
+            timeClockCategoryCustomInputHtml("tc-edit-split-cat-custom-" + e.id, "") + "</div></td>" +
             '<td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
             '<button class="btn btn-primary btn-sm" data-save-tc="' + e.id + '">Save</button>' +
             '<button class="btn btn-ghost btn-sm" data-cancel-edit-tc="' + e.id + '">Cancel</button></td></tr>';
@@ -8781,6 +8790,7 @@ function renderAdminTimeClock(root, session) {
   });
   wireTimeClockCategorySelect(document.getElementById("tc-add-category"), document.getElementById("tc-add-category-custom"));
   if (editingTimeClockId) wireTimeClockCategorySelect(document.getElementById("tc-edit-category-" + editingTimeClockId), document.getElementById("tc-edit-category-custom-" + editingTimeClockId));
+  if (editingTimeClockId) wireTimeClockCategorySelect(document.getElementById("tc-edit-split-cat-" + editingTimeClockId), document.getElementById("tc-edit-split-cat-custom-" + editingTimeClockId));
   const addSubmit = document.getElementById("tc-add-submit");
   if (addSubmit) addSubmit.addEventListener("click", async () => {
     const staffId = document.getElementById("tc-add-staff").value;
@@ -8876,19 +8886,34 @@ function renderAdminTimeClock(root, session) {
     // staff member -- exclude this entry's own id so it doesn't flag itself.
     const overlap = findOverlappingTimeClockEntry(state.timeClock, original.staffId, inMs, outMs, id);
     if (overlap) { const s = staffById(original.staffId); toast(timeClockOverlapMessage(overlap, s && s.name), "warn"); return; }
+    // Optional split: from splitMs on, the time was for splitCategory -- this entry ends there and
+    // a new one (same person) runs from there to this entry's end (or stays open, if this one is).
+    const splitVal = document.getElementById("tc-edit-split-at-" + id).value;
+    const splitMs = splitVal ? localInputValueToMs(splitVal) : null;
+    const splitCategory = splitVal ? resolveTimeClockCategory(document.getElementById("tc-edit-split-cat-" + id), document.getElementById("tc-edit-split-cat-custom-" + id)) : "";
+    if (splitVal) {
+      const fmt = (ms) => new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+      if (splitMs == null) { toast("Enter a valid time for the switch.", "warn"); return; }
+      if (!splitCategory) { toast("Choose what the time was for after the switch.", "warn"); return; }
+      const endMs = outMs != null ? outMs : appNow();
+      if (splitMs <= inMs || splitMs >= endMs) { toast("The switch has to be between " + fmt(inMs) + " and " + (outMs != null ? fmt(outMs) : "now") + ".", "warn"); return; }
+      if (splitCategory === category) { toast("That’s the same as what it was already for.", "warn"); return; }
+    }
+    const splitId = uid("tc"); // fixed up front so a retry touches the same new entry
     const applyEdit = (base) => {
       const ns = JSON.parse(JSON.stringify(base));
       const rec = (ns.timeClock || []).find((x) => x.id === id);
       if (!rec) return ns;
       rec.clockInAt = inMs;
-      rec.clockOutAt = outMs;
+      rec.clockOutAt = splitVal ? splitMs : outMs;
       if (category) rec.category = category; else delete rec.category;
       if (note) rec.note = note; else delete rec.note;
+      if (splitVal && !ns.timeClock.some((x) => x.id === splitId)) ns.timeClock.push({ id: splitId, staffId: rec.staffId, clockInAt: splitMs, clockOutAt: outMs, category: splitCategory });
       return ns;
     };
     editingTimeClockId = null;
     const res = await saveState(applyEdit(state), { retry: applyEdit });
-    if (res.ok || res.local) { toast("Time clock entry updated.", "good"); renderAll(); } else { renderAdminTimeClock(root, session); }
+    if (res.ok || res.local) { toast(splitVal ? "Split into " + (category || "—") + " and " + splitCategory + "." : "Time clock entry updated.", "good"); renderAll(); } else { renderAdminTimeClock(root, session); }
   }));
   root.querySelectorAll("[data-delete-tc]").forEach((btn) => btn.addEventListener("click", () => {
     confirmDeleteTimeClockId = btn.getAttribute("data-delete-tc");
