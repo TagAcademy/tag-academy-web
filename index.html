@@ -1623,6 +1623,23 @@ html.tv-mode #tv-root { display: block; }
 .tvc-photo-btns { display: flex; gap: 6px; flex-wrap: wrap; } .tvc-photo-btns .btn { min-height: 40px; }
 .tvc-del { background: var(--warn); color: #fff; }
 .tvc-upload { cursor: pointer; }
+/* Admin > Staff Accounts: each person's options as one vertical list behind "Actions"; on a phone,
+   full-width cards instead of a table. */
+.act-list { display: flex; flex-direction: column; align-items: stretch; gap: 6px; min-width: 200px; }
+.act-list .btn { justify-content: flex-start; text-align: left; }
+.act-list .act-close { justify-content: center; text-align: center; }
+.staff-cards { display: flex; flex-direction: column; gap: 10px; }
+.staff-card { border: 1px solid var(--line); border-radius: 12px; padding: 12px; background: var(--surface); display: flex; flex-direction: column; gap: 8px; }
+.staff-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 1rem; }
+.staff-card-head b { margin-right: 4px; }
+.staff-card-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: .85rem; color: var(--muted); }
+.staff-card-meta b { color: var(--ink); }
+.staff-card-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.staff-card-actions .act-list { width: 100%; min-width: 0; }
+.staff-card-actions .act-list .btn { min-height: 44px; }
+.staff-card .field { margin: 0; }
+/* Phone: no box around the list, so each card gets the screen's full width. */
+@media (max-width: 700px) { .staff-list-card { padding: 0; border: none; background: none; box-shadow: none; } }
 /* Time Clock full log, editing a row: the "For" cell's fields stacked full width. */
 .tc-edit-for { min-width: 230px; }
 .tc-edit-for select, .tc-edit-for input { display: block; width: 100%; box-sizing: border-box; }
@@ -8252,6 +8269,56 @@ let confirmDeleteStaffId = null;
 // still the separate "Reset password" action, same as before.
 let editingStaffId = null;
 let showGraduatedStaff = false;
+let openStaffActionMenu = null; // which staff member's Actions list is open
+function staffRolePillsHtml(s) {
+  return (s.role === "admin" ? '<span class="pill pill-gold">Admin</span>'
+      : s.role === "limited" ? '<span class="pill pill-muted">Limited: ' + escapeHtml(s.restrictedPeriod || "?") + "</span>"
+      : s.role === "family" ? '<span class="pill pill-muted">Family only</span>'
+      : '<span class="pill pill-muted">Teacher</span>') +
+    (s.familyAccess && s.role !== "family" ? ' <span class="pill pill-good" title="Sees the Family tab">Family</span>' : "") +
+    (s.canClockInOut ? ' <span class="pill pill-good" title="Sees a clock icon next to their profile to clock in/out, plus a Time Clock tab in their own nav with the full combined log">⏱ Time Clock</span>' : "");
+}
+function staffActionsHtml(s) {
+  if (confirmDeleteStaffId === s.id) {
+    return '<div class="act-list"><span style="color:var(--warn);font-weight:600;">Delete ' + escapeHtml(s.name) + " permanently, with all their history?</span>" +
+      '<button class="btn btn-danger btn-sm" data-confirm-delete-staff="' + s.id + '">Yes, delete everything</button>' +
+      '<button class="btn btn-ghost btn-sm" data-cancel-delete-staff="' + s.id + '">Cancel</button></div>';
+  }
+  if (openStaffActionMenu !== s.id) return '<button class="btn btn-ghost btn-sm" data-staff-menu-toggle="' + s.id + '">Actions ' + icon("chevron") + "</button>";
+  return '<div class="act-list">' +
+    '<button class="btn btn-ghost btn-sm" data-view-as-staff="' + s.id + '">View as</button>' +
+    '<button class="btn btn-ghost btn-sm" data-edit-staff="' + s.id + '">Edit name, username or role</button>' +
+    '<button class="btn btn-ghost btn-sm" data-reset-staff="' + s.id + '">Reset password</button>' +
+    '<button class="btn btn-ghost btn-sm" data-toggle-clock="' + s.id + '">' + (s.canClockInOut ? "Remove Time Clock access" : "Allow Time Clock access") + "</button>" +
+    (s.role === "family" ? "" : '<button class="btn btn-ghost btn-sm" data-toggle-family="' + s.id + '">' + (s.familyAccess ? "Remove Family tab" : "Allow Family tab") + "</button>") +
+    '<button class="btn btn-ghost btn-sm" data-graduate-staff="' + s.id + '">Graduate</button>' +
+    '<button class="btn btn-ghost btn-sm" data-delete-staff="' + s.id + '" style="color:var(--warn);">Delete</button>' +
+    '<button class="btn btn-ghost btn-sm act-close" data-staff-menu-toggle="' + s.id + '">Close</button></div>';
+}
+function staffEditButtonsHtml(s) {
+  return '<button class="btn btn-primary btn-sm" data-save-edit-staff="' + s.id + '">Save</button>' +
+    '<button class="btn btn-ghost btn-sm" data-cancel-edit-staff="' + s.id + '">Cancel</button>';
+}
+// The edit form's fields: as table cells (desktop), or stacked labelled fields (phone card).
+function staffEditFieldsHtml(s, stacked) {
+  const role = '<select id="st-edit-role-' + s.id + '">' +
+    '<option value="teacher"' + (s.role === "teacher" ? " selected" : "") + ">Teacher</option>" +
+    '<option value="admin"' + (s.role === "admin" ? " selected" : "") + ">Admin</option>" +
+    '<option value="limited"' + (s.role === "limited" ? " selected" : "") + ">Limited (one class)</option>" +
+    '<option value="family"' + (s.role === "family" ? " selected" : "") + ">Family only</option></select>" +
+    '<div id="st-edit-restricted-wrap-' + s.id + '" style="margin-top:4px;display:' + (s.role === "limited" ? "" : "none") + ';">' +
+    '<select id="st-edit-restricted-' + s.id + '">' +
+    state.settings.periods.map((p) => '<option value="' + escapeHtml(p) + '"' + (s.restrictedPeriod === p ? " selected" : "") + ">" + escapeHtml(p) + "</option>").join("") + "</select></div>";
+  const name = '<input type="text" id="st-edit-name-' + s.id + '" value="' + escapeHtml(s.name) + '">';
+  const user = '<input type="text" id="st-edit-username-' + s.id + '" value="' + escapeHtml(s.username) + '">';
+  if (stacked) {
+    return '<div class="field"><label for="st-edit-name-' + s.id + '">Name</label>' + name + "</div>" +
+      '<div class="field"><label for="st-edit-username-' + s.id + '">Username</label>' + user + "</div>" +
+      '<div class="field"><label for="st-edit-role-' + s.id + '">Role</label>' + role + "</div>";
+  }
+  return "<tr><td>" + name + '</td><td class="num">' + user + '</td><td class="num">' + passwordCellHtml(s.password, "staff:" + s.id) + "</td><td>" + role + "</td>" +
+    '<td class="num">' + num2(staffStats(s.id).balance) + "</td>";
+}
 function renderAdminStaff(root) {
   let html = '<div class="card card-pad"><div class="section-title">Add a staff account</div><div class="field-row">' +
     '<div class="field"><label for="st-name">Name</label><input type="text" id="st-name"></div>' +
@@ -8288,50 +8355,30 @@ function renderAdminStaff(root) {
       '<button class="btn btn-ghost btn-sm" id="st-bulk-dismiss" style="margin-top:10px;">Dismiss</button></div>';
   }
 
-  html += '<div class="card card-pad"><div class="table-wrap"><table><thead><tr><th>Name</th><th>Username</th><th>Password</th><th>Role</th><th class="num" title="Earned from their own self-marked attendance &amp; participation -- never shown to students">TAG coins</th><th class="sticky-col-r"></th></tr></thead><tbody>';
-  currentStaff().forEach((s) => {
-    if (editingStaffId === s.id) {
-      html += "<tr><td><input type=\"text\" id=\"st-edit-name-" + s.id + "\" value=\"" + escapeHtml(s.name) + "\"></td>" +
-        "<td class=\"num\"><input type=\"text\" id=\"st-edit-username-" + s.id + "\" value=\"" + escapeHtml(s.username) + "\"></td>" +
-        '<td class="num">' + passwordCellHtml(s.password, "staff:" + s.id) + "</td>" +
-        "<td><select id=\"st-edit-role-" + s.id + "\">" +
-        "<option value=\"teacher\"" + (s.role === "teacher" ? " selected" : "") + ">Teacher</option>" +
-        "<option value=\"admin\"" + (s.role === "admin" ? " selected" : "") + ">Admin</option>" +
-        "<option value=\"limited\"" + (s.role === "limited" ? " selected" : "") + ">Limited (one class)</option>" +
-        "<option value=\"family\"" + (s.role === "family" ? " selected" : "") + ">Family only</option>" +
-        "</select>" +
-        "<div id=\"st-edit-restricted-wrap-" + s.id + "\" style=\"margin-top:4px;display:" + (s.role === "limited" ? "" : "none") + ";\">" +
-        "<select id=\"st-edit-restricted-" + s.id + "\">" +
-        state.settings.periods.map((p) => "<option value=\"" + escapeHtml(p) + "\"" + (s.restrictedPeriod === p ? " selected" : "") + ">" + escapeHtml(p) + "</option>").join("") +
-        "</select></div></td>" +
-        '<td class="num">' + num2(staffStats(s.id).balance) + "</td>" +
-        '<td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
-        '<button class="btn btn-primary btn-sm" data-save-edit-staff="' + s.id + '">Save</button>' +
-        '<button class="btn btn-ghost btn-sm" data-cancel-edit-staff="' + s.id + '">Cancel</button></td></tr>';
-      return;
-    }
-    const actions = confirmDeleteStaffId === s.id
-      ? '<span style="color:var(--warn);font-weight:600;">Delete permanently?</span> ' +
-        '<button class="btn btn-danger btn-sm" data-confirm-delete-staff="' + s.id + '">Yes, delete everything</button>' +
-        '<button class="btn btn-ghost btn-sm" data-cancel-delete-staff="' + s.id + '">Cancel</button>'
-      : '<button class="btn btn-ghost btn-sm" data-view-as-staff="' + s.id + '">View as</button>' +
-        '<button class="btn btn-ghost btn-sm" data-edit-staff="' + s.id + '">Edit</button>' +
-        '<button class="btn btn-ghost btn-sm" data-reset-staff="' + s.id + '">Reset password</button>' +
-        '<button class="btn btn-ghost btn-sm" data-toggle-clock="' + s.id + '">' + (s.canClockInOut ? "Remove Time Clock access" : "Allow Time Clock access") + '</button>' +
-        (s.role === "family" ? "" : '<button class="btn btn-ghost btn-sm" data-toggle-family="' + s.id + '">' + (s.familyAccess ? "Remove Family tab" : "Allow Family tab") + '</button>') +
-        '<button class="btn btn-ghost btn-sm" data-graduate-staff="' + s.id + '">Graduate</button>' +
-        '<button class="btn btn-ghost btn-sm" data-delete-staff="' + s.id + '" style="color:var(--warn);">Delete</button>';
-    html += "<tr><td>" + escapeHtml(s.name) + '</td><td class="num">' + escapeHtml(s.username) + '</td><td class="num">' + passwordCellHtml(s.password, "staff:" + s.id) +
-      '</td><td>' + (s.role === "admin" ? '<span class="pill pill-gold">Admin</span>'
-        : s.role === "limited" ? '<span class="pill pill-muted">Limited: ' + escapeHtml(s.restrictedPeriod || "?") + "</span>"
-        : s.role === "family" ? '<span class="pill pill-muted">Family only</span>'
-        : '<span class="pill pill-muted">Teacher</span>') +
-      (s.familyAccess && s.role !== "family" ? ' <span class="pill pill-good" title="Sees the Family tab">Family</span>' : "") +
-      (s.canClockInOut ? ' <span class="pill pill-good" title="Sees a clock icon next to their profile to clock in/out, plus a Time Clock tab in their own nav with the full combined log">⏱ Time Clock</span>' : "") +
-      '</td><td class="num">' + num2(staffStats(s.id).balance) + "</td>" +
-      '<td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' + actions + "</td></tr>";
-  });
-  html += "</tbody></table></div>";
+  // Each person's options sit behind one "Actions" button (staffActionsHtml). On a phone the list
+  // is full-width cards instead of a table whose columns get squeezed and cut off.
+  const phone = window.matchMedia("(max-width: 700px)").matches;
+  html += '<div class="card card-pad staff-list-card">';
+  if (phone) {
+    html += '<div class="staff-cards">' + currentStaff().map((s) => editingStaffId === s.id
+      ? '<div class="staff-card">' + staffEditFieldsHtml(s, true) + '<div class="staff-card-actions">' + staffEditButtonsHtml(s) + "</div></div>"
+      : '<div class="staff-card"><div class="staff-card-head"><b>' + escapeHtml(s.name) + "</b>" + staffRolePillsHtml(s) + "</div>" +
+        '<div class="staff-card-meta"><span>Username <b class="num">' + escapeHtml(s.username) + "</b></span><span>Password " + passwordCellHtml(s.password, "staff:" + s.id) + "</span>" +
+        '<span title="Earned from their own self-marked attendance &amp; participation -- never shown to students">TAG coins <b>' + num2(staffStats(s.id).balance) + "</b></span></div>" +
+        '<div class="staff-card-actions">' + staffActionsHtml(s) + "</div></div>").join("") + "</div>";
+  } else {
+    html += '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Username</th><th>Password</th><th>Role</th><th class="num" title="Earned from their own self-marked attendance &amp; participation -- never shown to students">TAG coins</th><th class="sticky-col-r"></th></tr></thead><tbody>';
+    currentStaff().forEach((s) => {
+      if (editingStaffId === s.id) {
+        html += staffEditFieldsHtml(s, false) + '<td class="sticky-col-r" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' + staffEditButtonsHtml(s) + "</td></tr>";
+        return;
+      }
+      html += "<tr><td>" + escapeHtml(s.name) + '</td><td class="num">' + escapeHtml(s.username) + '</td><td class="num">' + passwordCellHtml(s.password, "staff:" + s.id) +
+        "</td><td>" + staffRolePillsHtml(s) + '</td><td class="num">' + num2(staffStats(s.id).balance) + "</td>" +
+        '<td class="sticky-col-r">' + staffActionsHtml(s) + "</td></tr>";
+    });
+    html += "</tbody></table></div>";
+  }
   // Graduated staff: off every current list and can't sign in, but everything they logged is kept.
   const gradStaff = state.staff.filter(isGraduatedStaff).sort((a, b) => a.name.localeCompare(b.name));
   html += '<button class="btn btn-ghost btn-sm" id="grad-staff-toggle" style="margin-top:12px;">' + (showGraduatedStaff ? "Hide" : "Show") + " graduated staff (" + gradStaff.length + ")</button>";
@@ -8346,6 +8393,16 @@ function renderAdminStaff(root) {
   html += "</div>";
   root.innerHTML = html;
   wirePasswordToggles(root);
+  // Choosing anything from an Actions list closes it (runs before the button's own handler).
+  if (!root.__staffMenuCloser) {
+    root.__staffMenuCloser = true;
+    root.addEventListener("click", (e) => { if (e.target.closest(".act-list button:not([data-staff-menu-toggle])")) openStaffActionMenu = null; }, true);
+  }
+  root.querySelectorAll("[data-staff-menu-toggle]").forEach((btn) => btn.addEventListener("click", () => {
+    const id = btn.getAttribute("data-staff-menu-toggle");
+    openStaffActionMenu = openStaffActionMenu === id ? null : id;
+    renderAdminStaff(root);
+  }));
   const gradToggle = document.getElementById("grad-staff-toggle");
   if (gradToggle) gradToggle.addEventListener("click", () => { showGraduatedStaff = !showGraduatedStaff; renderAdminStaff(root); });
   root.querySelectorAll("[data-graduate-staff], [data-reenroll-staff]").forEach((btn) => btn.addEventListener("click", async () => {
@@ -8430,6 +8487,7 @@ function renderAdminStaff(root) {
     renderAdminStaff(root);
   }));
   root.querySelectorAll("[data-edit-staff]").forEach((btn) => btn.addEventListener("click", () => {
+    openStaffActionMenu = null;
     editingStaffId = btn.getAttribute("data-edit-staff");
     confirmDeleteStaffId = null;
     renderAdminStaff(root);
