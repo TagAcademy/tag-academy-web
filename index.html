@@ -4616,7 +4616,12 @@ function renderTimeClockModal(session) {
       timeClockStartEditHtml(open) +
       (!open && lastClosed ? timeClockEndEditHtml(null, lastClosed) : "") +
       (open ? timeClockSwitchHtml(open) : '<button type="button" class="btn btn-ghost" id="time-clock-dayoff-open-btn" style="width:100%;margin-bottom:14px;">Take a personal or sick day</button>');
-  root.innerHTML = '<div class="modal-backdrop" id="time-clock-backdrop">' +
+  // Replacing the modal removes a time box that's being edited, and the browser fires its
+  // "change" right then -- whose handler redraws this modal again, in the middle of this redraw
+  // (which threw "The node to be removed is no longer a child of this node"). Such a redraw now
+  // just waits for this one to finish.
+  if (timeClockRendering) { setTimeout(() => { if (timeClockOpen) renderTimeClockModal(session); }, 0); return; }
+  const modalHtml = '<div class="modal-backdrop" id="time-clock-backdrop">' +
     '<div class="modal modal-wide">' +
     "<h2>Time Clock</h2>" +
     '<p class="sub">' + (open ? "Clocked in since " + fmtClockTime(open.clockInAt) + (open.category ? " · " + escapeHtml(open.category) : "") + "." : needsReason ? "It's after hours — let us know what this time is for." : timeClockShowDayOffForm ? "Log a personal or sick day." : "You’re not clocked in right now.") + "</p>" +
@@ -4627,6 +4632,8 @@ function renderTimeClockModal(session) {
     '<button type="button" class="btn btn-ghost btn-sm" id="time-clock-full-log-btn">Open full log</button>' +
     '<button type="button" class="btn btn-ghost btn-sm" id="time-clock-close-btn">Close</button>' +
     "</div></div></div>";
+  timeClockRendering = true;
+  try { root.innerHTML = modalHtml; } finally { timeClockRendering = false; }
   const newModal = root.querySelector(".modal");
   if (newModal && prevScroll) newModal.scrollTop = prevScroll;
   wireTimeClockCalendar(session);
@@ -4690,6 +4697,7 @@ function closeTimeClock(session) {
   timeClockShowDayOffForm = false;
   timeClockStartEdit = null; timeClockStartValue = "";
   timeClockEndEdit = null; timeClockEndValue = "";
+  timeClockSwitchEdit = false; timeClockSwitchValue = "";
   renderTimeClockModal(session);
 }
 // "Left earlier?" (before tapping Clock Out) / "Change your last clock-out" (after clocking out).
@@ -4792,29 +4800,57 @@ async function changeOpenTimeClockStart(session, entryId, startMs) {
   }
 }
 // While clocked in: switch what the time is for without clocking out. The current stretch ends
-// now and a new one starts now under the new category, so each category's hours stay right.
-// (Within the first minute it just relabels the session instead of leaving a 0-minute entry.)
+// at the switch time and a new one starts then under the new category, so each category's hours
+// stay right. The switch time is now unless "Switched earlier?" sets one (e.g. started admin work
+// at 10:30 but only switched at 11). (A switch within a minute of the session's start just
+// relabels the session instead of leaving a 0-minute entry.)
+let timeClockSwitchEdit = false;
+let timeClockRendering = false; // see renderTimeClockModal
+let timeClockSwitchValue = "";
 function timeClockSwitchHtml(open) {
+  const timeRow = timeClockSwitchEdit
+    ? '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;"><label for="tc-switch-time" style="margin:0;font-weight:600;">Switched at</label>' +
+      '<input type="time" id="tc-switch-time" value="' + escapeHtml(timeClockSwitchValue || hhmmOf(appNow())) + '" style="flex:1;min-width:120px;">' +
+      '<button type="button" class="btn btn-ghost btn-sm" id="tc-switch-time-cancel">Use now</button></div>'
+    : '<button type="button" class="diag-link" id="tc-switch-time-open" style="display:block;margin:6px 0 0;font-size:0.85rem;">Switched earlier? Set the time</button>';
   return '<div class="field" style="margin-bottom:14px;"><label for="tc-switch-category">Switch what you’re doing (stays clocked in)</label>' +
     '<div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;"><div style="flex:1;min-width:160px;">' +
     '<select id="tc-switch-category">' + timeClockCategoryOptionsHtml("", "Choose…").replace('<option value="' + escapeHtml(open.category || "") + '">', '<option value="' + escapeHtml(open.category || "") + '" disabled>') + "</select>" +
     timeClockCategoryCustomInputHtml("tc-switch-category-custom", "") + "</div>" +
-    '<button type="button" class="btn btn-ghost btn-sm" id="tc-switch-btn" style="min-height:40px;">Switch</button></div></div>';
+    '<button type="button" class="btn btn-ghost btn-sm" id="tc-switch-btn" style="min-height:40px;">Switch</button></div>' + timeRow + "</div>";
 }
 function wireTimeClockSwitch(session, open) {
   const sel = document.getElementById("tc-switch-category"), custom = document.getElementById("tc-switch-category-custom");
   wireTimeClockCategorySelect(sel, custom);
+  const openTime = document.getElementById("tc-switch-time-open");
+  if (openTime) openTime.addEventListener("click", () => {
+    timeClockSwitchEdit = true; timeClockSwitchValue = hhmmOf(appNow());
+    renderTimeClockModal(session);
+    const t = document.getElementById("tc-switch-time"); if (t) t.focus();
+  });
+  const timeInp = document.getElementById("tc-switch-time");
+  if (timeInp) timeInp.addEventListener("change", () => { timeClockSwitchValue = timeInp.value; });
+  const cancelTime = document.getElementById("tc-switch-time-cancel");
+  if (cancelTime) cancelTime.addEventListener("click", () => { timeClockSwitchEdit = false; timeClockSwitchValue = ""; renderTimeClockModal(session); });
   const btn = document.getElementById("tc-switch-btn");
   if (btn && open) btn.addEventListener("click", () => {
     const category = resolveTimeClockCategory(sel, custom);
     if (!category) { toast("Choose what you’re switching to.", "warn"); return; }
     if (category === open.category) { toast("You’re already clocked in for " + category + ".", "warn"); return; }
-    switchTimeClockCategory(session, open.id, category);
+    let atMs = null;
+    if (timeClockSwitchEdit && timeInp) {
+      const now = appNow();
+      const r = timeClockStartFromHhmm(timeInp.value, now);
+      if (r.error) { toast(r.error.replace("when you actually started", "when you actually switched"), "warn"); return; }
+      if (r.ms < open.clockInAt) { toast("That’s before you clocked in (" + new Date(open.clockInAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) + "). To change when you started, use “Change start time”.", "warn"); return; }
+      if (now - r.ms >= 60000) atMs = r.ms;
+    }
+    switchTimeClockCategory(session, open.id, category, atMs);
   });
 }
-async function switchTimeClockCategory(session, openId, category) {
+async function switchTimeClockCategory(session, openId, category, atMs) {
   const staffId = session.record.id;
-  const now = appNow();
+  const now = atMs || appNow(); // when the switch happened (now, or the earlier time chosen)
   const newEntryId = uid("tc"); // fixed up front -- see toggleTimeClock
   const res = await saveEdit((ns) => {
     ns.timeClock = ns.timeClock || [];
@@ -4825,7 +4861,11 @@ async function switchTimeClockCategory(session, openId, category) {
     if (!ns.timeClock.some((e) => e.id === newEntryId)) ns.timeClock.push({ id: newEntryId, staffId, clockInAt: now, clockOutAt: null, category });
     return ns;
   });
-  if (res.ok || res.local) { toast("Switched to " + category + " — still clocked in.", "good"); renderAll(); }
+  if (res.ok || res.local) {
+    timeClockSwitchEdit = false; timeClockSwitchValue = "";
+    toast("Switched to " + category + (atMs ? " from " + new Date(atMs).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : "") + " — still clocked in.", "good");
+    renderAll();
+  }
 }
 async function toggleTimeClock(session, extra) {
   const staffId = session.record.id;
@@ -4869,6 +4909,7 @@ async function toggleTimeClock(session, extra) {
   if (res.ok || res.local) {
     timeClockStartEdit = null; timeClockStartValue = "";
     timeClockEndEdit = null; timeClockEndValue = "";
+    timeClockSwitchEdit = false; timeClockSwitchValue = "";
     toast(wasOpenNow ? "Clocked out." : "Clocked in.", "good");
     renderAll();
   }
