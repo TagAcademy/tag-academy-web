@@ -11677,12 +11677,28 @@ function listenForLiveUpdates() {
   subscribe();
 
   // Belt-and-suspenders beyond the push-based listener above: catch up with one plain fetch
-  // the moment a backgrounded tab is looked at again or the network comes back, instead of
-  // waiting on the realtime channel to notice by itself.
+  // the moment a backgrounded tab is looked at again (below) or the network comes back, instead
+  // of waiting on the realtime channel to notice by itself.
+  // A tab left in the background still holds a live connection to the database, and a browser
+  // only allows a handful per site -- with several TAG Academy tabs open, a NEW tab could wait
+  // forever for one and sit on "Loading TAG Academy…" (Incognito, with its own connections,
+  // loaded fine). So a tab that's been hidden for 2 minutes lets its connection go, and takes it
+  // back -- catching up at once -- as soon as it's looked at again.
+  let idleTimer = null, idleOff = false;
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") syncNow();
+    clearTimeout(idleTimer);
+    if (document.visibilityState === "hidden") {
+      idleTimer = setTimeout(() => {
+        if (document.visibilityState !== "hidden" || typeof db.disableNetwork !== "function") return;
+        idleOff = true;
+        db.disableNetwork().catch((e) => { idleOff = false; console.error("disableNetwork failed:", e); });
+      }, 120000);
+    } else if (idleOff) {
+      idleOff = false;
+      db.enableNetwork().then(syncNow).catch((e) => console.error("enableNetwork failed:", e));
+    } else if (document.visibilityState === "visible") syncNow();
   });
-  window.addEventListener("online", syncNow);
+  window.addEventListener("online", () => { if (!idleOff) syncNow(); });
   // And a final safety net that needs no trigger at all: every 20 seconds, just check --
   // so even a stall none of the above catches can never leave a screen more than about 20
   // seconds out of date.
