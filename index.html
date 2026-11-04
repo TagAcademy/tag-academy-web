@@ -5674,10 +5674,8 @@ function renderToday(root, session) {
   // tefilah's fixed bonus coin amount as a real ledger entry the moment it's picked; switching to
   // a different student/"Other", or picking "— none —" replaces/clears that same entry (see
   // wireChazzanControl/applyChazzanChoice) rather than piling up duplicates. This quick control
-  // stays a plain single-select dropdown (picking a name -- or "Other" -- here always sets that
-  // ONE slot as the sole chazzan, collapsing away any split); the TA's own dedicated Chazzan tab
-  // (see renderChazzanGrantCard) is the only place two slots can split a tefilah (e.g. a student
-  // plus a non-student "Other" for half each). Only an admin can grant chazzan coins from here --
+  // has a second "Split with" dropdown for when two led it (a second student, or "Other" for a
+  // non-student) -- the same split the TA's own Chazzan tab offers (see renderChazzanGrantCard). Only an admin can grant chazzan coins from here --
   // a regular teacher account no longer can (this used to be open to any signed-in staff who
   // could write, which was too broad) -- a student with isTA permission can still do the exact
   // same thing from their own Chazzan tab.
@@ -5686,28 +5684,27 @@ function renderToday(root, session) {
     const current = chazzanFor(todayDate, selectedPeriod);
     const currentIds = (current && current.studentIds) || [];
     const share = currentIds.length ? chazzanShareFor(selectedPeriod, todayDate, currentIds.length) : chazzanCoinsFor(selectedPeriod, todayDate);
-    const realCurrent = currentIds.find((id) => id !== CHAZZAN_OTHER) || "";
-    const hasOtherSlot = currentIds.includes(CHAZZAN_OTHER);
-    // This dropdown only ever shows/sets ONE real student -- if a TA split this tefilah with a
-    // second REAL student (from their own Chazzan tab), point staff there to see who; if the
-    // second slot is "Other" (a non-student), say so directly since there's nothing to look up.
-    const splitNote = currentIds.length === 2
-      ? (hasOtherSlot
-          ? " (other half led by a non-student)"
-          : (() => { const otherReal = studentById(currentIds.find((id) => id !== realCurrent)); return otherReal ? " (split with " + escapeHtml(otherReal.first + " " + otherReal.last) + " — see their Chazzan tab)" : ""; })())
-      : "";
+    // Two dropdowns: who led it, and (optionally) who split it with them -- a second student, or
+    // "Other" for a non-student. Each real student gets chazzanShareFor's split share.
+    const first = currentIds[0] || "", second = currentIds[1] || "";
+    const realCount = currentIds.filter((id) => id !== CHAZZAN_OTHER).length;
+    const opts = (val, exclude) => roster.filter((s) => s.id !== exclude).map((s) => '<option value="' + s.id + '"' + (val === s.id ? " selected" : "") + ">" + escapeHtml(s.first + " " + s.last) + "</option>").join("") +
+      '<option value="' + CHAZZAN_OTHER + '"' + (val === CHAZZAN_OTHER ? " selected" : "") + ">Other (not a student)</option>";
     chazzanHtml = '<div class="card card-pad" style="margin-top:14px;">' +
       '<div class="section-title" style="font-size:0.95rem;">Chazzan — ' + escapeHtml(selectedPeriod) + "</div>" +
       '<div class="field-row" style="align-items:flex-end;">' +
       '<div class="field" style="min-width:200px;"><label for="chazzan-student">Today\'s chazzan</label><select id="chazzan-student">' +
-      '<option value="">— none —</option>' +
-      roster.map((s) => '<option value="' + s.id + '"' + (realCurrent === s.id ? " selected" : "") + '>' + escapeHtml(s.first + " " + s.last) + "</option>").join("") +
-      '<option value="' + CHAZZAN_OTHER + '"' + (!realCurrent && hasOtherSlot ? " selected" : "") + '>Other (not a student)</option>' +
-      "</select></div>" +
+      '<option value="">— none —</option>' + opts(first, "") + "</select></div>" +
+      (first ? '<div class="field" style="min-width:200px;"><label for="chazzan-student-2">Split with (optional)</label><select id="chazzan-student-2">' +
+        '<option value="">— nobody, led it alone —</option>' + opts(second, first) + "</select></div>" : "") +
       // Only show a coin pill when there's an actual real recipient -- "Other" alone means a
       // non-student led it and nobody here receives coins.
-      (realCurrent ? '<span class="pill pill-gold">+' + num2(share) + " coin" + (share === 1 ? "" : "s") + splitNote + "</span>" : "") +
-      "</div></div>";
+      (realCount ? '<span class="pill pill-gold">+' + num2(share) + " coin" + (share === 1 ? "" : "s") + (realCount === 2 ? " each" : "") +
+        (currentIds.length === 2 ? (realCount === 1 ? " (other half led by a non-student)" : " (split)") : "") + "</span>" : "") +
+      "</div>" +
+      (first && !second ? '<p class="help-text" style="margin:6px 0 0;">Two students led it? Pick the second one under “Split with”. ' +
+        (selectedPeriod === "Shacharis" ? (dayNameFor(todayDate) === "Shabbos" ? "On Shabbos each half of Shacharis is worth 1 coin." : "A split weekday Shacharis pays ½ coin each.") : "The coins are shared between them.") + "</p>" : "") +
+      "</div>";
   }
   html += chazzanHtml;
 
@@ -6155,19 +6152,21 @@ function wireChazzanControl(root, session) {
   const sel = document.getElementById("chazzan-student");
   if (!sel) return;
   const date = todayDate, period = selectedPeriod;
-  // Picking a name (or "Other") here always sets that ONE slot as the sole chazzan -- if a TA
-  // had split this tefilah between two slots from their own Chazzan tab, choosing anyone here
-  // (including re-selecting who's already picked) collapses that back down to just this one pick.
-  sel.addEventListener("change", async () => {
-    const studentId = sel.value;
-    const res = await applyChazzanChoice(date, period, studentId ? [studentId] : [], session.record.name);
+  // First dropdown: who led it. Second ("Split with"): an optional second student or "Other".
+  const sel2 = document.getElementById("chazzan-student-2");
+  const nameOf = (id) => { if (id === CHAZZAN_OTHER) return "a non-student"; const st = studentById(id); return st ? st.first + " " + st.last : "?"; };
+  const apply = async () => {
+    // Clearing who led it clears the split too; the same pick twice counts once.
+    const ids = sel.value ? Array.from(new Set([sel.value].concat(sel2 && sel2.value ? [sel2.value] : []))) : [];
+    if (ids.length === 2 && ids.every((id) => id === CHAZZAN_OTHER)) ids.pop();
+    const res = await applyChazzanChoice(date, period, ids, session.record.name);
     if (res.ok || res.local) {
-      const student = studentId && studentId !== CHAZZAN_OTHER ? studentById(studentId) : null;
-      const label = studentId === CHAZZAN_OTHER ? "a non-student" : (student ? student.first + " " + student.last : null);
-      toast(label ? "Set " + label + " as chazzan for " + period + "." : "Cleared chazzan for " + period + ".", "good");
+      toast(!ids.length ? "Cleared chazzan for " + period + "." : ids.length === 2 ? nameOf(ids[0]) + " and " + nameOf(ids[1]) + " split " + period + "." : "Set " + nameOf(ids[0]) + " as chazzan for " + period + ".", "good");
       renderAll();
     }
-  });
+  };
+  sel.addEventListener("change", apply);
+  if (sel2) sel2.addEventListener("change", apply);
 }
 // Drives the "Mark yourself" row's shared dial pieces (compactSlotHtml's circles, the
 // present/absent quick-mark buttons) exactly the way wireTodayGrid drives them for a real
@@ -9545,9 +9544,8 @@ let confirmDeleteChazzanId = null;
    wireChazzanControl), just with its own date+tefilah picker instead of riding on
    todayDate/selectedPeriod, since a student's own nav has neither. A tap-list of every active
    student (up to two -- tap a second name to split the tefilah between them) instead of a
-   dropdown, and tap-buttons for the tefilah and Full/Half instead of <select>s -- this is the
-   only screen where a tefilah can be split between two chazzanim; Today's own staff control
-   (wireChazzanControl) stays a plain single-student dropdown. */
+   dropdown, and tap-buttons for the tefilah and Full/Half instead of <select>s. (Today's own
+   staff control, wireChazzanControl, splits with a second "Split with" dropdown.) */
 function renderChazzanGrantCard() {
   const info = hebrewDayInfoFor(cgDate);
   // Unlike Today's staff control (which only ever shows up when the school's own schedule has a
