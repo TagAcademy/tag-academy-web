@@ -1623,6 +1623,14 @@ html.tv-mode #tv-root { display: block; }
 .tvc-photo-btns { display: flex; gap: 6px; flex-wrap: wrap; } .tvc-photo-btns .btn { min-height: 40px; }
 .tvc-del { background: var(--warn); color: #fff; }
 .tvc-upload { cursor: pointer; }
+/* Admin > Staff Accounts: Grant or charge TAG coins */
+.staff-coins { border: 1px dashed var(--line-strong); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px; background: var(--surface); }
+.staff-coins-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.staff-coins-head span { display: inline-flex; align-items: center; gap: 4px; }
+.staff-coins .pool-chip { border: 1px solid var(--line); cursor: pointer; font: inherit; font-size: .8rem; }
+.staff-coins-hist { display: flex; flex-direction: column; gap: 4px; font-size: .85rem; border-top: 1px solid var(--line); padding-top: 8px; }
+.staff-coins-hist div { display: grid; grid-template-columns: 5.5em 4em 1fr auto; gap: 8px; align-items: center; }
+.staff-coins-hist .pos { color: var(--gold); } .staff-coins-hist .neg { color: var(--warn); }
 /* Pools (TAG Coins page / a student's My Balance) */
 .pool-list { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
 .pool-card { border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: var(--surface); display: flex; flex-direction: column; gap: 8px; }
@@ -3000,8 +3008,9 @@ function coinBreakdownText(st) {
 // (state.staffAttendance) instead of the roster's state.attendance. Deliberately not visible
 // anywhere a student could see it: shown only in Admin > Staff (every staff member's balance)
 // and to the staff member themselves on their own Today page (see the "Mark yourself" card) --
-// never on a leaderboard or any other student-facing screen. There's no ledger dimension here
-// (no grant/charge/spend for staff), so balance is simply whatever's been earned.
+// never on a leaderboard or any other student-facing screen. On top of what they earn, an admin
+// can grant or charge a staff member coins (state.staffLedger -- see staffCoinsFormHtml):
+// { id, date, staffId, type: "Grant" | "Charge", amount, note, enteredBy, enteredAt }.
 function computeStaffStats(staffId, opts) {
   opts = opts || {};
   const from = opts.from, to = opts.to;
@@ -3023,13 +3032,21 @@ function computeStaffStats(staffId, opts) {
   const pointsPerCoin = state.settings.pointsPerCoin || 10;
   const coinsEarned = Math.floor((attPts + partPts) / pointsPerCoin);
   const blendedPoss = attPoss + partPoss;
+  let granted = 0, charged = 0;
+  for (const tx of (state.staffLedger || [])) {
+    if (tx.staffId !== staffId) continue;
+    if (from && tx.date < from) continue;
+    if (to && tx.date > to) continue;
+    if (tx.type === "Charge") charged += Number(tx.amount) || 0; else granted += Number(tx.amount) || 0;
+  }
   return {
     attPts, attPoss, attPct: attPoss ? attPts / attPoss : null,
     partPts, partPoss, partPct: partPoss ? partPts / partPoss : null,
     attCount, partCount,
     points: attPts + partPts,
     blendedPct: blendedPoss ? (attPts + partPts) / blendedPoss : null,
-    coinsEarned, balance: coinsEarned, earnedTotal: coinsEarned,
+    coinsEarned, granted, charged,
+    balance: coinsEarned + granted - charged, earnedTotal: coinsEarned + granted,
   };
 }
 function staffStats(staffId) { return computeStaffStats(staffId, {}); }
@@ -8448,11 +8465,30 @@ function staffActionsHtml(s) {
     '<button class="btn btn-ghost btn-sm" data-view-as-staff="' + s.id + '">View as</button>' +
     '<button class="btn btn-ghost btn-sm" data-edit-staff="' + s.id + '">Edit name, username or role</button>' +
     '<button class="btn btn-ghost btn-sm" data-reset-staff="' + s.id + '">Reset password</button>' +
+    '<button class="btn btn-ghost btn-sm" data-staff-coins="' + s.id + '">Grant or charge TAG coins</button>' +
     '<button class="btn btn-ghost btn-sm" data-toggle-clock="' + s.id + '">' + (s.canClockInOut ? "Remove Time Clock access" : "Allow Time Clock access") + "</button>" +
     (s.role === "family" ? "" : '<button class="btn btn-ghost btn-sm" data-toggle-family="' + s.id + '">' + (s.familyAccess ? "Remove Family tab" : "Allow Family tab") + "</button>") +
     '<button class="btn btn-ghost btn-sm" data-graduate-staff="' + s.id + '">Graduate</button>' +
     '<button class="btn btn-ghost btn-sm" data-delete-staff="' + s.id + '" style="color:var(--warn);">Delete</button>' +
     '<button class="btn btn-ghost btn-sm act-close" data-staff-menu-toggle="' + s.id + '">Close</button></div>';
+}
+// Grant / charge TAG coins for one staff member (Actions > "Grant or charge TAG coins"), with their
+// recent coin history underneath (each entry can be undone).
+let staffCoinsOpen = null;
+function staffCoinsFormHtml(s) {
+  const st = staffStats(s.id);
+  const privs = state.settings.privileges || [];
+  const hist = (state.staffLedger || []).filter((t) => t.staffId === s.id).sort((a, b) => (b.enteredAt || 0) - (a.enteredAt || 0)).slice(0, 8);
+  return '<div class="staff-coins"><div class="staff-coins-head"><b>TAG coins — ' + escapeHtml(s.name) + "</b><span>Balance " + coinBadge("sm") + " <b>" + num2(st.balance) + "</b></span></div>" +
+    '<div class="help-text" style="margin:0;">' + num2(st.coinsEarned) + " earned from their own marks" + (st.granted ? " · +" + num2(st.granted) + " granted" : "") + (st.charged ? " · −" + num2(st.charged) + " charged" : "") + "</div>" +
+    (privs.length ? '<div class="pool-who">' + privs.map((p) => '<button type="button" class="pool-chip" data-staff-coins-priv="' + escapeHtml(p.id) + '">' + escapeHtml(p.name) + " · " + num2(p.cost) + "</button>").join("") + "</div>" : "") +
+    '<div class="pool-row"><input type="number" min="0" step="any" inputmode="decimal" id="sc-amount" placeholder="Coins">' +
+    '<input type="text" id="sc-note" maxlength="120" placeholder="What for? (e.g. Bought: late lights-out)" style="flex:3;"></div>' +
+    '<div class="pool-row"><button type="button" class="btn btn-primary btn-sm" data-staff-coins-do="Grant:' + s.id + '">Grant</button>' +
+    '<button type="button" class="btn btn-sm tvc-del" data-staff-coins-do="Charge:' + s.id + '">Charge</button>' +
+    '<button type="button" class="btn btn-ghost btn-sm" data-staff-coins="">Close</button></div>' +
+    (hist.length ? '<div class="staff-coins-hist">' + hist.map((t) => '<div><span>' + escapeHtml(fmtDateShort(t.date)) + "</span><b class=\"" + (t.type === "Charge" ? "neg" : "pos") + '">' + (t.type === "Charge" ? "−" : "+") + num2(t.amount) + "</b><span>" + escapeHtml(t.note || t.type) + "</span>" +
+      '<button type="button" class="diag-link" data-staff-coins-undo="' + t.id + '">Undo</button></div>').join("") + "</div>" : "") + "</div>";
 }
 function staffEditButtonsHtml(s) {
   return '<button class="btn btn-primary btn-sm" data-save-edit-staff="' + s.id + '">Save</button>' +
@@ -8524,7 +8560,7 @@ function renderAdminStaff(root) {
       : '<div class="staff-card"><div class="staff-card-head"><b>' + escapeHtml(s.name) + "</b>" + staffRolePillsHtml(s) + "</div>" +
         '<div class="staff-card-meta"><span>Username <b class="num">' + escapeHtml(s.username) + "</b></span><span>Password " + passwordCellHtml(s.password, "staff:" + s.id) + "</span>" +
         '<span title="Earned from their own self-marked attendance &amp; participation -- never shown to students">TAG coins <b>' + num2(staffStats(s.id).balance) + "</b></span></div>" +
-        '<div class="staff-card-actions">' + staffActionsHtml(s) + "</div></div>").join("") + "</div>";
+        '<div class="staff-card-actions">' + staffActionsHtml(s) + "</div>" + (staffCoinsOpen === s.id ? staffCoinsFormHtml(s) : "") + "</div>").join("") + "</div>";
   } else {
     html += '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Username</th><th>Password</th><th>Role</th><th class="num" title="Earned from their own self-marked attendance &amp; participation -- never shown to students">TAG coins</th><th class="sticky-col-r"></th></tr></thead><tbody>';
     currentStaff().forEach((s) => {
@@ -8534,7 +8570,8 @@ function renderAdminStaff(root) {
       }
       html += "<tr><td>" + escapeHtml(s.name) + '</td><td class="num">' + escapeHtml(s.username) + '</td><td class="num">' + passwordCellHtml(s.password, "staff:" + s.id) +
         "</td><td>" + staffRolePillsHtml(s) + '</td><td class="num">' + num2(staffStats(s.id).balance) + "</td>" +
-        '<td class="sticky-col-r">' + staffActionsHtml(s) + "</td></tr>";
+        '<td class="sticky-col-r">' + staffActionsHtml(s) + "</td></tr>" +
+        (staffCoinsOpen === s.id ? '<tr><td colspan="6">' + staffCoinsFormHtml(s) + "</td></tr>" : "");
     });
     html += "</tbody></table></div>";
   }
@@ -8557,6 +8594,41 @@ function renderAdminStaff(root) {
     root.__staffMenuCloser = true;
     root.addEventListener("click", (e) => { if (e.target.closest(".act-list button:not([data-staff-menu-toggle])")) openStaffActionMenu = null; }, true);
   }
+  root.querySelectorAll("[data-staff-coins]").forEach((btn) => btn.addEventListener("click", () => {
+    staffCoinsOpen = btn.getAttribute("data-staff-coins") || null; renderAdminStaff(root);
+  }));
+  root.querySelectorAll("[data-staff-coins-priv]").forEach((btn) => btn.addEventListener("click", () => {
+    const pr = (state.settings.privileges || []).find((x) => x.id === btn.getAttribute("data-staff-coins-priv"));
+    if (!pr) return;
+    document.getElementById("sc-amount").value = pr.cost; document.getElementById("sc-note").value = "Bought: " + pr.name;
+  }));
+  root.querySelectorAll("[data-staff-coins-do]").forEach((btn) => btn.addEventListener("click", async () => {
+    const [type, id] = btn.getAttribute("data-staff-coins-do").split(":");
+    const rec = staffById(id);
+    const amount = Math.round(Number(document.getElementById("sc-amount").value) * 100) / 100;
+    const note = document.getElementById("sc-note").value.trim();
+    if (!rec) return;
+    if (!(amount > 0)) { toast("Enter how many coins.", "warn"); return; }
+    if (type === "Charge" && amount > staffStats(id).balance) { toast(rec.name + " only has " + num2(staffStats(id).balance) + " TAG coins.", "warn"); return; }
+    const txId = uid("sl"), today = todayISO(), now = Date.now(), by = (currentSession() || { record: {} }).record.name || "";
+    const res = await saveEdit((ns) => {
+      ns.staffLedger = ns.staffLedger || [];
+      if (!ns.staffLedger.some((t) => t.id === txId)) ns.staffLedger.push({ id: txId, date: today, staffId: id, type, amount, note, enteredBy: by, enteredAt: now });
+      return ns;
+    });
+    if (res.ok || res.local) { toast((type === "Charge" ? "Charged " : "Granted ") + rec.name + " " + num2(amount) + " TAG coin" + (amount === 1 ? "" : "s") + ".", "good"); renderAll(); }
+  }));
+  root.querySelectorAll("[data-staff-coins-undo]").forEach((btn) => btn.addEventListener("click", async () => {
+    const txId = btn.getAttribute("data-staff-coins-undo");
+    const tx = (state.staffLedger || []).find((t) => t.id === txId);
+    if (!tx) return;
+    // Undoing a grant can't leave them below zero -- undo the charge that spent it first.
+    const after = staffStats(tx.staffId).balance - (tx.type === "Charge" ? -1 : 1) * (Number(tx.amount) || 0);
+    if (after < 0) { toast("That would leave them at " + num2(after) + " coins — undo the charge first.", "warn"); return; }
+    if (!window.confirm("Undo this coin entry?")) return;
+    const res = await saveEdit((ns) => { ns.staffLedger = (ns.staffLedger || []).filter((t) => t.id !== txId); return ns; });
+    if (res.ok || res.local) { toast("Undone.", "good"); renderAll(); }
+  }));
   root.querySelectorAll("[data-staff-menu-toggle]").forEach((btn) => btn.addEventListener("click", () => {
     const id = btn.getAttribute("data-staff-menu-toggle");
     openStaffActionMenu = openStaffActionMenu === id ? null : id;
@@ -12535,7 +12607,9 @@ async function fetchCalendarWindow(days) {
     const e = allDay ? jsDateFor(ev.end && ev.end.date ? ev.end.date : ev.start.date).setHours(0, 0, 0, 0) : new Date(ev.end.dateTime).getTime();
     return { title: (ev.summary || "").trim() || "(untitled)", start: s, end: e, allDay };
   });
-  return { ok: true, events };
+  // The same event entered twice in the calendar (same name, same start and end) shows once.
+  const seen = new Set();
+  return { ok: true, events: events.filter((ev) => { const k = ev.title.toLowerCase() + "|" + ev.start + "|" + ev.end; if (seen.has(k)) return false; seen.add(k); return true; }) };
 }
 async function tvRefreshCalendar() {
   const r = await fetchCalendarWindow(7);
