@@ -12607,7 +12607,9 @@ async function fetchCalendarWindow(days) {
     const e = allDay ? jsDateFor(ev.end && ev.end.date ? ev.end.date : ev.start.date).setHours(0, 0, 0, 0) : new Date(ev.end.dateTime).getTime();
     return { title: (ev.summary || "").trim() || "(untitled)", start: s, end: e, allDay };
   });
-  return { ok: true, events };
+  // The same event entered twice in the calendar (same name, same start and end) shows once.
+  const seen = new Set();
+  return { ok: true, events: events.filter((ev) => { const k = ev.title.toLowerCase() + "|" + ev.start + "|" + ev.end; if (seen.has(k)) return false; seen.add(k); return true; }) };
 }
 async function tvRefreshCalendar() {
   const r = await fetchCalendarWindow(7);
