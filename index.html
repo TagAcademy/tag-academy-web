@@ -6904,6 +6904,27 @@ function renderLedger(root, session) {
   }
   html += "</div>";
 
+  // ---- Staff TAG coins. Admins: every staff member's balance as cards, like the students above --
+  // tap one to grant or charge (staffCoinsFormHtml). Other staff: just their own balance and
+  // history. Staff coins never appear on any student-facing screen. ----
+  if (isAdmin(session)) {
+    const staffList = currentStaff().filter((s) => s.role !== "family").sort((a, b) => a.name.localeCompare(b.name));
+    html += '<div class="card card-pad" style="margin-bottom:16px;"><div class="section-title">Staff</div>' +
+      '<p class="help-text" style="margin-top:-6px;">Only admins see this. Tap a staff member to grant or charge TAG coins.</p>' +
+      '<div class="coin-card-grid">' + staffList.map((s) => '<button type="button" class="coin-card' + (staffCoinsOpen === s.id ? " selected" : "") + '"' + (canWrite ? "" : " disabled") + ' data-staff-coins="' + s.id + '">' +
+        '<span class="coin-card-check">' + icon("check") + "</span>" + avatarHtml(s, "lb-avatar-md") +
+        '<span class="coin-card-name">' + escapeHtml(s.name) + "</span>" +
+        '<span class="coin-card-balance">' + coinBadge("sm") + '<span class="coin-card-balance-value">' + num2(staffStats(s.id).balance) + "</span></span></button>").join("") + "</div>" +
+      (staffCoinsOpen && staffList.some((s) => s.id === staffCoinsOpen) ? '<div style="margin-top:14px;">' + staffCoinsFormHtml(staffById(staffCoinsOpen)) + "</div>" : "") + "</div>";
+  } else if (session.type === "staff") {
+    const me = session.record, st = staffStats(me.id);
+    const hist = (state.staffLedger || []).filter((t) => t.staffId === me.id).sort((a, b) => (b.enteredAt || 0) - (a.enteredAt || 0)).slice(0, 10);
+    html += '<div class="card card-pad" style="margin-bottom:16px;"><div class="section-title">My TAG coins</div>' +
+      '<div class="staff-coins-head"><span>Balance ' + coinBadge("sm") + " <b>" + num2(st.balance) + "</b></span></div>" +
+      '<div class="help-text" style="margin:4px 0 0;">' + num2(st.coinsEarned) + " earned from your own marks" + (st.granted ? " · +" + num2(st.granted) + " granted" : "") + (st.charged ? " · −" + num2(st.charged) + " charged" : "") + "</div>" +
+      (hist.length ? '<div class="staff-coins-hist" style="margin-top:10px;">' + hist.map((t) => "<div><span>" + escapeHtml(fmtDateShort(t.date)) + '</span><b class="' + (t.type === "Charge" ? "neg" : "pos") + '">' + (t.type === "Charge" ? "−" : "+") + num2(t.amount) + "</b><span>" + escapeHtml(t.note || t.type) + "</span><span></span></div>").join("") + "</div>" : "") + "</div>";
+  }
+
   // ---- Selection action panel: only appears once something's selected, and offers exactly
   // the two things you'd do with a coin balance -- grant, or charge/purchase. ----
   if (canWrite && selCount > 0) {
@@ -6984,6 +7005,7 @@ function renderLedger(root, session) {
   html += "</div>";
   root.innerHTML = html;
   wirePools(root, session);
+  wireStaffCoins(root, renderAll);
 
   root.querySelectorAll("[data-coin-student]").forEach((btn) => {
     if (btn.disabled) return;
@@ -8490,6 +8512,46 @@ function staffCoinsFormHtml(s) {
     (hist.length ? '<div class="staff-coins-hist">' + hist.map((t) => '<div><span>' + escapeHtml(fmtDateShort(t.date)) + "</span><b class=\"" + (t.type === "Charge" ? "neg" : "pos") + '">' + (t.type === "Charge" ? "−" : "+") + num2(t.amount) + "</b><span>" + escapeHtml(t.note || t.type) + "</span>" +
       '<button type="button" class="diag-link" data-staff-coins-undo="' + t.id + '">Undo</button></div>').join("") + "</div>" : "") + "</div>";
 }
+// The grant / charge panel's buttons (staffCoinsFormHtml) -- used in Admin > Staff Accounts and
+// on the TAG Coins page; `rerender` redraws whichever view it's in.
+function wireStaffCoins(root, rerender) {
+  root.querySelectorAll("[data-staff-coins]").forEach((btn) => btn.addEventListener("click", () => {
+    const id = btn.getAttribute("data-staff-coins") || null;
+    staffCoinsOpen = staffCoinsOpen === id ? null : id; rerender();
+  }));
+  root.querySelectorAll("[data-staff-coins-priv]").forEach((btn) => btn.addEventListener("click", () => {
+    const pr = (state.settings.privileges || []).find((x) => x.id === btn.getAttribute("data-staff-coins-priv"));
+    if (!pr) return;
+    document.getElementById("sc-amount").value = pr.cost; document.getElementById("sc-note").value = "Bought: " + pr.name;
+  }));
+  root.querySelectorAll("[data-staff-coins-do]").forEach((btn) => btn.addEventListener("click", async () => {
+    const [type, id] = btn.getAttribute("data-staff-coins-do").split(":");
+    const rec = staffById(id);
+    const amount = Math.round(Number(document.getElementById("sc-amount").value) * 100) / 100;
+    const note = document.getElementById("sc-note").value.trim();
+    if (!rec) return;
+    if (!(amount > 0)) { toast("Enter how many coins.", "warn"); return; }
+    if (type === "Charge" && amount > staffStats(id).balance) { toast(rec.name + " only has " + num2(staffStats(id).balance) + " TAG coins.", "warn"); return; }
+    const txId = uid("sl"), today = todayISO(), now = Date.now(), by = (currentSession() || { record: {} }).record.name || "";
+    const res = await saveEdit((ns) => {
+      ns.staffLedger = ns.staffLedger || [];
+      if (!ns.staffLedger.some((t) => t.id === txId)) ns.staffLedger.push({ id: txId, date: today, staffId: id, type, amount, note, enteredBy: by, enteredAt: now });
+      return ns;
+    });
+    if (res.ok || res.local) { toast((type === "Charge" ? "Charged " : "Granted ") + rec.name + " " + num2(amount) + " TAG coin" + (amount === 1 ? "" : "s") + ".", "good"); renderAll(); }
+  }));
+  root.querySelectorAll("[data-staff-coins-undo]").forEach((btn) => btn.addEventListener("click", async () => {
+    const txId = btn.getAttribute("data-staff-coins-undo");
+    const tx = (state.staffLedger || []).find((t) => t.id === txId);
+    if (!tx) return;
+    // Undoing a grant can't leave them below zero -- undo the charge that spent it first.
+    const after = staffStats(tx.staffId).balance - (tx.type === "Charge" ? -1 : 1) * (Number(tx.amount) || 0);
+    if (after < 0) { toast("That would leave them at " + num2(after) + " coins — undo the charge first.", "warn"); return; }
+    if (!window.confirm("Undo this coin entry?")) return;
+    const res = await saveEdit((ns) => { ns.staffLedger = (ns.staffLedger || []).filter((t) => t.id !== txId); return ns; });
+    if (res.ok || res.local) { toast("Undone.", "good"); renderAll(); }
+  }));
+}
 function staffEditButtonsHtml(s) {
   return '<button class="btn btn-primary btn-sm" data-save-edit-staff="' + s.id + '">Save</button>' +
     '<button class="btn btn-ghost btn-sm" data-cancel-edit-staff="' + s.id + '">Cancel</button>';
@@ -8594,41 +8656,7 @@ function renderAdminStaff(root) {
     root.__staffMenuCloser = true;
     root.addEventListener("click", (e) => { if (e.target.closest(".act-list button:not([data-staff-menu-toggle])")) openStaffActionMenu = null; }, true);
   }
-  root.querySelectorAll("[data-staff-coins]").forEach((btn) => btn.addEventListener("click", () => {
-    staffCoinsOpen = btn.getAttribute("data-staff-coins") || null; renderAdminStaff(root);
-  }));
-  root.querySelectorAll("[data-staff-coins-priv]").forEach((btn) => btn.addEventListener("click", () => {
-    const pr = (state.settings.privileges || []).find((x) => x.id === btn.getAttribute("data-staff-coins-priv"));
-    if (!pr) return;
-    document.getElementById("sc-amount").value = pr.cost; document.getElementById("sc-note").value = "Bought: " + pr.name;
-  }));
-  root.querySelectorAll("[data-staff-coins-do]").forEach((btn) => btn.addEventListener("click", async () => {
-    const [type, id] = btn.getAttribute("data-staff-coins-do").split(":");
-    const rec = staffById(id);
-    const amount = Math.round(Number(document.getElementById("sc-amount").value) * 100) / 100;
-    const note = document.getElementById("sc-note").value.trim();
-    if (!rec) return;
-    if (!(amount > 0)) { toast("Enter how many coins.", "warn"); return; }
-    if (type === "Charge" && amount > staffStats(id).balance) { toast(rec.name + " only has " + num2(staffStats(id).balance) + " TAG coins.", "warn"); return; }
-    const txId = uid("sl"), today = todayISO(), now = Date.now(), by = (currentSession() || { record: {} }).record.name || "";
-    const res = await saveEdit((ns) => {
-      ns.staffLedger = ns.staffLedger || [];
-      if (!ns.staffLedger.some((t) => t.id === txId)) ns.staffLedger.push({ id: txId, date: today, staffId: id, type, amount, note, enteredBy: by, enteredAt: now });
-      return ns;
-    });
-    if (res.ok || res.local) { toast((type === "Charge" ? "Charged " : "Granted ") + rec.name + " " + num2(amount) + " TAG coin" + (amount === 1 ? "" : "s") + ".", "good"); renderAll(); }
-  }));
-  root.querySelectorAll("[data-staff-coins-undo]").forEach((btn) => btn.addEventListener("click", async () => {
-    const txId = btn.getAttribute("data-staff-coins-undo");
-    const tx = (state.staffLedger || []).find((t) => t.id === txId);
-    if (!tx) return;
-    // Undoing a grant can't leave them below zero -- undo the charge that spent it first.
-    const after = staffStats(tx.staffId).balance - (tx.type === "Charge" ? -1 : 1) * (Number(tx.amount) || 0);
-    if (after < 0) { toast("That would leave them at " + num2(after) + " coins — undo the charge first.", "warn"); return; }
-    if (!window.confirm("Undo this coin entry?")) return;
-    const res = await saveEdit((ns) => { ns.staffLedger = (ns.staffLedger || []).filter((t) => t.id !== txId); return ns; });
-    if (res.ok || res.local) { toast("Undone.", "good"); renderAll(); }
-  }));
+  wireStaffCoins(root, () => renderAdminStaff(root));
   root.querySelectorAll("[data-staff-menu-toggle]").forEach((btn) => btn.addEventListener("click", () => {
     const id = btn.getAttribute("data-staff-menu-toggle");
     openStaffActionMenu = openStaffActionMenu === id ? null : id;
