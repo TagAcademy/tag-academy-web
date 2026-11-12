@@ -1588,16 +1588,6 @@ html.tv-mode #tv-root { display: block; }
 .tvc-wide { width: 100%; min-height: 48px; }
 .tvc-sub { font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 700; margin-top: 12px; }
 .tvc-text { width: 100%; font: inherit; padding: 12px; min-height: 46px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); color: var(--ink); margin-top: 8px; }
-.tvc-drive-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 8px; margin-top: 8px; max-height: 360px; overflow-y: auto; }
-.tvc-drive-item { position: relative; display: block; padding: 0; border: 3px solid transparent; border-radius: 9px; background: none; cursor: pointer; }
-.tvc-drive-item.selected { border-color: var(--brand); }
-.tvc-drive-check { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 50%; background: var(--brand); color: #fff; font-size: 0.8rem; font-weight: 800; display: none; align-items: center; justify-content: center; }
-.tvc-drive-item.selected .tvc-drive-check { display: flex; }
-.tvc-rot-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
-.tvc-rot-bar .btn { min-height: 40px; }
-.tvc-rot-count { font-weight: 700; font-size: 0.9rem; margin-right: auto; }
-.tvc-drive-thumb { display: flex; aspect-ratio: 1; border-radius: 6px; overflow: hidden; background: #000; display: flex; align-items: center; justify-content: center; }
-.tvc-drive-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .tvc-howto { margin-top: 10px; font-size: .88rem; }
 .tvc-howto summary { cursor: pointer; font-weight: 700; min-height: 32px; }
 .tvc-howto ol { margin: 6px 0 0; padding-left: 20px; display: grid; gap: 6px; }
@@ -1623,6 +1613,9 @@ html.tv-mode #tv-root { display: block; }
 .tvc-photo-btns { display: flex; gap: 6px; flex-wrap: wrap; } .tvc-photo-btns .btn { min-height: 40px; }
 .tvc-del { background: var(--warn); color: #fff; }
 .tvc-upload { cursor: pointer; }
+/* TV Display tab: a row of the album's first photos after "Check album" */
+.tvc-album-strip { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; margin-top: 6px; }
+.tvc-album-strip img { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; flex: none; background: var(--surface-2); }
 /* Admin > Staff Accounts: Grant or charge TAG coins */
 .staff-coins { border: 1px dashed var(--line-strong); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px; background: var(--surface); }
 .staff-coins-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -1667,11 +1660,6 @@ html.tv-mode #tv-root { display: block; }
 /* Time Clock full log, editing a row: the "For" cell's fields stacked full width. */
 .tc-edit-for { min-width: 230px; }
 .tc-edit-for select, .tc-edit-for input { display: block; width: 100%; box-sizing: border-box; }
-.tvc-recent { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 8px; }
-.tvc-recent-item { display: flex; flex-direction: column; gap: 4px; }
-.tvc-recent-item .tvc-drive-thumb img { object-fit: contain; }
-.tvc-recent-btns { display: flex; gap: 4px; } .tvc-recent-btns .btn { flex: 1; min-height: 38px; padding: 0; }
-.tvc-recent-diag { font-size: .68rem; color: var(--muted); line-height: 1.3; word-break: break-word; }
 .tvc-posters { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 10px; }
 .tvc-poster { border: 1px solid var(--line); border-radius: 12px; padding: 6px; background: var(--surface-2); display: flex; flex-direction: column; gap: 6px; }
 .tvc-poster.ended { opacity: .6; }
@@ -11873,7 +11861,7 @@ function tvDefaults() {
     override: null, announcement: null,
     // posterEvery: a poster (see tvRebuildPhotos) after every this-many photos; posterSecs: how
     // long each poster stays up.
-    photos: { intervalSecs: 12, kenBurns: true, shuffle: true, driveFolder: "", driveRotate: {}, posterEvery: 2, posterSecs: 15 },
+    photos: { intervalSecs: 12, kenBurns: true, shuffle: true, albumUrl: "", posterEvery: 2, posterSecs: 15 },
     leaderboard: { categories: LEADERBOARD_CATEGORIES.map((c) => c.id), scope: "week", places: 8, secsPerCategory: 12 },
     exitTvNonce: null,
     refreshTvNonce: null, // changed by "Refresh the TV" in the TV Display tab (see tvCheckRefresh)
@@ -11955,13 +11943,10 @@ function tvLayoutLabel(id) { const l = TV_LAYOUTS.find((x) => x.id === id); retu
 /* ---------- the TV screen ---------- */
 const TV = {
   cfg: tvDefaults(), photos: [], uploaded: [], posters: [], layout: null, lastLayoutCheck: 0,
-  drive: { folder: "", photos: [], fetchedAt: 0, error: null },
+  album: { url: "", photos: [], fetchedAt: 0, error: null }, // the Google Photos album (see tvRefreshAlbum)
   photoIdx: -1, photoSlide: 0, lbIdx: 0, lbStamp: 0, shuffleKeys: new Map(),
-  // Drive photos worked out and ready to show (see tvPreparePhoto).
-  prepared: new Map(), prepBusy: null, learn: null, recent: [], // see tvPreparePhoto
-  photoStats: { originals: 0, lastError: null, thumbOnly: new Set() }, // reported in the heartbeat
   cal: { events: [], fetchedAt: 0, ok: null },
-  stamps: { photo: 0, lb: 0, cal: 0, drive: 0, hb: 0, shift: 0, nightly: 0 },
+  stamps: { photo: 0, lb: 0, cal: 0, album: 0, hb: 0, shift: 0, nightly: 0 },
   exitHandled: false, started: false, dirty: true,
   refreshSeen: null, pageHash: null, loadedAt: Date.now(),
 };
@@ -12070,8 +12055,8 @@ function tvTick() {
   tvUpdateClock();
   const S = TV.stamps;
   if (TV.zones.photos) {
-    const folder = driveFolderId(TV.cfg.photos.driveFolder);
-    if (folder !== TV.drive.folder || (folder && now - S.drive >= 300000)) { S.drive = now; tvRefreshDrivePhotos(folder); }
+    const album = albumLinkOk(TV.cfg.photos.albumUrl) ? TV.cfg.photos.albumUrl.trim() : "";
+    if (album !== TV.album.url || (album && now - S.album >= 300000)) { S.album = now; tvRefreshAlbum(album); }
   }
   const onScreen = TV.photos[TV.photoIdx];
   const slideSecs = Math.max(4, Number(TV.cfg.photos.intervalSecs) || 12, onScreen && onScreen.kind === "poster" ? Number(TV.cfg.photos.posterSecs) || 15 : 0);
@@ -12107,8 +12092,9 @@ function tvHeartbeat() {
   DISPLAY_STATUS_DOC.set({
     lastSeen: firebase.firestore.FieldValue.serverTimestamp(), screen: "hallway",
     layout: TV.layout || null, source: TV.eff ? TV.eff.source : null, loadedAt: TV.loadedAt, quietFor: (TV.eff && TV.eff.quietFor) || null,
-    // How the Drive photos are being drawn (shown in the TV Display tab's Photos section).
-    photoInfo: { originals: TV.photoStats.originals, thumbOnly: TV.photoStats.thumbOnly.size, lastError: TV.photoStats.lastError, learned: tvLearned(), recent: TV.recent || [] },
+    // How many album photos the TV has (shown in the TV Display tab's Photos section).
+    album: { count: TV.album.photos.length, error: TV.album.error || null },
+    photoInfo: firebase.firestore.FieldValue.delete(),
   }, { merge: true }).catch((e) => console.error("TV heartbeat failed:", e));
 }
 function tvMaybeNightlyReload(now) {
@@ -12169,74 +12155,44 @@ function tvUpdateClock() {
     (parsha ? '<div class="tv-clock-parsha">' + escapeHtml(parsha) + "</div>" : "");
 }
 
-/* ---------- photos from a shared Google Drive folder ----------
-   Google Photos no longer lets outside apps read albums (2025), so the slideshow can also pull
-   every picture from a Google Drive folder shared as "Anyone with the link can view". Same API key
-   as the Live schedule (settings.googleCalendar.apiKey) -- it needs the Google Drive API enabled
-   and allowed on that key. Drive's own resized versions are used, so iPhone HEIC photos work and
-   the TV never downloads a full-size original. A photo's Drive "description" becomes its caption. */
-function driveFolderId(input) {
-  const v = String(input || "").trim();
-  if (!v) return "";
-  const m = /\/folders\/([A-Za-z0-9_-]{10,})/.exec(v) || /[?&]id=([A-Za-z0-9_-]{10,})/.exec(v);
-  if (m) return m[1];
-  return /^[A-Za-z0-9_-]{10,}$/.test(v) ? v : "";
-}
-async function fetchDriveFolderPhotos(folderId, apiKey) {
-  if (!folderId) return { ok: false, reason: "no-folder" };
-  if (!apiKey) return { ok: false, reason: "no-key" };
-  const q = "'" + folderId + "' in parents and mimeType contains 'image/' and trashed = false";
-  const url = "https://www.googleapis.com/drive/v3/files?q=" + encodeURIComponent(q) +
-    "&fields=" + encodeURIComponent("files(id,name,description,mimeType,thumbnailLink,imageMediaMetadata(rotation,width,height))") +
-    "&orderBy=" + encodeURIComponent("createdTime desc") + "&pageSize=200" +
-    "&supportsAllDrives=true&includeItemsFromAllDrives=true&key=" + encodeURIComponent(apiKey);
-  let res;
-  try { res = await fetch(url); } catch (e) { return { ok: false, reason: "network" }; }
-  let data = null;
+/* ---------- photos from a Google Photos shared album ----------
+   Add pictures to a Google Photos album that's shared by link, paste the link in the TV Display
+   tab, and they show on the TV. Google no longer lets outside apps read albums through its API,
+   so the app's own small server function (api/gphotos.js, on Vercel alongside this page) reads the
+   album's share page and returns the photo addresses. Google serves those already turned upright,
+   at whatever size is asked for -- no turning needed here. The TV re-checks every 5 minutes. */
+function albumLinkOk(v) { return /^https:\/\/(photos\.app\.goo\.gl\/[A-Za-z0-9_-]+|photos\.google\.com\/(u\/\d+\/)?share\/[A-Za-z0-9_-]+(\?key=[A-Za-z0-9_-]+)?)\/?$/.test(String(v || "").trim()); }
+async function fetchAlbumPhotos(link) {
+  let res, data = null;
+  try { res = await fetch("/api/gphotos?url=" + encodeURIComponent(link.trim())); } catch (e) { return { ok: false, reason: "network" }; }
   try { data = await res.json(); } catch (e) {}
-  if (!res.ok) {
-    const msg = (data && data.error && data.error.message) || "";
-    return { ok: false, reason: res.status === 404 ? "not-found" : /not been used|disabled|API_KEY_SERVICE_BLOCKED|blocked/i.test(msg) ? "api-off" : "http-" + res.status, message: msg };
-  }
-  const photos = ((data && data.files) || []).map((f) => ({
-    id: "drive:" + f.id, fileId: f.id,
-    // Quarter turns clockwise needed to stand the photo upright: Drive's resized copies drop the
-    // camera's "which way is up" note, but Drive still reports it here.
-    autoRot: ((Number(f.imageMediaMetadata && f.imageMediaMetadata.rotation) || 0) % 4 + 4) % 4,
-    // JPEG/PNG/WebP originals the TV can open itself (iPhone HEIC can't be, so those stay on
-    // Google's thumbnails). See tvPreparePhoto.
-    original: /^image\/(jpeg|png|webp)$/i.test(f.mimeType || "") ? "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(f.id) + "?alt=media&key=" + encodeURIComponent(apiKey) : null,
-    // Any photo's file (only its first part is read, for the camera's orientation note).
-    media: "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(f.id) + "?alt=media&key=" + encodeURIComponent(apiKey),
-    mime: f.mimeType || "",
-    // Drive's public thumbnail address at TV size; the API's own thumbnailLink (asked for at the
-    // same size instead of its default "=s220") is the backup.
-    src: "https://drive.google.com/thumbnail?id=" + encodeURIComponent(f.id) + "&sz=w1920",
-    fallback: f.thumbnailLink ? f.thumbnailLink.replace(/=s\d+(-[a-z0-9-]+)?$/i, "") + "=s1920" : null,
-    thumb: "https://drive.google.com/thumbnail?id=" + encodeURIComponent(f.id) + "&sz=w400",
-    caption: (f.description || "").trim().slice(0, 80),
-  }));
-  return { ok: true, photos };
+  if (!data) return { ok: false, reason: res.status === 404 ? "no-function" : "http-" + res.status };
+  if (!data.ok) return data;
+  return { ok: true, title: data.title || "", photos: data.photos.map((p) => {
+    const key = p.url.split("/pw/")[1] || p.url;
+    return { id: "gp:" + key.slice(0, 48), src: p.url + "=w1920-h1080", thumb: p.url + "=w400-h400", caption: "" };
+  }) };
 }
-function driveErrorText(r) {
+function albumErrorText(r) {
   return {
-    "no-key": "Connect the Google Calendar first (Admin > Schedule > Live schedule) -- the folder uses the same Google API key.",
-    "api-off": "The Google Drive API isn't turned on for your API key yet -- see the steps below.",
-    "not-found": "Couldn't find that folder. Check the link.",
-    "network": "Couldn't reach Google Drive -- check the internet connection.",
-  }[r.reason] || ("Google Drive said no (" + r.reason + (r.message ? ": " + r.message : "") + "). Check that the API key allows the Google Drive API.");
+    "bad-link": "That doesn’t look like a Google Photos album link. In Google Photos, open the album, tap Share, then Create link (or Copy link), and paste that here.",
+    "not-an-album": "That link doesn’t open a shared Google Photos album.",
+    "no-photos": "Found the album, but no photos in it — or it isn’t shared by link. In Google Photos: open the album → Share → turn on “Link sharing”.",
+    "network": "Couldn’t reach the album — check the internet connection.",
+    "no-function": "The album reader isn’t set up on the website yet.",
+  }[r.reason] || "Google Photos said no (" + r.reason + "). Try again in a minute.";
 }
-async function tvRefreshDrivePhotos(folder) {
-  TV.drive.folder = folder;
-  if (!folder) { TV.drive.photos = []; TV.drive.error = null; tvRebuildPhotos(); return; }
-  const r = await fetchDriveFolderPhotos(folder, liveScheduleConfig().apiKey);
-  if (folder !== TV.drive.folder) return; // the setting changed while this was in flight
-  TV.drive.fetchedAt = Date.now();
-  if (r.ok) { TV.drive.photos = r.photos; TV.drive.error = null; }
-  else { TV.drive.error = r.reason; console.error("TV Drive photos:", r); } // keep showing the last good list
+async function tvRefreshAlbum(link) {
+  TV.album.url = link;
+  if (!link) { TV.album.photos = []; TV.album.error = null; tvRebuildPhotos(); return; }
+  const r = await fetchAlbumPhotos(link);
+  if (link !== TV.album.url) return; // the setting changed while this was in flight
+  TV.album.fetchedAt = Date.now();
+  if (r.ok) { TV.album.photos = r.photos; TV.album.error = null; }
+  else { TV.album.error = r.reason; console.error("TV album:", r); } // keep showing the last good list
   tvRebuildPhotos();
 }
-// Photos uploaded in the TV Display tab first (in their chosen order), then the Drive folder's,
+// Photos uploaded in the TV Display tab first (in their chosen order), then the album's,
 // with a poster (posted from the Announcement card) slipped in after every few photos -- and
 // every poster at least once per round, however few photos there are.
 function tvRebuildPhotos() {
@@ -12247,14 +12203,14 @@ function tvRebuildPhotos() {
   if (TV.zones && TV.zones.photos) tvNextPhoto(keep >= 0);
 }
 // Shuffle (photos.shuffle, on by default): every photo gets a random place for the round, kept
-// when the Drive folder is re-checked mid-round (so nothing repeats early); a new round deals a
+// when the album is re-checked mid-round (so nothing repeats early); a new round deals a
 // fresh order (tvNextPhoto).
 function tvShuffleKey(id) {
   if (!TV.shuffleKeys.has(id)) TV.shuffleKeys.set(id, Math.random());
   return TV.shuffleKeys.get(id);
 }
 function tvPhotoList() {
-  let photos = TV.uploaded.concat(TV.drive.photos);
+  let photos = TV.uploaded.concat(TV.album.photos);
   const posters = TV.posters || [];
   if (TV.cfg.photos.shuffle !== false) photos = photos.slice().sort((a, b) => tvShuffleKey(a.id) - tvShuffleKey(b.id));
   const every = Math.max(1, Number(TV.cfg.photos.posterEvery) || 2);
@@ -12266,247 +12222,14 @@ function tvPhotoList() {
 }
 
 /* ---------- photos ---------- */
-// Total quarter turns to show a photo upright: Drive's own reading plus any manual "Rotate" taps
-// from the TV Display tab (uploaded photos keep theirs on the photo; Drive photos in
-// photos.driveRotate, keyed by file id). `cfg` is TV.cfg on the TV, TVC.cfg in the control tab.
-function tvPhotoRotation(photo, cfg) {
-  const manual = photo.fileId ? Number(((cfg && cfg.photos && cfg.photos.driveRotate) || {})[photo.fileId]) || 0 : Number(photo.rotate) || 0;
-  // photos.driveAutoRotate (default on) can switch off using Drive's own orientation reading.
-  const auto = cfg && cfg.photos && cfg.photos.driveAutoRotate === false ? 0 : Number(photo.autoRot) || 0;
-  return ((auto + manual) % 4 + 4) % 4;
-}
-/* Upright Drive photos, without anyone turning them by hand.
-   Google's pictures of a Drive photo aren't consistent: the small preview in the TV Display tab and
-   the big thumbnail can come back turned differently (one as the camera stored it, the other
-   already upright), so a turn that fixes one leaves the other upside down. So before showing a
-   Drive photo the TV works out exactly how it relates to the preview (which is what people check
-   and turn), using:
-     - the camera's own "which way is up" note, read from the start of the original file (JPEG
-       EXIF, or iPhone HEIC's EXIF / rotation box), and
-     - the shapes (portrait/landscape) of the preview and the big picture: a photo the camera stored
-       a quarter turn off shows which of them came back upright, and that finding is remembered on
-       this TV for photos whose shape can't tell (upside down = a half turn).
-   JPEG/PNG/WebP originals are then drawn into a TV-sized picture by the TV itself; anything else
-   (HEIC) shows Google's big thumbnail, turned to match. The last few are reported in the heartbeat
-   so the TV Display tab can show them, with one-tap turns. */
-const TV_PREP_MAX = 80; // prepared pictures kept in memory (~300 KB each)
-const TV_LEARN_KEY = "tagTvPhotoLearn";
-// Quarter turns clockwise a JPEG/HEIC's own orientation note asks for; null if it has none.
-function tiffOrientationTurns(v, t) {
-  const le = v.getUint16(t) === 0x4949;
-  const ifd = t + v.getUint32(t + 4, le), n = v.getUint16(ifd, le);
-  for (let i = 0; i < n; i++) {
-    const e = ifd + 2 + i * 12;
-    if (v.getUint16(e, le) === 0x0112) return { 1: 0, 2: 0, 3: 2, 4: 2, 5: 1, 6: 1, 7: 3, 8: 3 }[v.getUint16(e + 8, le)] || 0;
-  }
-  return null;
-}
-function orientationTurns(buf) {
-  try {
-    const v = new DataView(buf), b = new Uint8Array(buf);
-    if (v.getUint16(0) === 0xffd8) { // JPEG: walk the markers to the EXIF block
-      let off = 2;
-      while (off + 4 < v.byteLength) {
-        const marker = v.getUint16(off), len = v.getUint16(off + 2);
-        if (marker === 0xffe1 && v.getUint32(off + 4) === 0x45786966) return tiffOrientationTurns(v, off + 10);
-        if ((marker & 0xff00) !== 0xff00 || marker === 0xffda) return null;
-        off += 2 + len;
-      }
-      return null;
-    }
-    // HEIC and others: find an "Exif\0\0" block followed by a TIFF header; else HEIC's "irot" box
-    // (anticlockwise quarter turns).
-    for (let i = 0; i + 14 < b.length; i++) {
-      if (b[i] === 0x45 && b[i + 1] === 0x78 && b[i + 2] === 0x69 && b[i + 3] === 0x66 && b[i + 4] === 0 && b[i + 5] === 0 &&
-          ((b[i + 6] === 0x49 && b[i + 7] === 0x49) || (b[i + 6] === 0x4d && b[i + 7] === 0x4d))) {
-        const r = tiffOrientationTurns(v, i + 6);
-        if (r !== null) return r;
-      }
-    }
-    for (let i = 0; i + 4 < b.length; i++) {
-      if (b[i] === 0x69 && b[i + 1] === 0x72 && b[i + 2] === 0x6f && b[i + 3] === 0x74) return (4 - (b[i + 4] & 3)) % 4;
-    }
-  } catch (e) {}
-  return null;
-}
-async function readHead(url, bytes) {
-  const res = await fetch(url, { headers: { Range: "bytes=0-" + (bytes - 1) } });
-  if (!res.ok) throw new Error("Drive download " + res.status);
-  if (!res.body || !res.body.getReader) return (await res.arrayBuffer()).slice(0, bytes);
-  const reader = res.body.getReader(), parts = [];
-  let got = 0;
-  while (got < bytes) { const { done, value } = await reader.read(); if (done) break; parts.push(value); got += value.length; }
-  reader.cancel().catch(() => {});
-  const out = new Uint8Array(Math.min(got, bytes));
-  let o = 0;
-  for (const p of parts) { const take = Math.min(p.length, out.length - o); out.set(p.subarray(0, take), o); o += take; if (o >= out.length) break; }
-  return out.buffer;
-}
-function tvLoadImageSize(src, ms) {
-  return new Promise((resolve) => {
-    if (!src) { resolve(null); return; }
-    const im = new Image(); im.referrerPolicy = "no-referrer";
-    const t = setTimeout(() => resolve(null), ms);
-    im.onload = () => { clearTimeout(t); resolve({ w: im.naturalWidth, h: im.naturalHeight }); };
-    im.onerror = () => { clearTimeout(t); resolve(null); };
-    im.src = src;
-  });
-}
-// What this TV has learned: previewRaw = the small preview comes back as the camera stored it
-// (not upright); bigRaw = the same for the big thumbnail. null = not known yet.
-function tvLearned() {
-  if (!TV.learn) { try { TV.learn = JSON.parse(localStorage.getItem(TV_LEARN_KEY) || "null"); } catch (e) {} TV.learn = TV.learn || { previewRaw: null, bigRaw: null }; }
-  return TV.learn;
-}
-function tvLearn(field, val) {
-  const L = tvLearned();
-  if (L[field] === val) return;
-  L[field] = val;
-  try { localStorage.setItem(TV_LEARN_KEY, JSON.stringify(L)); } catch (e) {}
-  // Learned something new: redraw everything prepared on the old assumption.
-  TV.prepared.forEach((v) => { if (v.blob) URL.revokeObjectURL(v.src); });
-  TV.prepared.clear();
-}
-const isLandscape = (d) => d.w > d.h;
-function tvPrepKey(photo) { return photo.fileId + "|" + tvPhotoRotation(photo, TV.cfg); }
-// Picture matching: shrink two pictures to a 24x24 grey grid and find the quarter turn that makes
-// the first look like the second. Resizing to a square grid commutes with quarter turns, so shape
-// differences don't matter. Needs the pixels, so Google's pictures are loaded with CORS; if Google
-// won't allow that, this answers null and the orientation-note logic below decides instead.
-const TV_GRID = 24;
-function tvGridFrom(source) {
-  const c = document.createElement("canvas"); c.width = c.height = TV_GRID;
-  const ctx = c.getContext("2d");
-  ctx.drawImage(source, 0, 0, TV_GRID, TV_GRID);
-  const d = ctx.getImageData(0, 0, TV_GRID, TV_GRID).data; // throws if the picture didn't allow CORS
-  const g = new Float32Array(TV_GRID * TV_GRID);
-  let sum = 0;
-  for (let i = 0; i < g.length; i++) { g[i] = d[i * 4] * 0.3 + d[i * 4 + 1] * 0.59 + d[i * 4 + 2] * 0.11; sum += g[i]; }
-  const mean = sum / g.length;
-  for (let i = 0; i < g.length; i++) g[i] -= mean;
-  return g;
-}
-function tvLoadGrid(src, ms) {
-  return new Promise((resolve) => {
-    if (!src) { resolve(null); return; }
-    const im = new Image(); im.crossOrigin = "anonymous"; im.referrerPolicy = "no-referrer";
-    const t = setTimeout(() => resolve(null), ms);
-    im.onload = () => { clearTimeout(t); try { resolve(tvGridFrom(im)); } catch (e) { resolve(null); } };
-    im.onerror = () => { clearTimeout(t); resolve(null); };
-    im.src = src;
-  });
-}
-// Quarter turns clockwise that make grid `a` look like grid `b`, or null if it isn't clear-cut.
-function tvMatchTurns(a, b) {
-  if (!a || !b) return null;
-  const N = TV_GRID, diffs = [];
-  for (let t = 0; t < 4; t++) {
-    let d = 0;
-    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
-      // pixel (x, y) of `a` turned t quarter turns clockwise
-      const sx = t === 0 ? x : t === 1 ? y : t === 2 ? N - 1 - x : N - 1 - y;
-      const sy = t === 0 ? y : t === 1 ? N - 1 - x : t === 2 ? N - 1 - y : x;
-      d += Math.abs(a[sy * N + sx] - b[y * N + x]);
-    }
-    diffs.push(d / (N * N));
-  }
-  const order = [0, 1, 2, 3].sort((i, j) => diffs[i] - diffs[j]);
-  return diffs[order[0]] < diffs[order[1]] * 0.75 ? order[0] : null;
-}
-async function tvPreparePhoto(photo) {
-  const R = tvPhotoRotation(photo, TV.cfg);
-  const info = { id: photo.fileId, mime: (photo.mime || "").replace("image/", ""), r: R };
-  let blob = null, head = null;
-  if (photo.original) {
-    const res = await fetch(photo.original);
-    if (!res.ok) throw new Error("Drive download " + res.status);
-    blob = await res.blob();
-    head = await blob.slice(0, 512 * 1024).arrayBuffer();
-  } else if (photo.media) {
-    try { head = await readHead(photo.media, 512 * 1024); } catch (e) { info.err = String(e.message || e).slice(0, 60); }
-  }
-  const E = head ? orientationTurns(head) : null;
-  info.e = E;
-  const prev = await tvLoadImageSize(photo.thumb, 10000);
-  const prevGrid = await tvLoadGrid(photo.thumb, 10000);
-  const L = tvLearned();
-  if (blob) {
-    let bmp;
-    try { bmp = await createImageBitmap(blob, { imageOrientation: "from-image" }); } // camera's note applied
-    catch (e) { blob = null; }
-    if (bmp) {
-      // The decoded picture is upright. A quarter-turned photo tells whether the preview is too.
-      if (E % 2 && prev && prev.w !== prev.h && bmp.width !== bmp.height) tvLearn("previewRaw", isLandscape(prev) !== (bmp.width > bmp.height));
-      const pRaw = L.previewRaw === true;
-      // Best: compare this picture with the preview itself. Otherwise: preview on screen = upright
-      // picture, minus E if the preview is raw, plus the preview turn R.
-      let match = null;
-      try { match = tvMatchTurns(tvGridFrom(bmp), prevGrid); } catch (e) {}
-      info.m = match === null ? (prevGrid ? "unclear" : "no-cors") : match;
-      const turns = match !== null ? (match + R) % 4 : (((R - (pRaw ? E || 0 : 0)) % 4) + 4) % 4;
-      const k = Math.min(1, 1920 / Math.max(bmp.width, bmp.height));
-      const w = Math.round(bmp.width * k), h = Math.round(bmp.height * k);
-      const c = document.createElement("canvas");
-      c.width = turns % 2 ? h : w; c.height = turns % 2 ? w : h;
-      const ctx = c.getContext("2d");
-      ctx.translate(c.width / 2, c.height / 2); ctx.rotate(turns * Math.PI / 2);
-      ctx.drawImage(bmp, -w / 2, -h / 2, w, h);
-      if (bmp.close) bmp.close();
-      const out = await new Promise((resolve) => c.toBlob(resolve, "image/jpeg", 0.88));
-      if (out) {
-        Object.assign(info, { how: "orig", t: turns, p: pRaw ? 1 : 0 });
-        TV.photoStats.originals++;
-        return { src: URL.createObjectURL(out), turns: 0, blob: true, info };
-      }
-    }
-  }
-  // Google's big thumbnail. If it and the preview differ in shape, they differ by a quarter turn:
-  // one came back upright and the other raw.
-  const big = await tvLoadImageSize(photo.src, 15000) || await tvLoadImageSize(photo.fallback, 15000);
-  if (E % 2 && prev && big && prev.w !== prev.h && big.w !== big.h) {
-    const differ = isLandscape(prev) !== isLandscape(big);
-    if (L.previewRaw !== null && L.previewRaw !== undefined) tvLearn("bigRaw", differ ? !L.previewRaw : L.previewRaw);
-    else if (differ) tvLearn("bigRaw", true); // the preview is upright unless learned otherwise
-  }
-  // Not learned yet: assume what this school's own photos showed -- the preview comes back upright
-  // and the big thumbnail as the camera stored it (an upside-down iPhone photo: preview fine, TV not).
-  // What's learned about the big picture comes from quarter-turned photos only; Google doesn't
-  // necessarily treat upside-down ones the same way (this school's upside-down iPhone photos came
-  // back raw), so for those the big picture is taken to be the opposite of the preview.
-  const pRaw = L.previewRaw === true;
-  const bRaw = E % 2 && L.bigRaw !== null && L.bigRaw !== undefined ? L.bigRaw : !pRaw;
-  // Best: compare the big picture with the preview itself and turn it to match, then by the
-  // preview's own turn R. Otherwise: preview on screen = upright - (pRaw ? E) + R; big thumbnail =
-  // upright - (bRaw ? E).
-  const match = tvMatchTurns(await tvLoadGrid(photo.src, 15000), prevGrid);
-  info.m = match === null ? (prevGrid ? "unclear" : "no-cors") : match;
-  const turns = match !== null ? (match + R) % 4 : ((((R - (pRaw ? E || 0 : 0) + (bRaw ? E || 0 : 0)) % 4) + 4) % 4);
-  Object.assign(info, { how: "thumb", t: turns, p: pRaw ? 1 : 0, b: bRaw ? 1 : 0 });
-  TV.photoStats.thumbOnly.add(photo.fileId);
-  return { src: photo.src, turns, info };
-}
-// One photo prepared at a time; one that fails outright shows its thumbnail turned the old way.
-function tvQueuePrep(photo) {
-  if (!photo || !photo.fileId || TV.prepBusy || TV.prepared.has(tvPrepKey(photo))) return TV.prepBusy;
-  const key = tvPrepKey(photo);
-  TV.prepBusy = tvPreparePhoto(photo)
-    .catch((e) => {
-      console.error("TV photo:", photo.fileId, e);
-      TV.photoStats.lastError = String((e && e.message) || e).slice(0, 120);
-      return { src: photo.src, turns: tvPhotoRotation(photo, TV.cfg), info: { id: photo.fileId, how: "thumb", err: TV.photoStats.lastError } };
-    })
-    .then((prep) => {
-      TV.prepared.set(key, prep);
-      while (TV.prepared.size > TV_PREP_MAX) { const [k0, v0] = TV.prepared.entries().next().value; if (v0.blob) URL.revokeObjectURL(v0.src); TV.prepared.delete(k0); }
-    })
-    .finally(() => { TV.prepBusy = null; });
-  return TV.prepBusy;
-}
+// Quarter turns for an uploaded photo (its ⟳ button in the TV Display tab). Album photos come from
+// Google already upright. `cfg` is unused now but kept so callers don't change.
+function tvPhotoRotation(photo, cfg) { return ((Number(photo.rotate) || 0) % 4 + 4) % 4; }
 // Photos are always live; a poster only until its "until" time (null = until it's removed).
 function tvPosterLive(p, now) { return !p || p.kind !== "poster" || !p.until || Number(p.until) > now; }
 function tvInitPhotos() {
   const el = TV.zones.photos.el;
-  // no-referrer: Google's image hosts serve publicly shared Drive photos to anyone, but can refuse a
+  // no-referrer: Google's image hosts serve shared album photos to anyone, but can refuse a
   // request that carries another site's address.
   el.innerHTML = [0, 1].map((n) => '<div class="tv-slide" data-s="' + n + '"><img class="tv-bg" alt="" referrerpolicy="no-referrer"><div class="tv-rot"><img alt="" referrerpolicy="no-referrer"></div><div class="tv-cap"></div></div>').join("") +
     '<div class="tv-photo-empty" style="display:none;"><img src="' + LOGO_DATA_URI + '" alt=""><div>Photos coming soon</div></div>';
@@ -12536,14 +12259,6 @@ function tvNextPhoto(keepIndex) {
   for (let n = 0; n < list.length && !tvPosterLive(list[TV.photoIdx], now); n++) TV.photoIdx = (TV.photoIdx + 1) % list.length;
   const photo = list[TV.photoIdx];
   const poster = photo.kind === "poster";
-  // A Drive photo not worked out yet (see tvPreparePhoto): leave the current picture up until it
-  // is (usually a second or two).
-  if (photo.fileId && !TV.prepared.has(tvPrepKey(photo))) {
-    Promise.resolve(tvQueuePrep(photo) || TV.prepBusy).then(() => { if (TV.photos[TV.photoIdx] === photo) tvNextPhoto(true); });
-    return;
-  }
-  const prep = photo.fileId ? TV.prepared.get(tvPrepKey(photo)) : null;
-  if (prep) { TV.recent = [prep.info].concat((TV.recent || []).filter((x) => x.id !== prep.info.id)).slice(0, 6); }
   TV.photoSlide = TV.photoSlide ? 0 : 1;
   const slide = el.querySelector('.tv-slide[data-s="' + TV.photoSlide + '"]');
   const other = el.querySelector('.tv-slide[data-s="' + (TV.photoSlide ? 0 : 1) + '"]');
@@ -12552,9 +12267,9 @@ function tvNextPhoto(keepIndex) {
   bg.removeAttribute("src");
   const frame = slide.querySelector(".tv-rot");
   const show = () => {
-    // Turn the photo upright (a prepared original is already). For a quarter turn the frame is
-    // sized to the zone's height x width before rotating, so the turned picture still fills the zone.
-    const rot = prep ? prep.turns : tvPhotoRotation(photo, TV.cfg);
+    // An uploaded photo someone turned with ⟳. For a quarter turn the frame is sized to the zone's
+    // height x width before rotating, so the turned picture still fills the zone.
+    const rot = tvPhotoRotation(photo, TV.cfg);
     frame.className = "tv-rot r" + rot;
     // Show it whole over a blurred copy (see .is-fit) when filling the screen would cut off more
     // than about an eighth of it; posters always.
@@ -12574,15 +12289,9 @@ function tvNextPhoto(keepIndex) {
     if (other) other.classList.remove("show");
   };
   img.onload = show;
-  img.onerror = () => {
-    // A Drive photo whose main address fails gets one try at its backup before skipping ahead.
-    if (photo.fallback && img.src !== photo.fallback) { img.src = photo.fallback; return; }
-    if (list.length > 1) TV.stamps.photo = 0;
-  };
-  img.src = prep ? prep.src : photo.dataUrl || photo.src;
+  img.onerror = () => { if (list.length > 1) TV.stamps.photo = 0; }; // skip a photo that won't load
+  img.src = photo.dataUrl || photo.src;
   if (img.complete && img.naturalWidth) show();
-  // Work out the next Drive photo while this one is up.
-  for (let n = 1; n < list.length; n++) { const nx = list[(TV.photoIdx + n) % list.length]; if (nx.fileId) { tvQueuePrep(nx); break; } }
 }
 
 /* ---------- leaderboard (reuses leaderboardEntryFor / competitionRanks / avatarHtml) ---------- */
@@ -12805,7 +12514,7 @@ function tvUpdateTicker(now) {
 const TVC = {
   cfg: tvDefaults(), cfgLoaded: false, status: null, photos: [], photosLoaded: false,
   unsubs: {}, duration: 15 * 60000, annStyle: "info", annExpiry: 60 * 60000, annText: null,
-  uploading: null, deleteConfirm: null, seenTimer: null, driveInput: null, driveCheck: null, driveSel: new Set(),
+  uploading: null, deleteConfirm: null, seenTimer: null, albumInput: null, albumCheck: null,
   posters: [], postersLoaded: false, posterExpiry: 7 * 86400000, posterUploading: null,
 };
 const TV_MAX_POSTERS = 12;
@@ -12929,8 +12638,8 @@ function renderTvControl(root, session) {
     tvcPostersHtml() + "</div>";
 
   // Photos (collapsible; the photo list is only downloaded while this is open)
-  const driveOn = !!(cfg.photos && cfg.photos.driveFolder);
-  html += collapsibleSectionHtml("tvPhotos", "Photos", (TVC.photosLoaded ? TVC.photos.length + " uploaded" : "Slideshow pictures") + (driveOn ? " + Drive folder" : ""), tvcPhotosHtml());
+  const albumOn = !!(cfg.photos && cfg.photos.albumUrl);
+  html += collapsibleSectionHtml("tvPhotos", "Photos", (TVC.photosLoaded ? TVC.photos.length + " uploaded" : "Slideshow pictures") + (albumOn ? " + Google Photos album" : ""), tvcPhotosHtml());
   // Normal mode
   html += collapsibleSectionHtml("tvNormal", "Normal mode", { fixed: "Fixed layout", rotate: "Rotation", schedule: "Schedule" }[cfg.mode] || "", tvcNormalHtml());
   // No photos during davening / Eagle
@@ -12942,13 +12651,9 @@ function renderTvControl(root, session) {
   html += collapsibleSectionHtml("tvExit", "Exit TV mode", "Return the screen to the normal app",
     '<p class="help-text">Sends the TV back to the normal app login. To put it back in TV mode, open the TV link again.</p><button type="button" class="btn btn-ghost" data-tvc-act="exit-tv">Exit TV mode on screen</button>');
   // Re-rendering replaces the whole tab (a saved setting echoing back, a photo list update...);
-  // keep the page and the Drive photo grid scrolled where they were.
+  // keep the page scrolled where it was.
   const pageY = window.scrollY;
-  const oldGrid = root.querySelector(".tvc-drive-grid");
-  const gridY = oldGrid ? oldGrid.scrollTop : 0;
   root.innerHTML = '<div class="tvc">' + html + "</div>";
-  const newGrid = root.querySelector(".tvc-drive-grid");
-  if (newGrid && gridY) newGrid.scrollTop = gridY;
   if (window.scrollY !== pageY) window.scrollTo(0, pageY);
   tvcWire(root);
 }
@@ -13015,15 +12720,18 @@ function tvcLeaderboardHtml() {
 }
 function tvcPhotosHtml() {
   const cfg = TVC.cfg;
-  let h = '<div class="tvc-row"><label class="btn btn-primary tvc-upload">+ Add photos<input type="file" id="tvc-file" accept="image/*" multiple hidden></label>' +
+  // The Google Photos album is the everyday way in; uploading here is the backup (and is where a
+  // photo can be captioned, hidden or reordered).
+  let h = tvcAlbumHtml() +
+    '<div class="tvc-sub">Or upload photos here</div>' +
+    '<div class="tvc-row"><label class="btn btn-ghost tvc-upload">+ Add photos<input type="file" id="tvc-file" accept="image/*" multiple hidden></label>' +
     (TVC.uploading ? '<span class="tvc-unit">' + escapeHtml(TVC.uploading) + "</span>" : "") + "</div>" +
-    '<p class="help-text">Pick from your camera roll. Photos are shrunk automatically (max ' + TV_MAX_PHOTOS + " photos).</p>" +
-    tvcDriveHtml() +
+    '<p class="help-text">Pick from your camera roll. Photos are shrunk and turned upright automatically (max ' + TV_MAX_PHOTOS + " photos).</p>" +
     '<div class="tvc-sub">Seconds per photo</div><div class="tvc-chips">' + [6, 10, 15, 25].map((n) => '<button type="button" class="tvc-chip sm' + (Number(cfg.photos.intervalSecs) === n ? " active" : "") + '" data-tvc-interval="' + n + '">' + n + "</button>").join("") + "</div>" +
     '<label class="tvc-check"><input type="checkbox" id="tvc-shuffle"' + (cfg.photos.shuffle !== false ? " checked" : "") + "> Shuffle the photos (a new random order each time through)</label>" +
     '<label class="tvc-check"><input type="checkbox" id="tvc-kb"' + (cfg.photos.kenBurns ? " checked" : "") + "> Slow zoom on photos</label>";
   if (!TVC.photosLoaded) return h + '<p class="help-text">Loading photos…</p>';
-  if (!TVC.photos.length) return h + '<p class="help-text">No photos yet.</p>';
+  if (!TVC.photos.length) return h + '<p class="help-text">No photos uploaded here.</p>';
   h += '<div class="tvc-photos">' + TVC.photos.map((p, i) =>
     '<div class="tvc-photo' + (p.enabled === false ? " hidden" : "") + '"><div class="tvc-thumb"><img loading="lazy" decoding="async" alt="" class="tvc-r' + tvPhotoRotation(p, TVC.cfg) + '" src="' + escapeHtml(p.thumb || p.dataUrl) + '">' + (p.enabled === false ? '<span class="tvc-hid">Hidden</span>' : "") + "</div>" +
     '<input type="text" class="tvc-cap-in" maxlength="80" placeholder="Caption (optional)" value="' + escapeHtml(p.caption || "") + '" data-tvc-caption="' + p.id + '">' +
@@ -13035,107 +12743,39 @@ function tvcPhotosHtml() {
   return h;
 }
 
-function tvcDriveHtml() {
-  const saved = (TVC.cfg.photos && TVC.cfg.photos.driveFolder) || "";
-  const val = TVC.driveInput !== null && TVC.driveInput !== undefined ? TVC.driveInput : saved;
-  // Load the folder's photos (for their ⟳ buttons) as soon as the Photos section is opened.
-  if (saved && !TVC.driveCheck && openSections.has("tvPhotos")) setTimeout(() => { if (!TVC.driveCheck) tvcCheckDrive(saved); }, 0);
-  const chk = TVC.driveCheck;
-  let h = '<div class="tvc-sub">Google Drive folder</div>' +
-    '<p class="help-text" style="margin-top:4px;">Every picture in this folder shows on the TV too, and the TV checks it for new ones every 5 minutes — so anyone with access to the folder can add photos from the Google Drive app.</p>' +
-    '<input type="text" id="tvc-drive" class="tvc-text" inputmode="url" autocomplete="off" placeholder="Paste the folder link (drive.google.com/drive/folders/…)" value="' + escapeHtml(val) + '">' +
-    '<div class="tvc-row"><button type="button" class="btn btn-primary" data-tvc-act="drive-save">' + (saved ? "Save" : "Connect") + '</button>' +
-    '<button type="button" class="btn btn-ghost" data-tvc-act="drive-check">Check folder</button>' +
-    (saved ? '<button type="button" class="btn btn-ghost" data-tvc-act="drive-clear">Disconnect</button>' : "") + "</div>";
+function tvcAlbumHtml() {
+  const saved = (TVC.cfg.photos && TVC.cfg.photos.albumUrl) || "";
+  const val = TVC.albumInput !== null && TVC.albumInput !== undefined ? TVC.albumInput : saved;
+  // Load the album's photos as soon as the Photos section is opened, so you can see it's working.
+  if (saved && !TVC.albumCheck && openSections.has("tvPhotos")) setTimeout(() => { if (!TVC.albumCheck) tvcCheckAlbum(saved); }, 0);
+  const chk = TVC.albumCheck;
+  const tv = TVC.status && TVC.status.album;
+  let h = '<div class="tvc-sub">Google Photos album</div>' +
+    '<p class="help-text" style="margin-top:4px;">Every photo in this album shows on the TV, right side up. Add pictures from the Google Photos app on any phone and the TV picks them up within 5 minutes.</p>' +
+    '<input type="text" id="tvc-album" class="tvc-text" inputmode="url" autocomplete="off" placeholder="Paste the album’s share link (photos.app.goo.gl/…)" value="' + escapeHtml(val) + '">' +
+    '<div class="tvc-row"><button type="button" class="btn btn-primary" data-tvc-act="album-save">' + (saved ? "Save" : "Connect") + "</button>" +
+    '<button type="button" class="btn btn-ghost" data-tvc-act="album-check">Check album</button>' +
+    (saved ? '<button type="button" class="btn btn-ghost" data-tvc-act="album-clear">Disconnect</button>' : "") + "</div>";
   if (chk && chk.busy) h += '<p class="help-text">Checking…</p>';
   else if (chk && chk.ok) {
-    h += '<p class="help-text" style="color:var(--good);font-weight:700;">Found ' + chk.photos.length + " photo" + (chk.photos.length === 1 ? "" : "s") + " in the folder." +
-      (chk.photos.length ? "" : " If you’ve added some, make sure the folder is shared as “Anyone with the link — Viewer”.") + "</p>";
-    // What the TV reported in its last heartbeat (see tvHeartbeat): photos it drew from the
-    // original file (turned automatically) vs ones it had to show from Google's thumbnail.
-    const pi = TVC.status && TVC.status.photoInfo;
-    if (pi) h += '<p class="help-text" style="margin-top:2px;">On the TV so far: ' + (Number(pi.originals) || 0) + " drawn from the original file" +
-      (pi.thumbOnly ? ", " + pi.thumbOnly + " from Google’s picture (iPhone HEIC photos" + (pi.lastError ? "; last problem: " + escapeHtml(pi.lastError) : "") + ")" : "") + ".</p>";
-    if (pi && pi.recent && pi.recent.length) h += tvcRecentHtml(pi);
-    if (chk.photos.length) {
-      // Tap photos to select them, then turn the whole selection at once (one save).
-      const sel = TVC.driveSel;
-      const n = chk.photos.filter((p) => sel.has(p.fileId)).length;
-      const dis = n ? "" : " disabled";
-      const autoOn = !(TVC.cfg.photos && TVC.cfg.photos.driveAutoRotate === false);
-      h += '<p class="help-text" style="margin:6px 0 4px;">Sideways or upside down? Tap the photos to select them, then turn them all at once. The previews show exactly how the TV shows them.</p>' +
-        '<div class="tvc-rot-bar"><span class="tvc-rot-count">' + (n ? n + " selected" : "None selected") + "</span>" +
-        '<button type="button" class="btn btn-ghost btn-sm" data-tvc-act="drive-sel-all">Select all</button>' +
-        '<button type="button" class="btn btn-ghost btn-sm" data-tvc-act="drive-sel-none"' + dis + ">Clear</button></div>" +
-        '<div class="tvc-rot-bar"><button type="button" class="btn btn-primary btn-sm" data-tvc-drive-turn="3"' + dis + '>⟲ Left</button>' +
-        '<button type="button" class="btn btn-primary btn-sm" data-tvc-drive-turn="1"' + dis + '>⟳ Right</button>' +
-        '<button type="button" class="btn btn-primary btn-sm" data-tvc-drive-turn="2"' + dis + ">↻ 180°</button></div>" +
-        '<div class="tvc-drive-grid">' + chk.photos.map((p) =>
-          '<button type="button" class="tvc-drive-item' + (sel.has(p.fileId) ? " selected" : "") + '" data-tvc-drive-sel="' + escapeHtml(p.fileId) + '" aria-pressed="' + (sel.has(p.fileId) ? "true" : "false") + '">' +
-          '<span class="tvc-drive-thumb"><img loading="lazy" alt="" referrerpolicy="no-referrer" class="tvc-r' + tvPhotoRotation(p, TVC.cfg) + '" src="' + escapeHtml(p.thumb) + '"></span>' +
-          '<span class="tvc-drive-check" aria-hidden="true">✓</span></button>').join("") + "</div>" +
-        '<label class="tvc-check" style="margin-top:8px;"><input type="checkbox" id="tvc-drive-auto"' + (autoOn ? " checked" : "") + "> Turn photos automatically using Google Drive’s orientation info</label>" +
-        '<button type="button" class="diag-link" data-tvc-act="drive-rot-reset" style="font-size:0.85rem;">Reset all turns</button>';
-    }
+    h += '<p class="help-text" style="color:var(--good);font-weight:700;">Found ' + chk.photos.length + " photo" + (chk.photos.length === 1 ? "" : "s") + (chk.title ? " in “" + escapeHtml(chk.title) + "”" : "") + ".</p>" +
+      '<div class="tvc-album-strip">' + chk.photos.slice(0, 24).map((p) => '<img loading="lazy" alt="" referrerpolicy="no-referrer" src="' + escapeHtml(p.thumb) + '">').join("") + "</div>";
   } else if (chk && chk.error) h += '<p class="help-text" style="color:var(--warn);font-weight:700;">' + escapeHtml(chk.error) + "</p>";
-  h += '<details class="tvc-howto"><summary>How to set up the folder</summary><ol>' +
-    "<li>In Google Drive, create a folder (e.g. “TV photos”) and put pictures in it.</li>" +
-    "<li>Share the folder: <b>General access → Anyone with the link → Viewer</b>. (Anyone who has the link can see these photos.)</li>" +
-    "<li>Copy the folder link and paste it above, then press Connect.</li>" +
-    "<li>One-time: in Google Cloud Console, open <b>APIs &amp; Services → Library</b>, enable the <b>Google Drive API</b> in the same project as your calendar key. Then under <b>Credentials</b>, edit that API key and, if it’s limited to certain APIs, add Google Drive API to the list.</li>" +
-    "<li>To give a staff member access to add photos, share the folder with them as an Editor.</li></ol></details>";
+  if (saved && tv) h += '<p class="help-text">On the TV: ' + (tv.error ? "couldn’t read the album (" + escapeHtml(albumErrorText({ reason: tv.error })) + ")" : (Number(tv.count) || 0) + " album photos") + ".</p>";
+  h += '<details class="tvc-howto"><summary>How to set up the album</summary><ol>' +
+    "<li>In the <b>Google Photos</b> app, tap <b>Collections → New album</b> (e.g. “TAG TV”) and add pictures.</li>" +
+    "<li>In the album, tap <b>Share</b> and choose <b>Create link</b> (or turn on <b>Link sharing</b>), then <b>Copy link</b>.</li>" +
+    "<li>Paste the link above and tap <b>Connect</b>.</li>" +
+    "<li>To let other staff add photos, share the album with them (Share → their name) — anything they add shows up too.</li>" +
+    "<li>Anyone who has the link can see these photos, so only put in pictures that are fine to show.</li></ol></details>";
   return h;
 }
-// The last few Drive photos the TV showed (newest first), from its heartbeat: spot the one that was
-// wrong on the TV and turn it right here. The small line under each is for troubleshooting.
-function tvcRecentHtml(pi) {
-  const L = pi.learned || {};
-  const yn = (v, a, b) => (v === null || v === undefined ? "?" : v ? a : b);
-  return '<div class="tvc-sub">Recently on the TV</div><p class="help-text" style="margin-top:2px;">Newest first (updates every minute). If one was sideways or upside down on the TV, turn it here.</p>' +
-    '<div class="tvc-recent">' + pi.recent.map((r) =>
-      '<div class="tvc-recent-item"><span class="tvc-drive-thumb"><img loading="lazy" alt="" referrerpolicy="no-referrer" class="tvc-r' + (((Number(r.r) || 0) % 4) + 4) % 4 + '" src="https://drive.google.com/thumbnail?id=' + encodeURIComponent(r.id) + '&amp;sz=w400"></span>' +
-      '<span class="tvc-recent-btns"><button type="button" class="btn btn-ghost btn-sm" data-tvc-recent-turn="' + escapeHtml(r.id) + ':3" aria-label="Turn left">⟲</button>' +
-      '<button type="button" class="btn btn-ghost btn-sm" data-tvc-recent-turn="' + escapeHtml(r.id) + ':2" aria-label="Turn 180">↻</button>' +
-      '<button type="button" class="btn btn-ghost btn-sm" data-tvc-recent-turn="' + escapeHtml(r.id) + ':1" aria-label="Turn right">⟳</button></span>' +
-      '<span class="tvc-recent-diag">' + escapeHtml([r.how, r.mime, "cam " + yn(r.e, r.e, r.e), "pv " + r.r, "tv " + r.t, "match " + (r.m === undefined ? "?" : r.m), "p" + (r.p ? 1 : 0) + (r.how === "thumb" ? " b" + (r.b ? 1 : 0) : ""), r.err || ""].filter(Boolean).join(" · ")) + "</span></div>").join("") + "</div>" +
-    '<p class="help-text tvc-recent-diag">Learned: preview ' + yn(L.previewRaw, "raw", "upright") + ", big " + yn(L.bigRaw, "raw", "upright") + "</p>";
-}
-// Turn several Drive photos at once by `turns` quarter turns clockwise (3 = one to the left), in a
-// single save. The previews update immediately; the TV follows within a few seconds.
-function tvcTurnDrivePhotos(fileIds, turns, root) {
-  const cur = Object.assign({}, (TVC.cfg.photos && TVC.cfg.photos.driveRotate) || {});
-  const patch = {};
-  fileIds.forEach((fid) => { patch[fid] = ((Number(cur[fid]) || 0) + turns) % 4; cur[fid] = patch[fid]; });
-  TVC.cfg.photos = Object.assign({}, TVC.cfg.photos, { driveRotate: cur });
-  tvcSyncDriveGrid(root);
-  tvcWrite({ photos: { driveRotate: patch } }, "Turned " + fileIds.length + " photo" + (fileIds.length === 1 ? "" : "s") + ".");
-}
-// Bring the Drive grid's selection outlines, turned previews and the selection buttons up to date
-// in place.
-function tvcSyncDriveGrid(root) {
-  const chk = TVC.driveCheck;
-  if (!root || !chk || !chk.photos) return;
-  let n = 0;
-  chk.photos.forEach((p) => {
-    const tile = root.querySelector('[data-tvc-drive-sel="' + (window.CSS && CSS.escape ? CSS.escape(p.fileId) : p.fileId) + '"]');
-    if (!tile) return;
-    const on = TVC.driveSel.has(p.fileId);
-    if (on) n++;
-    tile.classList.toggle("selected", on);
-    tile.setAttribute("aria-pressed", on ? "true" : "false");
-    const img = tile.querySelector("img");
-    if (img) img.className = "tvc-r" + tvPhotoRotation(p, TVC.cfg);
-  });
-  const count = root.querySelector(".tvc-rot-count");
-  if (count) count.textContent = n ? n + " selected" : "None selected";
-  root.querySelectorAll('[data-tvc-drive-turn], [data-tvc-act="drive-sel-none"]').forEach((b) => { b.disabled = !n; });
-}
-async function tvcCheckDrive(input) {
-  const id = driveFolderId(input);
-  if (!id) { TVC.driveCheck = { error: "That doesn’t look like a Google Drive folder link." }; refreshViewOrDefer(); return null; }
-  TVC.driveCheck = { busy: true }; refreshViewOrDefer();
-  const r = await fetchDriveFolderPhotos(id, liveScheduleConfig().apiKey);
-  TVC.driveCheck = r.ok ? { ok: true, photos: r.photos } : { error: driveErrorText(r) };
+async function tvcCheckAlbum(input) {
+  const v = String(input || "").trim();
+  if (!albumLinkOk(v)) { TVC.albumCheck = { error: albumErrorText({ reason: "bad-link" }) }; refreshViewOrDefer(); return null; }
+  TVC.albumCheck = { busy: true }; refreshViewOrDefer();
+  const r = await fetchAlbumPhotos(v);
+  TVC.albumCheck = r.ok ? { ok: true, photos: r.photos, title: r.title } : { error: albumErrorText(r) };
   refreshViewOrDefer();
   return r;
 }
@@ -13225,26 +12865,16 @@ function tvcWire(root) {
       else if (TVC.annExpiry === -1) { const d = new Date(); d.setHours(23, 59, 0, 0); until = d.getTime(); }
       TVC.annText = null;
       tvcWrite({ announcement: { text, style: TVC.annStyle, until } }, "Posted to the TV.");
-    } else if (act === "drive-sel-all") {
-      ((TVC.driveCheck && TVC.driveCheck.photos) || []).forEach((p) => TVC.driveSel.add(p.fileId)); tvcSyncDriveGrid(root);
-    } else if (act === "drive-sel-none") {
-      TVC.driveSel.clear(); tvcSyncDriveGrid(root);
-    } else if (act === "drive-rot-reset") {
-      if (!window.confirm("Undo every manual turn on the Drive photos?")) return;
-      TVC.cfg.photos = Object.assign({}, TVC.cfg.photos, { driveRotate: {} });
-      refreshViewOrDefer();
-      // Replace (not merge) the whole map: a merge-set can't remove keys.
-      tvcWrite({ photos: { driveRotate: firebase.firestore.FieldValue.delete() } }, "All turns reset.");
-    } else if (act === "drive-check") {
-      const inp = document.getElementById("tvc-drive");
-      tvcCheckDrive(inp ? inp.value : "");
-    } else if (act === "drive-save") {
-      const inp = document.getElementById("tvc-drive");
+    } else if (act === "album-check") {
+      const inp = document.getElementById("tvc-album");
+      tvcCheckAlbum(inp ? inp.value : "");
+    } else if (act === "album-save") {
+      const inp = document.getElementById("tvc-album");
       const v = inp ? inp.value.trim() : "";
-      if (!driveFolderId(v)) { TVC.driveCheck = { error: "That doesn’t look like a Google Drive folder link." }; refreshViewOrDefer(); return; }
-      if (await tvcWrite({ photos: { driveFolder: v } }, "Folder connected — the TV will pick it up within a few seconds.")) { TVC.driveInput = null; tvcCheckDrive(v); }
-    } else if (act === "drive-clear") {
-      if (await tvcWrite({ photos: { driveFolder: "" } }, "Folder disconnected.")) { TVC.driveInput = null; TVC.driveCheck = null; }
+      if (!albumLinkOk(v)) { TVC.albumCheck = { error: albumErrorText({ reason: "bad-link" }) }; refreshViewOrDefer(); return; }
+      if (await tvcWrite({ photos: { albumUrl: v } }, "Album connected — the TV will pick it up within a few seconds.")) { TVC.albumInput = null; tvcCheckAlbum(v); }
+    } else if (act === "album-clear") {
+      if (await tvcWrite({ photos: { albumUrl: "" } }, "Album disconnected.")) { TVC.albumInput = null; TVC.albumCheck = null; }
     } else if (act === "clear-ann") { TVC.annText = null; tvcWrite({ announcement: null }, "Announcement cleared."); }
     else if (act === "refresh-tv") tvcWrite({ refreshTvNonce: String(Date.now()) + "-" + Math.random().toString(36).slice(2, 6) }, "Told the TV to refresh — it takes a few seconds.");
     else if (act === "exit-tv") tvcWrite({ exitTvNonce: String(Date.now()) + "-" + Math.random().toString(36).slice(2, 6) }, "Told the TV to exit TV mode.");
@@ -13292,7 +12922,7 @@ function tvcWire(root) {
   on("[data-tvc-secs]", "click", (el) => tvcWrite({ leaderboard: { secsPerCategory: Number(el.getAttribute("data-tvc-secs")) } }));
   // photos
   on("[data-tvc-interval]", "click", (el) => tvcWrite({ photos: { intervalSecs: Number(el.getAttribute("data-tvc-interval")) } }));
-  on("#tvc-drive", "input", (el) => { TVC.driveInput = el.value; });
+  on("#tvc-album", "input", (el) => { TVC.albumInput = el.value; });
   const shuf = document.getElementById("tvc-shuffle");
   if (shuf) shuf.addEventListener("change", () => tvcWrite({ photos: { shuffle: shuf.checked } }));
   const kb = document.getElementById("tvc-kb");
@@ -13304,24 +12934,6 @@ function tvcWire(root) {
   on("[data-tvc-posterexp]", "click", (el) => { TVC.posterExpiry = Number(el.getAttribute("data-tvc-posterexp")); refreshViewOrDefer(); });
   on("[data-tvc-caption]", "change", (el) => DISPLAY_PHOTOS.doc(el.getAttribute("data-tvc-caption")).update({ caption: el.value.trim() }).catch((e) => toast("Couldn’t save the caption.", "warn")));
   on("[data-tvc-rotate]", "click", (el) => { const p = TVC.photos.find((x) => x.id === el.getAttribute("data-tvc-rotate")); if (p) DISPLAY_PHOTOS.doc(p.id).update({ rotate: ((Number(p.rotate) || 0) + 1) % 4 }).catch(() => toast("Couldn’t rotate that photo.", "warn")); });
-  on("[data-tvc-drive-sel]", "click", (el) => {
-    const fid = el.getAttribute("data-tvc-drive-sel");
-    if (TVC.driveSel.has(fid)) TVC.driveSel.delete(fid); else TVC.driveSel.add(fid);
-    tvcSyncDriveGrid(root); // just this tile and the button row -- a full re-render would jump the page
-  });
-  on("[data-tvc-recent-turn]", "click", (el) => { const [fid, t] = el.getAttribute("data-tvc-recent-turn").split(":"); tvcTurnDrivePhotos([fid], Number(t), root); });
-  on("[data-tvc-drive-turn]", "click", (el) => {
-    const chk = TVC.driveCheck;
-    const ids = chk && chk.photos ? chk.photos.map((p) => p.fileId).filter((f) => TVC.driveSel.has(f)) : [];
-    if (!ids.length) return;
-    tvcTurnDrivePhotos(ids, Number(el.getAttribute("data-tvc-drive-turn")), root);
-  });
-  const driveAuto = document.getElementById("tvc-drive-auto");
-  if (driveAuto) driveAuto.addEventListener("change", () => {
-    TVC.cfg.photos = Object.assign({}, TVC.cfg.photos, { driveAutoRotate: driveAuto.checked });
-    refreshViewOrDefer();
-    tvcWrite({ photos: { driveAutoRotate: driveAuto.checked } });
-  });
   on("[data-tvc-toggle]", "click", (el) => { const p = TVC.photos.find((x) => x.id === el.getAttribute("data-tvc-toggle")); if (p) DISPLAY_PHOTOS.doc(p.id).update({ enabled: p.enabled === false }).catch(() => toast("Couldn’t update.", "warn")); });
   on("[data-tvc-move]", "click", (el) => {
     const [id, dir] = el.getAttribute("data-tvc-move").split(":"); const i = TVC.photos.findIndex((x) => x.id === id); const j = i + Number(dir);
