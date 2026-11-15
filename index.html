@@ -10845,7 +10845,7 @@ function ensureFamilyListener() {
       retryDelay = 2000;
       familyLoadError = false;
       const d = snap.exists ? snap.data() : {};
-      familyData = { entries: d.entries || [], learning: d.learning || [] };
+      familyData = { entries: d.entries || [], learning: d.learning || [], earnWays: d.earnWays || [] };
       famApplyFixups(d);
       refreshViewOrDefer();
     }, (err) => {
@@ -10892,9 +10892,9 @@ async function familySave(mutate, okMsg) {
     await db.runTransaction(async (tx) => {
       const snap = await tx.get(FAMILY_DOC);
       const cur = snap.exists ? snap.data() : {};
-      const draft = JSON.parse(JSON.stringify({ entries: cur.entries || [], learning: cur.learning || [], fixups: cur.fixups || [] }));
+      const draft = JSON.parse(JSON.stringify({ entries: cur.entries || [], learning: cur.learning || [], earnWays: cur.earnWays || [], fixups: cur.fixups || [] }));
       const next = mutate(draft) || draft;
-      tx.set(FAMILY_DOC, { entries: next.entries, learning: next.learning, fixups: next.fixups || [], _rev: (cur._rev || 0) + 1, updatedAt: Date.now() });
+      tx.set(FAMILY_DOC, { entries: next.entries, learning: next.learning, earnWays: next.earnWays || [], fixups: next.fixups || [], _rev: (cur._rev || 0) + 1, updatedAt: Date.now() });
     });
     if (okMsg) toast(okMsg, "good");
     return true;
@@ -11081,7 +11081,8 @@ function renderFamily(root, session) {
       '<button class="btn btn-primary" data-fam-act="learn">Log learning</button>' +
       '<button class="btn btn-ghost" data-fam-act="use">Screen time used</button>' +
       '<button class="btn btn-ghost" data-fam-act="in">Money received</button>' +
-      '<button class="btn btn-ghost" data-fam-act="out">Money spent</button></div>';
+      '<button class="btn btn-ghost" data-fam-act="out">Money spent</button>' +
+      '<button class="btn btn-ghost" data-fam-act="grant">Give or take screen time</button></div>';
   }
   // Learning
   const items = familyData.learning.filter((i) => i.kid === familyKid).sort((a, b) => (a.order || 0) - (b.order || 0));
@@ -11126,7 +11127,13 @@ function renderFamily(root, session) {
     "<li>Maamer daily review: 1 minute a paragraph, or 5 minutes a paragraph on a day a new paragraph was learned and tested (e.g. 17 paragraphs = 1h 25m).</li>" +
     "<li>100 Parsha points = 5 minutes.</li>" +
     "<li>Daily report from school: rated 4 of 5 = 10 minutes; rated 5 = 10 minutes and $1.</li>" +
+    familyData.earnWays.map((w) => "<li>" + escapeHtml(w.label) + ": " + escapeHtml(famWayWorth(w)) + (w.per ? " " + escapeHtml(w.per) : "") + ".</li>").join("") +
     "<li>Negative balance: no screen time until it’s paid off.</li></ul></details>" +
+    (canWrite ? '<div class="section-title" style="margin:16px 0 8px;font-size:0.9rem;">Ways to earn you added</div>' +
+      (familyData.earnWays.length ? '<div class="fam-list">' + familyData.earnWays.map((w) => '<button type="button" class="fam-row" data-fam-way="' + escapeHtml(w.id) + '"><span class="fam-main"><span class="fam-title" dir="auto">' + escapeHtml(w.label) + '</span>' +
+        (w.per ? '<span class="fam-sub" dir="auto">' + escapeHtml(w.per) + "</span>" : "") + '</span><span class="fam-amt num is-pos">' + escapeHtml(famWayWorth(w)) + "</span></button>").join("") + "</div>"
+        : '<p class="help-text">None yet. Add one and it shows up under Log learning.</p>') +
+      '<button class="btn btn-ghost btn-sm" data-fam-add-way style="margin-top:8px;">Add a way to earn</button><br>' : "") +
     '<button class="btn btn-ghost btn-sm" data-fam-backup style="margin-top:12px;">Download a backup</button></div>';
   root.innerHTML = html;
 
@@ -11144,8 +11151,11 @@ function renderFamily(root, session) {
   if (!canWrite) return;
   root.querySelectorAll("[data-fam-act]").forEach((b) => b.addEventListener("click", () => {
     const a = b.getAttribute("data-fam-act");
-    if (a === "learn") famOpenLearn(session); else if (a === "use") famOpenUse(session); else famOpenMoney(session, a);
+    if (a === "learn") famOpenLearn(session); else if (a === "use") famOpenUse(session); else if (a === "grant") famOpenGrant(session); else famOpenMoney(session, a);
   }));
+  root.querySelectorAll("[data-fam-way]").forEach((b) => b.addEventListener("click", () => famOpenWay(b.getAttribute("data-fam-way"))));
+  const addWay = root.querySelector("[data-fam-add-way]");
+  if (addWay) addWay.addEventListener("click", () => famOpenWay(null));
   root.querySelectorAll("[data-fam-entry]").forEach((b) => b.addEventListener("click", () => famOpenEntry(b.getAttribute("data-fam-entry"))));
   root.querySelectorAll("[data-fam-item]").forEach((b) => b.addEventListener("click", () => famOpenItem(b.getAttribute("data-fam-item"))));
   root.querySelector("[data-fam-add-item]").addEventListener("click", () => famOpenItem(null));
@@ -11156,6 +11166,7 @@ function famDownloadBackup() {
   const out = { exported: new Date().toISOString(), entries: {}, learning: {} };
   familyData.entries.forEach((e) => { const c = Object.assign({}, e); delete c.id; out.entries[e.id] = c; });
   familyData.learning.forEach((i) => { const c = Object.assign({}, i); delete c.id; out.learning[i.id] = c; });
+  out.earnWays = familyData.earnWays;
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 1)], { type: "application/json" }));
   a.download = "boys-ledger-backup-" + famToday() + ".json";
@@ -11223,7 +11234,7 @@ function famOpenLearn(session) {
 
     function drawFields() {
       const kid = kidSel.value;
-      m.querySelector("#fl-cat").innerHTML = seg("cat", [["tanya", "Tanya"], ["maamer", "Maamer"], ["parsha", "Parsha"], ["school", "School report"]], cat);
+      m.querySelector("#fl-cat").innerHTML = seg("cat", [["tanya", "Tanya"], ["maamer", "Maamer"], ["parsha", "Parsha"], ["school", "School report"]].concat(familyData.earnWays.map((w) => ["way:" + w.id, escapeHtml(w.label)])), cat);
       const subs = cat === "tanya" ? [["new", "New lines"], ["review", "Review a Perek"]] : cat === "maamer" ? [["new", "New paragraph"], ["review", "Daily review"]] : null;
       m.querySelector("#fl-sub").innerHTML = subs ? '<div class="field">' + seg("sub", subs, sub) + "</div>" : "";
       let h = "";
@@ -11251,6 +11262,11 @@ function famOpenLearn(session) {
       } else if (cat === "maamer") {
         h += '<div class="field"><label for="fm-lang">Language</label><select id="fm-lang">' + FAM_LANGS.map((l) => "<option>" + l + "</option>").join("") + "</select></div>";
         h += '<div id="fm-inner"></div>';
+      } else if (cat.startsWith("way:")) {
+        const w = familyData.earnWays.find((x) => "way:" + x.id === cat);
+        h += '<p class="help-text" style="margin:-8px 0 12px;">' + escapeHtml(w ? famWayWorth(w) + (w.per ? " " + w.per : "") : "") + "</p>" +
+          '<div class="field"><label for="fw-qty">How many times</label><input type="number" inputmode="numeric" min="0" id="fw-qty" value="1"></div>' +
+          '<div class="field"><label for="fw-note">Note (optional)</label><input type="text" id="fw-note"></div>';
       } else if (cat === "school") {
         h += '<div class="field"><label>Teacher’s rating (out of 5)</label>' + seg("rating", [1, 2, 3, 4, 5].map((n) => [String(n), String(n)]), String(rating)) + "</div>" +
           '<div class="field"><label for="fs-note">Note (optional)</label><input type="text" id="fs-note" placeholder="e.g. what the teacher wrote"></div>';
@@ -11375,6 +11391,13 @@ function famOpenLearn(session) {
         const paras = val("fm-rparas"), tested = checked("fm-tested");
         return { screen: (tested ? 5 : 1) * paras, why: paras + " paragraph" + (paras === 1 ? "" : "s") + " × " + (tested ? "5 minutes (new paragraph tested today)" : "1 minute"), note: "Maamer review (" + lang + "): " + paras + " paragraphs" };
       }
+      if (cat.startsWith("way:")) {
+        const w = familyData.earnWays.find((x) => "way:" + x.id === cat);
+        if (!w) return { error: "That way to earn was removed." };
+        const qty = val("fw-qty"), extra = sel("fw-note").trim();
+        const note = w.label + (qty !== 1 ? " ×" + qty : "") + (extra ? " — " + extra : "");
+        return { screen: Math.round((w.minutes || 0) * qty), money: Math.round((w.cents || 0) * qty), why: (qty !== 1 ? qty + " × " : "") + famWayWorth(w), note, moneyNote: note };
+      }
       // Daily report from school: 4 earns 10 minutes; 5 earns 10 minutes and $1.
       if (cat === "school") {
         if (rating < 4) return { error: "A rating of " + rating + " doesn’t earn anything — 4 earns 10 minutes, 5 earns 10 minutes and $1." };
@@ -11421,6 +11444,80 @@ function famOpenLearn(session) {
       const newOnes = famNewEntries(add, session);
       const ok = await familySave((d) => { d.entries.push(...newOnes); if (p.apply) p.apply(d); return d; }, "Added " + famMins(p.screen, true) + " for " + familyKidName(kid) + ".");
       if (ok) famCloseModal();
+    });
+  });
+}
+
+// What one of R. Aizik's own ways to earn is worth, e.g. "30m and $0.50".
+function famWayWorth(w) { return [w.minutes ? famMins(w.minutes) : "", w.cents ? famMoney(w.cents) : ""].filter(Boolean).join(" and ") || "nothing yet"; }
+
+// Give (or take away) any amount of screen time, and optionally money, for any reason.
+function famOpenGrant(session) {
+  const body = '<div class="field"><label for="fg-kid">For</label>' + famKidSelect("fg-kid", familyKid) + "</div>" +
+    '<div class="fam-chips" id="fg-dir"><button type="button" class="btn btn-sm btn-primary" data-dir="give">Give</button><button type="button" class="btn btn-sm btn-ghost" data-dir="take">Take away</button></div>' +
+    '<div class="field-row"><div class="field" style="min-width:100px;"><label for="fg-h">Hours</label><input type="number" inputmode="numeric" min="0" id="fg-h" value="0"></div><div class="field" style="min-width:100px;"><label for="fg-m">Minutes</label><input type="number" inputmode="numeric" min="0" id="fg-m" value="30"></div></div>' +
+    '<div class="field"><label for="fg-amt">Money too ($, optional)</label><input type="text" inputmode="decimal" id="fg-amt" placeholder="0.00"></div>' +
+    '<div class="field"><label for="fg-note">Reason</label><input type="text" id="fg-note" placeholder="e.g. helped with Shabbos cleaning"></div>' +
+    '<div class="field"><label for="fg-date">Date</label><input type="date" id="fg-date" value="' + famToday() + '"></div>' +
+    '<p class="help-text" id="fg-after"></p>' +
+    '<div class="fam-foot"><button class="btn btn-ghost btn-sm" data-fam-close>Cancel</button><button class="btn btn-primary btn-sm" id="fg-save">Save</button></div>';
+  famOpenModal("Give or take screen time", body, (m) => {
+    let take = false;
+    const mins = () => Math.round(famNum(m.querySelector("#fg-h").value) * 60 + famNum(m.querySelector("#fg-m").value));
+    const cents = () => Math.round(famNum(m.querySelector("#fg-amt").value) * 100);
+    const after = () => {
+      const t = famTotals(m.querySelector("#fg-kid").value), sign = take ? -1 : 1;
+      m.querySelector("#fg-after").textContent = "Balance after: " + famMins(t.screen + sign * mins()) + (cents() ? " · " + famMoney(t.money + sign * cents()) : "");
+    };
+    m.querySelectorAll("[data-dir]").forEach((b) => b.addEventListener("click", () => {
+      take = b.getAttribute("data-dir") === "take";
+      m.querySelectorAll("[data-dir]").forEach((x) => { x.classList.toggle("btn-primary", x === b); x.classList.toggle("btn-ghost", x !== b); });
+      after();
+    }));
+    m.addEventListener("input", after); m.addEventListener("change", after); after();
+    m.querySelector("#fg-save").addEventListener("click", async () => {
+      const kid = m.querySelector("#fg-kid").value, sign = take ? -1 : 1, n = mins(), c = cents();
+      if (!n && !c) { famErr(m, "Enter an amount of time or money."); return; }
+      const reason = m.querySelector("#fg-note").value.trim(), date = m.querySelector("#fg-date").value || famToday();
+      const note = (take ? "Taken away" : "Given") + (reason ? ": " + reason : "");
+      const add = [];
+      if (n) add.push({ kid, kind: "screen", amount: sign * n, note, date });
+      if (c) add.push({ kid, kind: "money", amount: sign * c, note, date });
+      const e = famNewEntries(add, session);
+      if (await familySave((d) => { d.entries.push(...e); return d; }, (take ? "Took away " : "Gave ") + [n ? famMins(n) : "", c ? famMoney(c) : ""].filter(Boolean).join(" and ") + (take ? " from " : " to ") + familyKidName(kid) + ".")) famCloseModal();
+    });
+  });
+}
+
+// Add or edit one of R. Aizik's own ways to earn; it then appears as a choice in Log learning.
+function famOpenWay(id) {
+  const w = id ? familyData.earnWays.find((x) => x.id === id) : null;
+  const body = '<div class="field"><label for="fw-label">What he does</label><input type="text" dir="auto" id="fw-label" value="' + escapeHtml(w ? w.label : "") + '" placeholder="e.g. Read a chapter of Chumash"></div>' +
+    '<div class="field-row"><div class="field" style="min-width:100px;"><label for="fw-h">Screen time — hours</label><input type="number" inputmode="numeric" min="0" id="fw-h" value="' + (w ? Math.floor((w.minutes || 0) / 60) : 0) + '"></div>' +
+    '<div class="field" style="min-width:100px;"><label for="fw-m">Minutes</label><input type="number" inputmode="numeric" min="0" id="fw-m" value="' + (w ? (w.minutes || 0) % 60 : 15) + '"></div></div>' +
+    '<div class="field"><label for="fw-amt">Money ($)</label><input type="text" inputmode="decimal" id="fw-amt" value="' + (w && w.cents ? (w.cents / 100).toFixed(2) : "") + '" placeholder="0.00"></div>' +
+    '<div class="field"><label for="fw-per">Each time means (optional)</label><input type="text" dir="auto" id="fw-per" value="' + escapeHtml(w ? w.per || "" : "") + '" placeholder="e.g. per chapter"></div>' +
+    '<div class="fam-foot">' + (w ? '<button class="btn btn-danger btn-sm" id="fw-del">Delete</button><span style="flex:1;"></span>' : "") +
+    '<button class="btn btn-ghost btn-sm" data-fam-close>Cancel</button><button class="btn btn-primary btn-sm" id="fw-save">Save</button></div>';
+  famOpenModal(w ? "Edit way to earn" : "Add a way to earn", body, (m) => {
+    m.querySelector("#fw-save").addEventListener("click", async () => {
+      const label = m.querySelector("#fw-label").value.trim();
+      const minutes = Math.round(famNum(m.querySelector("#fw-h").value) * 60 + famNum(m.querySelector("#fw-m").value));
+      const cents = Math.round(famNum(m.querySelector("#fw-amt").value) * 100);
+      if (!label) { famErr(m, "Say what he does to earn it."); return; }
+      if (!minutes && !cents) { famErr(m, "Give it some screen time, money, or both."); return; }
+      const fields = { label, minutes, cents, per: m.querySelector("#fw-per").value.trim() };
+      const ok = await familySave((d) => {
+        const r = w && d.earnWays.find((x) => x.id === w.id);
+        if (r) Object.assign(r, fields); else d.earnWays.push(Object.assign({ id: uid("fw") }, fields));
+        return d;
+      }, w ? "Saved." : "Added — it’s now a choice in Log learning.");
+      if (ok) famCloseModal();
+    });
+    const del = m.querySelector("#fw-del");
+    if (del) del.addEventListener("click", async () => {
+      if (!del.dataset.sure) { del.dataset.sure = "1"; del.textContent = "Tap again to delete"; return; }
+      if (await familySave((d) => { d.earnWays = d.earnWays.filter((x) => x.id !== id); return d; }, "Deleted. Entries already logged stay.")) famCloseModal();
     });
   });
 }
