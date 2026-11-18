@@ -1441,6 +1441,11 @@ html.tv-mode #tv-root { display: block; }
 .tv-ann-text { flex: 1; min-height: 0; display: flex; align-items: center; font-family: var(--font-display, Arial, sans-serif); font-weight: 800; line-height: 1.15; color: #fff; overflow: hidden; overflow-wrap: anywhere; }
 .tv-layout-split .tv-main { grid-template-columns: 1fr 1fr; }
 .tv-layout-photos .tv-main, .tv-layout-leaderboard .tv-main, .tv-layout-calendar .tv-main { grid-template-columns: 1fr; }
+/* Posters screen: just the poster, filling the whole screen. */
+.tv-root.tv-layout-posters { inset: 0; gap: 0; }
+.tv-layout-posters .tv-main { grid-template-columns: 1fr; gap: 0; }
+.tv-layout-posters .tv-bottom, .tv-layout-posters .tv-ticker { display: none; }
+.tv-layout-posters .tv-zone-photos { border: none; border-radius: 0; }
 .tv-layout-photos .tv-bottom, .tv-layout-leaderboard .tv-bottom, .tv-layout-calendar .tv-bottom, .tv-layout-split .tv-bottom { flex: none; height: 7.2rem; }
 /* clock */
 .tv-zone-clock { flex: none; justify-content: center; }
@@ -1467,6 +1472,10 @@ html.tv-mode #tv-root { display: block; }
    is shown whole -- never cropped -- over a blurred, darkened copy of itself. */
 .tv-slide .tv-bg { display: none; position: absolute; inset: 0; filter: blur(40px) brightness(.45); transform: scale(1.15); }
 .tv-slide.is-fit .tv-bg { display: block; }
+/* An album video (tvNextPhoto): played muted, whole, over its own still frame blurred. */
+.tv-slide .tv-vid { display: none; position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: transparent; }
+.tv-slide.is-video .tv-vid { display: block; }
+.tv-slide.is-video .tv-rot { display: none; }
 .tv-slide.is-fit .tv-rot img { object-fit: contain; }
 .tv-rot { position: absolute; inset: 0; }
 .tv-rot.r1, .tv-rot.r3 { inset: auto; left: 50%; top: 50%; }
@@ -12046,6 +12055,7 @@ function tvLayoutLabel(id) { const l = TV_LAYOUTS.find((x) => x.id === id); retu
 const TV = {
   cfg: tvDefaults(), photos: [], uploaded: [], posters: [], layout: null, lastLayoutCheck: 0,
   album: { url: "", photos: [], fetchedAt: 0, error: null }, // the Google Photos album (see tvRefreshAlbum)
+  videoKnown: new Map(), videoUntil: 0, // album videos (see tvIsVideo / tvNextPhoto)
   photoIdx: -1, photoSlide: 0, lbIdx: 0, lbStamp: 0, shuffleKeys: new Map(),
   cal: { events: [], fetchedAt: 0, ok: null },
   stamps: { photo: 0, lb: 0, cal: 0, album: 0, hb: 0, shift: 0, nightly: 0 },
@@ -12162,7 +12172,8 @@ function tvTick() {
   }
   const onScreen = TV.photos[TV.photoIdx];
   const slideSecs = Math.max(4, Number(TV.cfg.photos.intervalSecs) || 12, onScreen && onScreen.kind === "poster" ? Number(TV.cfg.photos.posterSecs) || 15 : 0);
-  if (TV.layout && TV.zones.photos && now - S.photo >= slideSecs * 1000) { S.photo = now; tvNextPhoto(); }
+  // A playing video moves on when it ends or after TV_VIDEO_MAX_SECS, not on the photo timer.
+  if (TV.layout && TV.zones.photos && (TV.videoUntil ? now >= TV.videoUntil : now - S.photo >= slideSecs * 1000)) { S.photo = now; tvNextPhoto(); }
   if (TV.zones.leaderboard) {
     if (now - S.lb >= Math.max(5, Number(TV.cfg.leaderboard.secsPerCategory) || 12) * 1000) { S.lb = now; TV.lbIdx++; tvUpdateLeaderboard(); }
     else if (TV.dirty) tvUpdateLeaderboard();
@@ -12226,8 +12237,8 @@ function tvBuildLayout(layout) {
   } else if (layout === "split") {
     main = z("photos") + z("leaderboard"); bottom = z("clock", " tv-clock-small");
   } else if (layout === "posters") {
-    // The photo slideshow, showing only the live posters (see tvPhotoList).
-    main = z("photos"); bottom = z("clock", " tv-clock-small");
+    // Only the live posters (see tvPhotoList), edge to edge -- no clock strip, no ticker.
+    main = z("photos"); bottom = "";
   } else {
     main = z(layout); bottom = z("clock", " tv-clock-small");
   }
@@ -12275,7 +12286,8 @@ async function fetchAlbumPhotos(link) {
   if (!data.ok) return data;
   return { ok: true, title: data.title || "", photos: data.photos.map((p) => {
     const key = p.url.split("/pw/")[1] || p.url;
-    return { id: "gp:" + key.slice(0, 48), src: p.url + "=w1920-h1080", thumb: p.url + "=w400-h400", caption: "" };
+    // video: the same item's playable version, if it's a video (see tvIsVideo).
+    return { id: "gp:" + key.slice(0, 48), src: p.url + "=w1920-h1080", thumb: p.url + "=w400-h400", video: p.url + "=dv", caption: "" };
   }) };
 }
 function albumErrorText(r) {
@@ -12333,12 +12345,30 @@ function tvPhotoList() {
 // Google already upright. `cfg` is unused now but kept so callers don't change.
 function tvPhotoRotation(photo, cfg) { return ((Number(photo.rotate) || 0) % 4 + 4) % 4; }
 // Photos are always live; a poster only until its "until" time (null = until it's removed).
+/* Album videos play muted (browsers only start a video on their own when it's silent), for up to
+   TV_VIDEO_MAX_SECS each. Google's album page doesn't say which items are videos, so the first
+   time an item comes up the TV asks for its video version (photo.video) and remembers the answer:
+   a photo has none and just shows as a picture. */
+const TV_VIDEO_MAX_SECS = 30;
+function tvIsVideo(photo) {
+  if (!photo.video) return Promise.resolve(false);
+  if (TV.videoKnown.has(photo.id)) return Promise.resolve(TV.videoKnown.get(photo.id));
+  return new Promise((resolve) => {
+    const v = document.createElement("video");
+    v.muted = true; v.preload = "metadata";
+    const done = (yes) => { clearTimeout(t); v.removeAttribute("src"); v.load(); TV.videoKnown.set(photo.id, yes); resolve(yes); };
+    const t = setTimeout(() => done(false), 8000);
+    v.onloadedmetadata = () => done(v.videoWidth > 0 && v.duration > 0);
+    v.onerror = () => done(false);
+    v.src = photo.video;
+  });
+}
 function tvPosterLive(p, now) { return !p || p.kind !== "poster" || !p.until || Number(p.until) > now; }
 function tvInitPhotos() {
   const el = TV.zones.photos.el;
   // no-referrer: Google's image hosts serve shared album photos to anyone, but can refuse a
   // request that carries another site's address.
-  el.innerHTML = [0, 1].map((n) => '<div class="tv-slide" data-s="' + n + '"><img class="tv-bg" alt="" referrerpolicy="no-referrer"><div class="tv-rot"><img alt="" referrerpolicy="no-referrer"></div><div class="tv-cap"></div></div>').join("") +
+  el.innerHTML = [0, 1].map((n) => '<div class="tv-slide" data-s="' + n + '"><img class="tv-bg" alt="" referrerpolicy="no-referrer"><div class="tv-rot"><img alt="" referrerpolicy="no-referrer"></div><video class="tv-vid" muted playsinline></video><div class="tv-cap"></div></div>').join("") +
     '<div class="tv-photo-empty" style="display:none;"><img src="' + LOGO_DATA_URI + '" alt=""><div>' + (TV.layout === "posters" ? "No posters right now" : "Photos coming soon") + "</div></div>";
   TV.stamps.photo = 0;
   tvNextPhoto(true);
@@ -12366,12 +12396,40 @@ function tvNextPhoto(keepIndex) {
   for (let n = 0; n < list.length && !tvPosterLive(list[TV.photoIdx], now); n++) TV.photoIdx = (TV.photoIdx + 1) % list.length;
   const photo = list[TV.photoIdx];
   const poster = photo.kind === "poster";
+  // Not known yet whether this album item is a video: find out, keeping the current picture up.
+  if (photo.video && !TV.videoKnown.has(photo.id)) {
+    tvIsVideo(photo).then(() => { if (TV.photos[TV.photoIdx] === photo) tvNextPhoto(true); });
+    return;
+  }
+  const isVideo = !!(photo.video && TV.videoKnown.get(photo.id));
+  TV.videoUntil = 0;
   TV.photoSlide = TV.photoSlide ? 0 : 1;
   const slide = el.querySelector('.tv-slide[data-s="' + TV.photoSlide + '"]');
   const other = el.querySelector('.tv-slide[data-s="' + (TV.photoSlide ? 0 : 1) + '"]');
   const img = slide.querySelector(".tv-rot img"), bg = slide.querySelector(".tv-bg");
-  slide.classList.remove("is-fit");
+  slide.classList.remove("is-fit", "is-video");
   bg.removeAttribute("src");
+  // Stop whatever video the other slide was playing.
+  el.querySelectorAll(".tv-vid").forEach((v) => { if (!v.paused || v.getAttribute("src")) { v.pause(); v.onended = v.onerror = v.onplaying = null; v.removeAttribute("src"); v.load(); } });
+  if (isVideo) {
+    const vid = slide.querySelector(".tv-vid");
+    slide.classList.add("is-video", "is-fit");
+    bg.src = photo.src; bg.style.transform = "scale(1.15)"; // its still frame, blurred, behind it
+    slide.querySelector(".tv-cap").style.display = "none";
+    slide.classList.remove("kb");
+    TV.videoUntil = Date.now() + 15000; // until it actually starts (a stuck video moves on)
+    vid.muted = true;
+    vid.onplaying = () => {
+      TV.videoUntil = Date.now() + Math.min(TV_VIDEO_MAX_SECS, isFinite(vid.duration) && vid.duration > 0 ? vid.duration : TV_VIDEO_MAX_SECS) * 1000;
+      slide.classList.add("show");
+      if (other) other.classList.remove("show");
+    };
+    vid.onended = () => { TV.videoUntil = Date.now(); };
+    vid.onerror = () => { TV.videoKnown.set(photo.id, false); TV.videoUntil = Date.now(); };
+    vid.src = photo.video;
+    const p = vid.play(); if (p && p.catch) p.catch(() => { TV.videoUntil = Date.now(); });
+    return;
+  }
   const frame = slide.querySelector(".tv-rot");
   const show = () => {
     // An uploaded photo someone turned with ⟳. For a quarter turn the frame is sized to the zone's
