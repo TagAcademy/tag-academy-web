@@ -11930,6 +11930,7 @@ const TV_LAYOUTS = [
   { id: "leaderboard", label: "Leaderboard", hint: "Rankings full screen" },
   { id: "calendar", label: "Calendar", hint: "Today's schedule with a countdown" },
   { id: "split", label: "Photos + Leaderboard", hint: "Half and half" },
+  { id: "posters", label: "Posters", hint: "Just the posters, full screen" },
 ];
 const TV_LAYOUT_IDS = TV_LAYOUTS.map((l) => l.id);
 
@@ -12224,12 +12225,15 @@ function tvBuildLayout(layout) {
     bottom = z("calendar") + z("clock");
   } else if (layout === "split") {
     main = z("photos") + z("leaderboard"); bottom = z("clock", " tv-clock-small");
+  } else if (layout === "posters") {
+    // The photo slideshow, showing only the live posters (see tvPhotoList).
+    main = z("photos"); bottom = z("clock", " tv-clock-small");
   } else {
     main = z(layout); bottom = z("clock", " tv-clock-small");
   }
   canvas.innerHTML = '<div class="tv-main">' + main + '</div><div class="tv-bottom">' + bottom + '</div><div class="tv-ticker empty" id="tv-ticker"></div>';
   canvas.querySelectorAll("[data-zone]").forEach((el) => { TV.zones[el.getAttribute("data-zone")] = { el }; });
-  if (TV.zones.photos) tvInitPhotos();
+  if (TV.zones.photos) { TV.photos = tvPhotoList(); TV.photoIdx = -1; tvInitPhotos(); }
   TV.dirty = true;
   TV.stamps.lb = Date.now();
   if (TV.zones.calendar) TV.stamps.cal = Date.now(); // (it fetches right below; otherwise leave the timer alone)
@@ -12311,6 +12315,8 @@ function tvShuffleKey(id) {
   return TV.shuffleKeys.get(id);
 }
 function tvPhotoList() {
+  // The Posters screen: just the posters still within their dates, in the order they were posted.
+  if (TV.layout === "posters") return (TV.posters || []).filter((p) => tvPosterLive(p, Date.now()));
   let photos = TV.uploaded.concat(TV.album.photos);
   const posters = TV.posters || [];
   if (TV.cfg.photos.shuffle !== false) photos = photos.slice().sort((a, b) => tvShuffleKey(a.id) - tvShuffleKey(b.id));
@@ -12333,7 +12339,7 @@ function tvInitPhotos() {
   // no-referrer: Google's image hosts serve shared album photos to anyone, but can refuse a
   // request that carries another site's address.
   el.innerHTML = [0, 1].map((n) => '<div class="tv-slide" data-s="' + n + '"><img class="tv-bg" alt="" referrerpolicy="no-referrer"><div class="tv-rot"><img alt="" referrerpolicy="no-referrer"></div><div class="tv-cap"></div></div>').join("") +
-    '<div class="tv-photo-empty" style="display:none;"><img src="' + LOGO_DATA_URI + '" alt=""><div>Photos coming soon</div></div>';
+    '<div class="tv-photo-empty" style="display:none;"><img src="' + LOGO_DATA_URI + '" alt=""><div>' + (TV.layout === "posters" ? "No posters right now" : "Photos coming soon") + "</div></div>";
   TV.stamps.photo = 0;
   tvNextPhoto(true);
   TV.stamps.photo = Date.now();
@@ -12697,6 +12703,7 @@ function tvcMiniPreview(layout) {
     leaderboard: '<div class="mp mp-one">' + b("l", "Leaderboard") + b("k s", "Clock") + "</div>",
     calendar: '<div class="mp mp-one">' + b("c", "Calendar") + b("k s", "Clock") + "</div>",
     split: '<div class="mp mp-split">' + b("p", "Photos") + b("l", "Leaderboard") + b("k s", "Clock") + "</div>",
+    posters: '<div class="mp mp-one">' + b("a", "Posters") + b("k s", "Clock") + "</div>",
   };
   return '<div class="tvc-preview">' + (bodies[layout] || bodies.all) + "</div>";
 }
@@ -12780,7 +12787,7 @@ function tvcPosterWhen(p, now) {
 function tvcPostersHtml() {
   const now = Date.now();
   let h = '<div class="tvc-sub" style="margin-top:18px;">Posters</div>' +
-    '<p class="help-text">A flyer or poster picture. It shows whole (not cropped) in the photo slideshow, after every ' + (Number(TVC.cfg.photos.posterEvery) || 2) + " photos, for " + (Number(TVC.cfg.photos.posterSecs) || 15) + " seconds.</p>" +
+    '<p class="help-text">A flyer or poster picture. It shows whole (not cropped) in the photo slideshow, after every ' + (Number(TVC.cfg.photos.posterEvery) || 2) + " photos, for " + (Number(TVC.cfg.photos.posterSecs) || 15) + " seconds. To show only the posters, pick <b>Posters</b> under Show now (or in Normal mode).</p>" +
     '<div class="tvc-sub">Show for</div><div class="tvc-chips">' + TVC_POSTER_EXPIRY.map(([ms, l]) => '<button type="button" class="tvc-chip' + (TVC.posterExpiry === ms ? " active" : "") + '" data-tvc-posterexp="' + ms + '">' + l + "</button>").join("") + "</div>" +
     '<div class="tvc-row"><label class="btn btn-primary tvc-upload">+ Add poster<input type="file" id="tvc-poster-file" accept="image/*" multiple hidden></label>' +
     (TVC.posterUploading ? '<span class="tvc-unit">' + escapeHtml(TVC.posterUploading) + "</span>" : "") + "</div>";
