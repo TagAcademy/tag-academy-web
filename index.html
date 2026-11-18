@@ -1441,6 +1441,11 @@ html.tv-mode #tv-root { display: block; }
 .tv-ann-text { flex: 1; min-height: 0; display: flex; align-items: center; font-family: var(--font-display, Arial, sans-serif); font-weight: 800; line-height: 1.15; color: #fff; overflow: hidden; overflow-wrap: anywhere; }
 .tv-layout-split .tv-main { grid-template-columns: 1fr 1fr; }
 .tv-layout-photos .tv-main, .tv-layout-leaderboard .tv-main, .tv-layout-calendar .tv-main { grid-template-columns: 1fr; }
+/* Posters screen: just the poster, filling the whole screen. */
+.tv-root.tv-layout-posters { inset: 0; gap: 0; }
+.tv-layout-posters .tv-main { grid-template-columns: 1fr; gap: 0; }
+.tv-layout-posters .tv-bottom, .tv-layout-posters .tv-ticker { display: none; }
+.tv-layout-posters .tv-zone-photos { border: none; border-radius: 0; }
 .tv-layout-photos .tv-bottom, .tv-layout-leaderboard .tv-bottom, .tv-layout-calendar .tv-bottom, .tv-layout-split .tv-bottom { flex: none; height: 7.2rem; }
 /* clock */
 .tv-zone-clock { flex: none; justify-content: center; }
@@ -12226,8 +12231,8 @@ function tvBuildLayout(layout) {
   } else if (layout === "split") {
     main = z("photos") + z("leaderboard"); bottom = z("clock", " tv-clock-small");
   } else if (layout === "posters") {
-    // The photo slideshow, showing only the live posters (see tvPhotoList).
-    main = z("photos"); bottom = z("clock", " tv-clock-small");
+    // Only the live posters (see tvPhotoList), edge to edge -- no clock strip, no ticker.
+    main = z("photos"); bottom = "";
   } else {
     main = z(layout); bottom = z("clock", " tv-clock-small");
   }
