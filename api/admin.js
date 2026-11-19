@@ -7,6 +7,7 @@
 //               plain password still in it into creds/ (scrambled) and remove it from the data
 //   resetAllStudents {}         a new password for every current student (returned once, to print)
 //   tvKey       {}              make a new key for the hallway TV (replaces the old one)
+//   canteenKey  {}              make a new key for the canteen tablet (replaces the old one)
 //   log         {}              the last 100 entries of the change log
 const crypto = require("crypto");
 const fb = require("./_firebase");
@@ -72,6 +73,13 @@ module.exports = async (req, res) => {
       const key = crypto.randomBytes(24).toString("base64url");
       await fb.db().collection("secrets").doc("tv").set({ keyHashes: [S.sha256(key)], at: Date.now(), by: me.name });
       await S.audit(who, "tvKey", {});
+      return S.send(res, 200, { ok: true, key });
+    }
+
+    if (b.action === "canteenKey") {
+      const key = crypto.randomBytes(24).toString("base64url");
+      await fb.db().collection("secrets").doc("canteen").set({ keyHashes: [S.sha256(key)], at: Date.now(), by: me.name });
+      await S.audit(who, "canteenKey", {});
       return S.send(res, 200, { ok: true, key });
     }
 

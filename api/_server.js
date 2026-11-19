@@ -61,6 +61,49 @@ const sha256 = (s) => crypto.createHash("sha256").update(String(s)).digest("hex"
 async function audit(who, action, details) {
   try { await fb.db().collection("audit").add({ at: Date.now(), who: who || null, action, details: details || {} }); } catch (e) { /* the log never blocks the action */ }
 }
+// Check a username and password (scrambled copy in creds/, or an old plain one still in the data,
+// moved to creds/ on first use). Ten wrong tries on one username lock it for 15 minutes.
+// Returns { ptype, rec } for the right person; throws with .status (401/403/429) otherwise.
+const MAX_FAILS = 10, LOCK_MS = 15 * 60000;
+async function verifyLogin(username, password, state) {
+  const u = String(username || "").trim().toLowerCase();
+  if (!u || !password) throw Object.assign(new Error("Enter your username and password."), { status: 400 });
+  const failRef = fb.db().collection("loginFails").doc(sha256(u).slice(0, 40));
+  const failSnap = await failRef.get();
+  const fails = failSnap.exists ? failSnap.data() : null;
+  if (fails && fails.count >= MAX_FAILS && Date.now() - fails.last < LOCK_MS) {
+    throw Object.assign(new Error("Too many wrong tries. Wait 15 minutes, or ask an admin to reset your password."), { status: 429 });
+  }
+  state = state || await readState();
+  if (!state) throw Object.assign(new Error("No data found."), { status: 500 });
+  let ptype = "staff", rec = (state.staff || []).find((s) => String(s.username || "").toLowerCase() === u);
+  if (!rec) { ptype = "student"; rec = (state.roster || []).find((s) => String(s.username || "").toLowerCase() === u); }
+  let good = false;
+  if (rec) {
+    const cred = await credRef(ptype, rec.id).get();
+    if (cred.exists && cred.data().hash) good = await checkPassword(password, cred.data().hash);
+    else if (typeof rec.password === "string" && rec.password !== "" && rec.password === String(password)) {
+      good = true;
+      await credRef(ptype, rec.id).set({ hash: await hashPassword(password), setAt: Date.now(), setBy: "moved at first sign-in" });
+    }
+  }
+  if (!good) {
+    const prev = fails && Date.now() - fails.last < LOCK_MS ? fails.count : 0;
+    await failRef.set({ count: prev + 1, last: Date.now() });
+    throw Object.assign(new Error("Username or password not recognized."), { status: 401 });
+  }
+  if (isGraduated(ptype, rec)) throw Object.assign(new Error("This account has graduated, so it can’t sign in. An admin can re-enroll it."), { status: 403 });
+  if (failSnap.exists) await failRef.delete();
+  return { ptype, rec };
+}
+
+// A device key (the hallway TV, the canteen tablet): only its sha256 is kept, in secrets/<name>.
+async function keyOk(name, key) {
+  if (!key || String(key).length < 20) return false;
+  const snap = await fb.db().collection("secrets").doc(name).get();
+  return (snap.exists ? (snap.data().keyHashes || []) : []).includes(sha256(key));
+}
+
 function fail(res, e) { send(res, e.status || 500, { ok: false, error: e.status ? e.message : "Something went wrong on the server." }); if (!e.status) console.error(e); }
 
-module.exports = { STAFF_ROLES, send, body, uidFor, credRef, stateRef, readState, findPerson, isGraduated, roleOf, displayName, caller, changeState, hashPassword, checkPassword, sha256, audit, fail };
+module.exports = { STAFF_ROLES, send, body, uidFor, credRef, stateRef, readState, findPerson, isGraduated, roleOf, displayName, caller, changeState, hashPassword, checkPassword, sha256, audit, fail, verifyLogin, keyOk };

@@ -1,5 +1,7 @@
 {
   "functions": {
-    "api/student.js": { "includeFiles": "index.html" }
+    "api/student.js": { "includeFiles": "index.html" },
+    "api/me.js": { "includeFiles": "index.html" },
+    "api/canteen.js": { "includeFiles": "index.html" }
   }
 }

@@ -1706,12 +1706,80 @@ html.tv-mode #tv-root { display: block; }
 .fam-preview { background: var(--surface-2); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 14px; }
 .fam-foot { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; align-items: center; }
 .fam-err { color: var(--warn); font-size: 0.82rem; margin: 8px 0 0; min-height: 1em; }
+/* ===================== Canteen (see CANTEEN) ===================== */
+.cn-scan-btn { width: 100%; padding: 14px; font-size: 1.05rem; margin-bottom: 14px; }
+.cn-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+.cn-tile {
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 14px 8px 12px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--ink); font: inherit; cursor: pointer; text-align: center;
+}
+.cn-tile:hover { border-color: var(--brand); }
+.cn-tile.in-cart { border-color: var(--brand); box-shadow: inset 0 0 0 1px var(--brand); background: var(--brand-soft); }
+.cn-tile.is-out { opacity: 0.45; cursor: not-allowed; }
+.cn-emoji { font-size: 2rem; line-height: 1.1; }
+.cn-name { font-weight: 700; font-size: 0.9rem; overflow-wrap: anywhere; }
+.cn-price { font-size: 0.8rem; color: var(--gold); font-weight: 700; }
+.cn-stock { font-size: 0.7rem; color: var(--muted); }
+.cn-q { position: absolute; top: 6px; right: 6px; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 99px; background: var(--brand); color: #fff; font-size: 0.75rem; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+.cn-cart { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; box-shadow: var(--shadow); }
+.cn-line { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.cn-line-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.cn-qty { display: inline-flex; align-items: center; gap: 8px; }
+.cn-qty .btn { min-width: 32px; }
+.cn-line-total { min-width: 44px; text-align: right; font-weight: 700; }
+.cn-total { display: flex; justify-content: space-between; padding: 10px 0 12px; font-size: 1.05rem; }
+.cn-buy { width: 100%; padding: 12px; font-size: 1rem; }
+.cn-other { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.cn-other .help-text { margin: 0; width: 100%; }
+.cn-clear { margin-top: 10px; }
+.cn-cash { color: var(--good); }
+.cn-today { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+.cn-today > div { background: var(--surface-2); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; }
+.cn-today b { font-size: 1.3rem; }
+.cn-today span { font-size: 0.75rem; color: var(--muted); }
+.kiosk-check.kiosk-box { background: var(--gold-soft); }
+.cn-sale { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 0.88rem; }
+.cn-sale > span:nth-child(2) { flex: 1; min-width: 160px; }
+.cn-items { display: flex; flex-direction: column; gap: 10px; }
+.cn-item { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
+.cn-item.is-hidden { opacity: 0.6; }
+.cn-item-main { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.cn-item-meta { font-size: 0.8rem; color: var(--muted); }
+.cn-form { border: 1px solid var(--brand); border-radius: 10px; padding: 14px; margin-bottom: 12px; background: var(--surface-2); }
+.cn-low { border-left: 4px solid var(--caution); }
+.scan-modal { max-width: 460px; }
+.scan-view { position: relative; width: 100%; aspect-ratio: 4 / 3; background: #000; border-radius: 10px; overflow: hidden; }
+.scan-view video { width: 100%; height: 100%; object-fit: cover; }
+.scan-frame { position: absolute; inset: 18% 12%; border: 3px solid rgba(255,255,255,0.85); border-radius: 12px; box-shadow: 0 0 0 999px rgba(0,0,0,0.25); }
+/* The canteen tablet: only #kiosk-root shows. */
+#kiosk-root { display: none; }
+html.kiosk-mode #kiosk-root { display: block; }
+html.kiosk-mode #login-root, html.kiosk-mode #shell, html.kiosk-mode #tv-root { display: none !important; }
+.kiosk { min-height: 100vh; min-height: 100dvh; background: var(--paper); padding: 16px; box-sizing: border-box; }
+.kiosk-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.kiosk-top .btn { padding: 14px 22px; font-size: 1.1rem; }
+.kiosk-title { font-family: var(--font-display); font-weight: 800; font-size: 1.8rem; }
+.kiosk-body { display: grid; grid-template-columns: 1fr 340px; gap: 16px; align-items: start; }
+.kiosk-side { position: sticky; top: 16px; }
+.kiosk .cn-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.kiosk .cn-tile { padding: 18px 8px 14px; }
+.kiosk .cn-emoji { font-size: 2.6rem; }
+.kiosk-empty { color: var(--muted); text-align: center; padding: 30px 16px; }
+.kiosk-banner { background: var(--warn-soft); color: var(--warn); font-weight: 700; padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; }
+.kiosk-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 70; background: var(--good); color: #fff; font-weight: 700; padding: 12px 20px; border-radius: 99px; box-shadow: var(--shadow); }
+.kiosk-toast.warn { background: var(--warn); }
+.kiosk-done { text-align: center; }
+.kiosk-check { width: 64px; height: 64px; margin: 0 auto 10px; border-radius: 50%; background: var(--good); color: #fff; font-size: 2.2rem; display: flex; align-items: center; justify-content: center; }
+.kiosk-center { max-width: 460px; margin: 15vh auto 0; text-align: center; }
+.kiosk-exit { display: block; margin: 30px auto 0; background: none; border: none; color: var(--muted); font: inherit; font-size: 0.75rem; text-decoration: underline; cursor: pointer; }
+@media (max-width: 760px) { .kiosk-body { grid-template-columns: 1fr; } .kiosk-side { position: static; order: -1; } }
 </style>
 </head>
 <body>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-app-compat.js"></script><script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-auth-compat.js"></script><script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-firestore-compat.js"></script>
 <div id="login-root"></div>
 <div id="tv-root"></div>
+<div id="kiosk-root"></div>
 <div id="shell" style="display:none;">
   <div id="preview-banner"></div>
   <div id="avatar-picker-root"></div>
@@ -4184,6 +4252,9 @@ const ROUTES = [
   // Remote control for the hallway TV (see TV DISPLAY). Admin only. Its id is deliberately NOT "tv" -- "#tv" is the URL that puts a screen into TV mode.
   { id: "tvdisplay", label: "TV Display", icon: "tv", roles: ["admin"] },
   { id: "balance", label: "My Balance", icon: "search", roles: ["student"] },
+  // Students and staff buy with their own coins here; admins also set up the items, stock, labels
+  // and tablet (see CANTEEN).
+  { id: "canteen", label: "Canteen", icon: "cart", roles: ["admin", "teacher", "student"] },
   // Only ever shown to the one student(s) admin has granted isTA permission to (see
   // renderChazzanTab/Admin > Students) -- `visible` is an extra per-session check beyond the
   // role list above, since "student" alone isn't narrow enough here.
@@ -4229,6 +4300,7 @@ function goToRoute(id) {
 
 /* ---------- icons ---------- */
 const ICONS = {
+  cart: '<path d="M1.8 2.5h2.3l1.9 8.6h8.1l1.6-6.1H5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="7" cy="14.6" r="1.4" fill="currentColor"/><circle cx="13.2" cy="14.6" r="1.4" fill="currentColor"/>',
   tv: '<rect x="2" y="3" width="14" height="9.5" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.6"/><line x1="6" y1="15.3" x2="12" y2="15.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
   home: '<path d="M2.5 8.5L9 3l6.5 5.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M4.5 7.5V15h9V7.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>',
   check: '<path d="M3 9l4 4 8-9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
@@ -5221,7 +5293,7 @@ function renderLogin(root) {
       try {
         await firebaseAuth.signInWithCustomToken(r.token);
         setSession(r.ptype === "staff" ? "staff" : "student", r.id);
-        goToRoute(r.ptype === "student" ? "balance" : "today");
+        goToRoute(canteenPendingId() && r.role !== "limited" && r.role !== "family" ? "canteen" : r.ptype === "student" ? "balance" : "today");
         authNeeded = false;
         if (state) renderAll(); else startApp();
         return;
@@ -8286,8 +8358,8 @@ function renderAdminSecurity(root) {
     (securityLog === null ? '<button type="button" class="btn btn-ghost" id="sec-log">Show the change log</button>'
       : securityLog.length ? '<div class="table-wrap"><table><thead><tr><th>When</th><th>Who</th><th>What</th></tr></thead><tbody>' + securityLog.map((e) =>
           "<tr><td>" + escapeHtml(new Date(e.at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })) + "</td><td>" + escapeHtml((e.who && e.who.name) || "—") + "</td><td>" +
-          escapeHtml({ setPassword: "Set a password", changeOwnPassword: "Changed their own password", resetAllStudents: "Reset all students’ passwords", signOut: "Signed someone out", movePasswords: "Moved passwords to the server", tvKey: "Connected a TV", pool: "Chipped into a pool", chazzan: "Recorded the chazzan" }[e.action] || e.action) +
-          (e.details && (e.details.name || e.details.title) ? " — " + escapeHtml(e.details.name || e.details.title) : "") + (e.details && e.details.amount ? " (" + num2(e.details.amount) + ")" : "") + "</td></tr>").join("") + "</tbody></table></div>"
+          escapeHtml({ setPassword: "Set a password", changeOwnPassword: "Changed their own password", resetAllStudents: "Reset all students’ passwords", signOut: "Signed someone out", movePasswords: "Moved passwords to the server", tvKey: "Connected a TV", pool: "Chipped into a pool", chazzan: "Recorded the chazzan", canteenBuy: "Bought at the canteen", canteenKey: "Connected the canteen tablet" }[e.action] || e.action) +
+          (e.details && (e.details.name || e.details.title) ? " — " + escapeHtml(e.details.name || e.details.title) : "") + (e.details && e.details.amount ? " (" + num2(e.details.amount) + ")" : "") + (e.action === "canteenBuy" && e.details ? " — " + escapeHtml((e.details.items || []).map((l) => (l.qty > 1 ? l.qty + "× " : "") + l.name).join(", ")) + " (" + num2(e.details.total) + (e.details.method === "cash" ? " cash" : e.details.method === "coins" ? " physical coins" : "") + (e.details.via === "tablet" ? ", on the tablet" : "") + ")" : "") + "</td></tr>").join("") + "</tbody></table></div>"
       : '<p class="help-text">Nothing yet.</p>') + "</div>";
   root.innerHTML = html;
   const move = document.getElementById("sec-move");
@@ -11868,7 +11940,7 @@ function renderAll() {
   // building its HTML/wiring, so restoring it right after is safe).
   const savedCanWrite = canWrite;
   if (previewing) canWrite = false;
-  ({ today: renderToday, ledger: renderLedger, overview: renderOverview, leaderboard: renderLeaderboard, timeclock: renderAdminTimeClock, participation: renderParticipation, admin: renderAdmin, tvdisplay: renderTvControl, balance: renderMyBalance, chazzan: renderChazzanTab, family: renderFamily })[route](root, session);
+  ({ today: renderToday, ledger: renderLedger, overview: renderOverview, leaderboard: renderLeaderboard, timeclock: renderAdminTimeClock, participation: renderParticipation, admin: renderAdmin, tvdisplay: renderTvControl, balance: renderMyBalance, canteen: renderCanteen, chazzan: renderChazzanTab, family: renderFamily })[route](root, session);
   canWrite = savedCanWrite;
   updateLiveScheduleBadge(); // reflect the last known poll result immediately, don't wait for the next tick
   wireStudentLinks(root);
@@ -11943,6 +12015,7 @@ async function existingSignIn() {
 let authNeeded = false; // no one signed in on this device: show the sign-in screen (see renderAll)
 async function init() {
   if (TV_MODE) { initTv(); return; } // hallway TV: read-only, no login, no migrations, no sheet timers (see TV DISPLAY below)
+  if (CANTEEN_MODE) { initKiosk(); return; } // the canteen tablet: its own shop screen, no sign-in (see CANTEEN)
   renderAll(); // shows the "Loading..." screen (state is still null at this point)
   const who = await existingSignIn();
   if (!who) { localStorage.removeItem(SESSION_KEY); authNeeded = true; renderAll(); return; }
@@ -13320,6 +13393,565 @@ function tvcWire(root) {
   });
   on("[data-tvc-askdel]", "click", (el) => { TVC.deleteConfirm = el.getAttribute("data-tvc-askdel"); refreshViewOrDefer(); });
   on("[data-tvc-del]", "click", (el) => { TVC.deleteConfirm = null; DISPLAY_PHOTOS.doc(el.getAttribute("data-tvc-del")).delete().then(() => toast("Removed.", "good")).catch(() => toast("Couldn’t delete.", "warn")); });
+}
+
+/* ================================================================
+   CANTEEN
+   Students and staff buy snacks with their own TAG coins (a student's balance, or a staff member's
+   staff coins -- see computeStaffStats) -- on their own phone (the Canteen tab) or on a
+   shared canteen tablet (?canteen=1, see initKiosk). Every purchase goes through the server
+   (api/student.js "buy", api/canteen.js), which checks the price, the stock and their balance, so
+   nobody can buy with someone else's coins or change a price. Admins manage items here.
+   state.canteen.items: [{ id, name, emoji, price, stock (number, or null = not counted), lowAt,
+   barcode, active, cashPrice (dollars, optional) }]. Paying from a TAG coin balance is a
+   "Spent/Redeemed" ledger entry with canteen: true and items: [{ id, name, qty, price }]; a refund
+   keeps the entry with amount 0 and refunded: {...}. Paying in cash or with physical TAG coins
+   (into the canteen box) changes no balance: it's kept in state.canteen.sales [{ id, date, at,
+   method: "cash"|"coins", total, items, via, studentId? }] so the box can be counted against it.
+   Scanning: each item can have a QR label printed from here (a link ending #buy=<id>, so a
+   phone's own camera opens the app on that item) and/or the barcode already on the package
+   (read by the app's scanner, or a USB barcode scanner plugged into the tablet).
+   ================================================================ */
+const CANTEEN_PENDING_KEY = "tag_canteen_pending";
+const CANTEEN_FLAG_KEY = "tag_canteen_mode_v1";
+const CANTEEN_KEY_KEY = "tag_canteen_key_v1";
+const ZXING_URL = "https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js";
+const QRGEN_URL = "https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js";
+// A QR label opened with the phone's camera arrives as #buy=<item id>: remember the item, open
+// the Canteen tab (after signing in, if needed), and tidy the address.
+function catchBuyLink() {
+  const m = /^#buy=([\w-]+)/.exec(location.hash || "");
+  if (!m) return false;
+  try { sessionStorage.setItem(CANTEEN_PENDING_KEY, m[1]); sessionStorage.setItem("tag_route", "canteen"); } catch (e) {}
+  try { history.replaceState(null, "", location.pathname + location.search + "#canteen"); } catch (e) {}
+  return true;
+}
+catchBuyLink();
+// The same link opened in a tab where the app is already running.
+window.addEventListener("hashchange", () => {
+  if (!catchBuyLink() || CANTEEN_MODE || TV_MODE) return;
+  const ses = state && currentSession();
+  if (ses && routesFor(ses).some((r) => r.id === "canteen")) { goToRoute("canteen"); renderAll(); }
+});
+function canteenPendingId() { try { return sessionStorage.getItem(CANTEEN_PENDING_KEY); } catch (e) { return null; } }
+function canteenItems() { return ((state.canteen || {}).items) || []; }
+function canteenLink(id) { return location.origin + location.pathname + "#buy=" + id; }
+// A scanned code -> the item: a QR label (…#buy=<id>) or a package barcode (leading zeros ignored,
+// so the same product read as UPC-A or EAN-13 still matches).
+function canteenFind(code, items) {
+  const t = String(code || "").trim();
+  if (!t) return null;
+  const m = /[#?&]buy=([\w-]+)/.exec(t);
+  if (m) return items.find((i) => i.id === m[1]) || null;
+  const norm = (x) => { x = String(x || "").replace(/\s+/g, ""); return /^\d+$/.test(x) ? x.replace(/^0+/, "") : x.toLowerCase(); };
+  const n = norm(t);
+  return n ? items.find((i) => i.barcode && norm(i.barcode) === n) || null : null;
+}
+function canteenStockText(it) {
+  if (typeof it.stock !== "number") return "";
+  return it.stock <= 0 ? "Sold out" : it.stock + " left";
+}
+const money = (n) => "$" + (Math.round(Number(n) * 100) / 100).toFixed(2);
+// The cash total, or null if something in the cart has no cash price.
+function cartCash(cart, items) { let t = 0, ok = true; cart.forEach((q, id) => { const it = items.find((x) => x.id === id); if (!it || typeof it.cashPrice !== "number") ok = false; else t += it.cashPrice * q; }); return ok ? Math.round(t * 100) / 100 : null; }
+function cartTotal(cart, items) { let t = 0; cart.forEach((q, id) => { const it = items.find((x) => x.id === id); if (it) t += Number(it.price) * q; }); return Math.round(t * 100) / 100; }
+function cartCount(cart) { let n = 0; cart.forEach((q) => { n += q; }); return n; }
+function cartList(cart) { return Array.from(cart.entries()).map(([id, qty]) => ({ id, qty })); }
+// Add one of an item to a cart, if there's stock for it. Returns a message to show.
+function cartAdd(cart, it) {
+  if (!it) return { warn: true, msg: "That code isn’t a canteen item." };
+  const have = cart.get(it.id) || 0;
+  if (typeof it.stock === "number" && have + 1 > it.stock) return { warn: true, msg: it.stock <= 0 ? it.name + " is sold out." : "Only " + it.stock + " " + it.name + " left." };
+  cart.set(it.id, have + 1);
+  return { msg: "Added " + it.name + "." };
+}
+// The item tiles and the cart, the same on a phone and on the tablet.
+function canteenGridHtml(items, cart) {
+  if (!items.length) return '<p class="help-text">Nothing for sale yet.</p>';
+  return '<div class="cn-grid">' + items.map((it) => {
+    const out = typeof it.stock === "number" && it.stock <= 0, q = cart.get(it.id) || 0;
+    return '<button type="button" class="cn-tile' + (out ? " is-out" : "") + (q ? " in-cart" : "") + '" data-cn-add="' + it.id + '"' + (out ? " disabled" : "") + ">" +
+      '<span class="cn-emoji">' + escapeHtml(it.emoji || "🛒") + "</span>" +
+      '<span class="cn-name">' + escapeHtml(it.name) + "</span>" +
+      '<span class="cn-price">' + num2(it.price) + " coin" + (Number(it.price) === 1 ? "" : "s") + (typeof it.cashPrice === "number" ? ' <span class="cn-cash">· ' + money(it.cashPrice) + "</span>" : "") + "</span>" +
+      (canteenStockText(it) ? '<span class="cn-stock">' + canteenStockText(it) + "</span>" : "") +
+      (q ? '<span class="cn-q">' + q + "</span>" : "") + "</button>";
+  }).join("") + "</div>";
+}
+function canteenCartHtml(items, cart, buyLabel, busy) {
+  if (!cart.size) return "";
+  const rows = Array.from(cart.entries()).map(([id, q]) => {
+    const it = items.find((x) => x.id === id);
+    if (!it) return "";
+    return '<div class="cn-line"><span class="cn-line-name">' + escapeHtml((it.emoji ? it.emoji + " " : "") + it.name) + "</span>" +
+      '<span class="cn-qty"><button type="button" class="btn btn-ghost btn-sm" data-cn-dec="' + id + '" aria-label="One less">−</button><b>' + q + '</b><button type="button" class="btn btn-ghost btn-sm" data-cn-inc="' + id + '" aria-label="One more">+</button></span>' +
+      '<span class="cn-line-total">' + num2(Number(it.price) * q) + "</span></div>";
+  }).join("");
+  return '<div class="cn-cart"><div class="section-title">Your cart</div>' + rows +
+    '<div class="cn-total"><span>Total</span><b>' + num2(cartTotal(cart, items)) + " TAG coins" + (cartCash(cart, items) !== null ? " or " + money(cartCash(cart, items)) : "") + "</b></div>" +
+    '<button type="button" class="btn btn-primary cn-buy" data-cn-buy="tag"' + (busy ? " disabled" : "") + ">" + escapeHtml(buyLabel) + "</button>" +
+    '<div class="cn-other"><span class="help-text">Or pay into the canteen box:</span>' +
+    (cartCash(cart, items) !== null ? '<button type="button" class="btn btn-ghost btn-sm" data-cn-buy="cash"' + (busy ? " disabled" : "") + ">💵 Cash " + money(cartCash(cart, items)) + "</button>" : "") +
+    '<button type="button" class="btn btn-ghost btn-sm" data-cn-buy="coins"' + (busy ? " disabled" : "") + ">🪙 " + num2(cartTotal(cart, items)) + " physical TAG coin" + (cartTotal(cart, items) === 1 ? "" : "s") + "</button></div>" +
+    '<button type="button" class="btn btn-ghost btn-sm cn-clear" data-cn-clear="1">Empty cart</button></div>';
+}
+// Taps on tiles and +/− in a cart. `after` re-draws.
+function wireCart(root, cart, items, after, say) {
+  root.querySelectorAll("[data-cn-add], [data-cn-inc]").forEach((b) => b.addEventListener("click", () => {
+    const r = cartAdd(cart, items.find((x) => x.id === (b.getAttribute("data-cn-add") || b.getAttribute("data-cn-inc"))));
+    if (r.warn) say(r.msg, true);
+    after();
+  }));
+  root.querySelectorAll("[data-cn-dec]").forEach((b) => b.addEventListener("click", () => {
+    const id = b.getAttribute("data-cn-dec"), q = (cart.get(id) || 0) - 1;
+    if (q > 0) cart.set(id, q); else cart.delete(id);
+    after();
+  }));
+  root.querySelectorAll("[data-cn-clear]").forEach((b) => b.addEventListener("click", () => { cart.clear(); after(); }));
+}
+
+/* ---------- the camera scanner (QR labels and package barcodes) ---------- */
+let scanCleanup = null;
+function loadScriptOnce(src) {
+  if (document.querySelector('script[src="' + src + '"]')) return Promise.resolve();
+  return new Promise((resolve, reject) => { const el = document.createElement("script"); el.src = src; el.onload = resolve; el.onerror = () => { el.remove(); reject(new Error("load")); }; document.head.appendChild(el); });
+}
+function closeScanner() {
+  if (scanCleanup) { const f = scanCleanup; scanCleanup = null; try { f(); } catch (e) {} }
+  const b = document.getElementById("scan-backdrop");
+  if (b) b.remove();
+}
+async function openScanner(onCode, title) {
+  closeScanner();
+  const wrap = document.createElement("div");
+  wrap.className = "modal-backdrop"; wrap.id = "scan-backdrop";
+  wrap.innerHTML = '<div class="modal scan-modal"><h2>' + escapeHtml(title || "Scan") + '</h2><p class="sub">Point the camera at the QR label or the barcode.</p>' +
+    '<div class="scan-view"><video id="scan-video" playsinline muted autoplay></video><div class="scan-frame"></div></div>' +
+    '<p class="help-text" id="scan-msg">Starting the camera…</p><button type="button" class="btn btn-ghost" id="scan-cancel" style="width:100%;margin-top:10px;">Cancel</button></div>';
+  document.body.appendChild(wrap);
+  document.getElementById("scan-cancel").addEventListener("click", closeScanner);
+  const video = document.getElementById("scan-video");
+  const msg = (t) => { const el = document.getElementById("scan-msg"); if (el) el.textContent = t; };
+  let done = false;
+  const found = (text) => {
+    if (done || !text) return;
+    done = true;
+    try { if (navigator.vibrate) navigator.vibrate(60); } catch (e) {}
+    closeScanner();
+    onCode(String(text));
+  };
+  const cameraError = (e) => msg(e && e.name === "NotAllowedError" ? "The camera is blocked. Allow the camera for this site (in the browser’s settings), then try again." : "Couldn’t start the camera on this device.");
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { msg("This browser can’t use the camera here."); return; }
+  try {
+    if ("BarcodeDetector" in window) {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+      if (!document.getElementById("scan-backdrop")) { stream.getTracks().forEach((t) => t.stop()); return; }
+      video.srcObject = stream; await video.play().catch(() => {});
+      const det = new window.BarcodeDetector();
+      let timer = null;
+      scanCleanup = () => { clearInterval(timer); stream.getTracks().forEach((t) => t.stop()); };
+      msg("Looking for a code…");
+      timer = setInterval(async () => {
+        if (done || video.readyState < 2) return;
+        try { const codes = await det.detect(video); if (codes && codes.length) found(codes[0].rawValue); } catch (e) {}
+      }, 250);
+      return;
+    }
+    await loadScriptOnce(ZXING_URL);
+    if (!document.getElementById("scan-backdrop")) return;
+    const reader = new window.ZXing.BrowserMultiFormatReader();
+    scanCleanup = () => { try { reader.reset(); } catch (e) {} };
+    msg("Looking for a code…");
+    await reader.decodeFromConstraints({ video: { facingMode: "environment" }, audio: false }, video, (res) => { if (res) found(res.getText()); });
+  } catch (e) {
+    if (e && e.message === "load") msg("Couldn’t load the scanner — check the internet connection.");
+    else cameraError(e);
+  }
+}
+
+/* ---------- the Canteen tab ---------- */
+const canteenCart = new Map(); // a student's cart on their own phone: item id -> how many
+let canteenBusy = false;
+let cnAdminShop = false; // an admin buying for themselves instead of managing
+function myCanteenCoins(session) { return session.type === "student" ? studentStats(session.record.id).balance : staffStats(session.record.id).balance; }
+function renderCanteen(root, session) {
+  // A QR label scanned by an admin opens their own shop, not the setup page.
+  if (isAdmin(session) && canteenPendingId()) cnAdminShop = true;
+  if (isAdmin(session) && !cnAdminShop) renderCanteenAdmin(root, session);
+  else renderCanteenShop(root, session);
+}
+function renderCanteenShop(root, session) {
+  const items = canteenItems().filter((x) => x.active !== false);
+  const pending = canteenPendingId();
+  if (pending) {
+    try { sessionStorage.removeItem(CANTEEN_PENDING_KEY); } catch (e) {}
+    const r = cartAdd(canteenCart, items.find((x) => x.id === pending));
+    setTimeout(() => toast(r.msg, r.warn ? "warn" : "good"), 0);
+  }
+  canteenCart.forEach((q, id) => { if (!items.some((x) => x.id === id)) canteenCart.delete(id); });
+  const bal = myCanteenCoins(session);
+  let html = (isAdmin(session) ? '<button type="button" class="btn btn-ghost btn-sm" id="cn-back-manage" style="margin-bottom:12px;">← Back to managing the canteen</button>' : "") +
+    '<div class="page-head"><div style="display:flex;gap:14px;align-items:center;">' + coinBadge("lg") +
+    '<div><span class="eyebrow">You have ' + num2(bal) + ' TAG coins</span><h1>Canteen</h1><p>Scan an item’s label or barcode, or tap it below — then buy it with your TAG coins.</p></div></div></div>';
+  html += '<button type="button" class="btn btn-primary cn-scan-btn" id="cn-scan">📷 Scan an item</button>';
+  html += canteenCartHtml(items, canteenCart, canteenBusy ? "Buying…" : "Pay " + num2(cartTotal(canteenCart, items)) + " from my TAG coins", canteenBusy);
+  html += '<div class="card card-pad" style="margin-top:16px;"><div class="section-title">For sale</div>' + canteenGridHtml(items, canteenCart) + "</div>";
+  const mine = canteenSales().filter((x) => session.type === "student" ? x.studentId === session.record.id : x.staffId === session.record.id).slice(0, 10);
+  if (mine.length) {
+    html += '<div class="card card-pad" style="margin-top:16px;"><div class="section-title">What you bought</div>' + mine.map((x) =>
+      '<div class="cn-sale"><span>' + escapeHtml(fmtDateShort(x.date)) + "</span><span>" + escapeHtml(x.what) + "</span><b>" + (x.refunded ? "Refunded" : escapeHtml(x.paid)) + "</b></div>").join("") + "</div>";
+  }
+  root.innerHTML = html;
+  const say = (m, warn) => toast(m, warn ? "warn" : "good");
+  wireCart(root, canteenCart, items, () => renderAll(), say);
+  const back = document.getElementById("cn-back-manage");
+  if (back) back.addEventListener("click", () => { cnAdminShop = false; renderAll(); });
+  document.getElementById("cn-scan").addEventListener("click", () => openScanner((code) => {
+    const r = cartAdd(canteenCart, canteenFind(code, items));
+    say(r.msg, r.warn); renderAll();
+  }, "Scan an item"));
+  root.querySelectorAll("[data-cn-buy]").forEach((buy) => buy.addEventListener("click", async () => {
+    if (canteenBusy) return;
+    const method = buy.getAttribute("data-cn-buy");
+    const total = cartTotal(canteenCart, items), n = cartCount(canteenCart), what = n + " item" + (n === 1 ? "" : "s");
+    if (method === "tag") {
+      if (total > myCanteenCoins(session) + 1e-9) { say("That’s " + num2(total) + " TAG coins, and you have " + num2(myCanteenCoins(session)) + ".", true); return; }
+      if (!window.confirm("Buy " + what + " for " + num2(total) + " TAG coins from your balance?")) return;
+    } else if (!window.confirm("Put " + (method === "cash" ? money(cartCash(canteenCart, items)) + " cash" : num2(total) + " physical TAG coin" + (total === 1 ? "" : "s")) + " in the canteen box for " + what + ". Your balance doesn’t change.\n\nDone?")) return;
+    canteenBusy = true; renderAll();
+    const r = await callApi("me", { action: "buy", method, cart: cartList(canteenCart), date: todayISO() });
+    canteenBusy = false;
+    if (!r.ok) { say(r.error, true); renderAll(); return; }
+    canteenCart.clear();
+    say(method === "tag" ? "Bought! You have " + num2(r.balance) + " TAG coins left." : "Thanks — enjoy!");
+    renderAll();
+  }));
+}
+
+// Every canteen sale, newest first, in one shape: from balances (ledger) and into the box (canteen.sales).
+function canteenSales() {
+  const fromCoins = (tx, staff) => ({ kind: "tag", staff, id: tx.id, at: tx.enteredAt || 0, date: tx.date, studentId: tx.studentId || null, staffId: tx.staffId || null, via: tx.via, refunded: tx.refunded,
+    what: String(tx.note || "").replace(/^Canteen: /, ""), amount: Number(tx.amount) || 0, paid: tx.refunded ? "" : num2(tx.amount) + " TAG coins" });
+  const a = (state.ledger || []).filter((tx) => tx.canteen).map((tx) => fromCoins(tx, false))
+    .concat((state.staffLedger || []).filter((tx) => tx.canteen).map((tx) => fromCoins(tx, true)));
+  const b = (((state.canteen || {}).sales) || []).map((x) => ({ kind: x.method, id: x.id, at: x.at || 0, date: x.date, studentId: x.studentId || null, staffId: x.staffId || null, via: x.via, refunded: x.refunded,
+    what: x.note || "", amount: Number(x.total) || 0, paid: x.method === "cash" ? money(x.total) + " cash" : num2(x.total) + " physical coin" + (Number(x.total) === 1 ? "" : "s") }));
+  return a.concat(b).sort((x, y) => y.at - x.at);
+}
+/* ---------- admin: items, stock, labels, the tablet, sales ---------- */
+let cnEdit = null;   // null | "new" | an item id: the item form that's open
+let cnDraft = null;  // what's typed into that form so far (kept across re-draws)
+let cnRestock = null; // item id whose "add stock" row is open
+let cnTabletLink = null;
+function cnDraftFor(id) {
+  if (id === "new") return { name: "", emoji: "", price: "", cashPrice: "", stock: "", lowAt: "3", barcode: "" };
+  const it = canteenItems().find((x) => x.id === id) || {};
+  return { name: it.name || "", emoji: it.emoji || "", price: it.price != null ? String(it.price) : "", cashPrice: typeof it.cashPrice === "number" ? String(it.cashPrice) : "", stock: typeof it.stock === "number" ? String(it.stock) : "", lowAt: it.lowAt != null ? String(it.lowAt) : "3", barcode: it.barcode || "" };
+}
+function cnFormHtml() {
+  const d = cnDraft, f = (k, label, attrs, help) => '<div class="field"><label for="cn-f-' + k + '">' + label + '</label><input id="cn-f-' + k + '" data-cn-field="' + k + '" value="' + escapeHtml(d[k]) + '" ' + attrs + ">" + (help ? '<p class="help-text">' + help + "</p>" : "") + "</div>";
+  return '<div class="cn-form"><div class="section-title">' + (cnEdit === "new" ? "New item" : "Edit item") + "</div>" +
+    '<div class="field-row">' + f("name", "Name", 'type="text" maxlength="60" placeholder="e.g. Doritos"') + f("emoji", "Picture (an emoji, optional)", 'type="text" maxlength="8" placeholder="🍫"') + "</div>" +
+    '<div class="field-row">' + f("price", "Price in TAG coins", 'type="number" min="0" step="any" inputmode="decimal"', "Paid from their balance, or with physical TAG coins.") +
+    f("cashPrice", "Price in cash ($)", 'type="number" min="0" step="0.01" inputmode="decimal" placeholder="Leave empty if not sold for cash"') + "</div>" +
+    '<div class="field-row">' +
+    f("stock", "How many in stock", 'type="number" min="0" step="1" inputmode="numeric" placeholder="Leave empty to not count"') +
+    f("lowAt", "Remind me to restock at", 'type="number" min="0" step="1" inputmode="numeric"') + "</div>" +
+    '<div class="field"><label for="cn-f-barcode">Barcode on the package (optional)</label><div class="pool-row"><input id="cn-f-barcode" data-cn-field="barcode" type="text" inputmode="numeric" maxlength="40" value="' + escapeHtml(d.barcode) + '" placeholder="Scan it or type the numbers" style="flex:1;min-width:150px;">' +
+    '<button type="button" class="btn btn-ghost btn-sm" id="cn-f-scan">📷 Scan</button></div><p class="help-text">Then students can scan the package itself. Every item can also have a printed QR label.</p></div>' +
+    '<div class="pool-row"><button type="button" class="btn btn-primary btn-sm" id="cn-save">' + (cnEdit === "new" ? "Add item" : "Save") + '</button><button type="button" class="btn btn-ghost btn-sm" id="cn-cancel">Cancel</button>' +
+    (cnEdit !== "new" ? '<button type="button" class="btn btn-danger btn-sm" id="cn-delete" style="margin-left:auto;">Delete item</button>' : "") + "</div></div>";
+}
+function renderCanteenAdmin(root, session) {
+  const items = canteenItems();
+  const sales = canteenSales();
+  const today = sales.filter((x) => x.date === todayISO() && !x.refunded);
+  const sum = (k) => today.filter((x) => x.kind === k).reduce((t, x) => t + x.amount, 0);
+  const low = items.filter((it) => it.active !== false && typeof it.stock === "number" && it.stock <= (it.lowAt != null ? Number(it.lowAt) : 3));
+  let html = '<div class="page-head"><div><span class="eyebrow">Snacks for TAG coins</span><h1>Canteen</h1>' +
+    '<p>Students scan an item (its QR label or the barcode on the package) on their phone or on the canteen tablet, and pay from their TAG coins — or put cash or physical TAG coins in the canteen box.</p></div></div>';
+  html += '<div class="card card-pad"><div class="section-title">Today</div><div class="cn-today"><div><b>' + today.length + "</b><span>sale" + (today.length === 1 ? "" : "s") + "</span></div>" +
+    "<div><b>" + num2(sum("tag")) + "</b><span>TAG coins from balances</span></div><div><b>" + money(sum("cash")) + "</b><span>cash in the box</span></div><div><b>" + num2(sum("coins")) + "</b><span>physical TAG coins in the box</span></div></div></div>";
+  if (low.length) html += '<div class="card card-pad cn-low"><div class="section-title">Time to restock</div>' + low.map((it) => '<span class="pool-chip">' + escapeHtml((it.emoji ? it.emoji + " " : "") + it.name) + " <b>" + (it.stock <= 0 ? "sold out" : it.stock + " left") + "</b></span>").join(" ") + "</div>";
+
+  html += '<div class="card card-pad" style="margin-top:16px;"><div class="section-title">Items</div>';
+  html += cnEdit === "new" ? cnFormHtml() : '<div class="pool-row" style="margin-bottom:12px;"><button type="button" class="btn btn-primary btn-sm" id="cn-new">+ Add item</button>' +
+    '<button type="button" class="btn btn-ghost btn-sm" id="cn-shop">🛒 Buy something myself</button>' +
+    (items.some((x) => x.active !== false) ? '<button type="button" class="btn btn-ghost btn-sm" data-cn-labels="all">🖨 Print QR labels</button>' : "") + "</div>";
+  if (!items.length && cnEdit !== "new") html += '<p class="help-text">No items yet — add the first one.</p>';
+  html += '<div class="cn-items">' + items.map((it) => {
+    if (cnEdit === it.id) return cnFormHtml();
+    const hidden = it.active === false;
+    return '<div class="cn-item' + (hidden ? " is-hidden" : "") + '"><div class="cn-item-main"><span class="cn-emoji">' + escapeHtml(it.emoji || "🛒") + "</span><div><b>" + escapeHtml(it.name) + "</b>" +
+      '<div class="cn-item-meta">' + num2(it.price) + " coins · " + (typeof it.stock === "number" ? (it.stock <= 0 ? '<span style="color:var(--warn);font-weight:700;">Sold out</span>' : it.stock + " in stock") : "Stock not counted") +
+      (it.barcode ? " · barcode ✓" : "") + (hidden ? " · <b>hidden from students</b>" : "") + "</div></div></div>" +
+      (cnRestock === it.id
+        ? '<div class="pool-row"><input type="number" min="1" step="1" inputmode="numeric" id="cn-restock-n" placeholder="How many more?" style="width:150px;"><button type="button" class="btn btn-primary btn-sm" data-cn-restock-add="' + it.id + '">Add to stock</button><button type="button" class="btn btn-ghost btn-sm" data-cn-restock="">Cancel</button></div>'
+        : '<div class="pool-row"><button type="button" class="btn btn-ghost btn-sm" data-cn-edit="' + it.id + '">Edit</button>' +
+          '<button type="button" class="btn btn-ghost btn-sm" data-cn-restock="' + it.id + '">+ Stock</button>' +
+          '<button type="button" class="btn btn-ghost btn-sm" data-cn-labels="' + it.id + '">🖨 Label</button>' +
+          '<button type="button" class="btn btn-ghost btn-sm" data-cn-hide="' + it.id + '">' + (hidden ? "Show to students" : "Hide") + "</button></div>") + "</div>";
+  }).join("") + "</div></div>";
+
+  html += '<div class="card card-pad" style="margin-top:16px;"><div class="section-title">Canteen tablet</div>' +
+    '<p class="help-text" style="margin-top:-6px;">A tablet left at the canteen: students (and staff) scan or tap what they’re buying, then type their own username and password to pay from their own TAG coins. Open this link once on the tablet (it remembers it). A USB barcode scanner plugged into the tablet works too.</p>' +
+    (cnTabletLink ? '<div class="pool-row"><input type="text" readonly id="cn-tablet-link" value="' + escapeHtml(cnTabletLink) + '" style="flex:1;min-width:200px;"><button type="button" class="btn btn-ghost btn-sm" id="cn-tablet-copy">Copy</button></div><p class="help-text">Treat this link like a password — anyone with it can open the canteen screen. Making a new one disconnects the old tablet.</p>'
+      : '<button type="button" class="btn btn-ghost btn-sm" id="cn-tablet-make">Make a tablet link</button>') + "</div>";
+
+  html += '<div class="card card-pad" style="margin-top:16px;"><div class="section-title">Recent sales</div>' +
+    (sales.length ? sales.slice(0, 40).map((x) => {
+      const st = x.studentId ? studentById(x.studentId) : null, sf = x.staffId ? staffById(x.staffId) : null;
+      const who = x.studentId ? (st ? st.first + " " + st.last : "(removed)") : x.staffId ? (sf ? sf.name : "(removed)") + " (staff)" : "Someone";
+      return '<div class="cn-sale"><span>' + escapeHtml(fmtDateShort(x.date)) + "</span><span><b>" + escapeHtml(who) + "</b> " + escapeHtml(x.what) + (x.via === "tablet" ? ' <span class="help-text">· tablet</span>' : "") + "</span>" +
+        (x.refunded ? '<b class="help-text">' + (x.kind === "tag" ? "Refunded" : "Undone") + "</b>"
+          : "<b>" + escapeHtml(x.paid) + '</b><button type="button" class="btn btn-ghost btn-sm" data-cn-refund="' + x.id + '">' + (x.kind === "tag" ? "Refund" : "Undo") + "</button>") + "</div>";
+    }).join("") : '<p class="help-text">No sales yet.</p>') + "</div>";
+  root.innerHTML = html;
+  wireCanteenAdmin(root, session);
+}
+function wireCanteenAdmin(root, session) {
+  const $ = (id) => document.getElementById(id);
+  const on = (sel, fn) => root.querySelectorAll(sel).forEach((b) => b.addEventListener("click", () => fn(b)));
+  if ($("cn-new")) $("cn-new").addEventListener("click", () => { cnEdit = "new"; cnDraft = cnDraftFor("new"); renderAll(); });
+  if ($("cn-shop")) $("cn-shop").addEventListener("click", () => { cnAdminShop = true; renderAll(); });
+  on("[data-cn-edit]", (b) => { cnEdit = b.getAttribute("data-cn-edit"); cnDraft = cnDraftFor(cnEdit); renderAll(); });
+  root.querySelectorAll("[data-cn-field]").forEach((el) => el.addEventListener("input", () => { if (cnDraft) cnDraft[el.getAttribute("data-cn-field")] = el.value; }));
+  if ($("cn-cancel")) $("cn-cancel").addEventListener("click", () => { cnEdit = null; cnDraft = null; renderAll(); });
+  if ($("cn-f-scan")) $("cn-f-scan").addEventListener("click", () => openScanner((code) => {
+    if (/[#?&]buy=/.test(code)) { toast("That’s a QR label — scan the barcode on the package instead.", "warn"); return; }
+    cnDraft.barcode = code.trim();
+    const other = canteenFind(code, canteenItems().filter((x) => x.id !== cnEdit));
+    toast(other ? "Got it — but " + other.name + " already has this barcode." : "Barcode scanned.", other ? "warn" : "good");
+    renderAll();
+  }, "Scan the barcode"));
+  if ($("cn-save")) $("cn-save").addEventListener("click", async () => {
+    const d = cnDraft, name = d.name.trim(), price = Math.round(Number(d.price) * 100) / 100;
+    if (!name) { toast("Give the item a name.", "warn"); return; }
+    if (d.price === "" || !(price >= 0)) { toast("Enter the price in TAG coins.", "warn"); return; }
+    const stock = d.stock.trim() === "" ? null : Math.max(0, Math.floor(Number(d.stock)));
+    if (stock !== null && isNaN(stock)) { toast("Stock should be a number (or empty).", "warn"); return; }
+    const lowAt = Math.max(0, Math.floor(Number(d.lowAt) || 0));
+    const cashPrice = String(d.cashPrice).trim() === "" ? null : Math.round(Number(d.cashPrice) * 100) / 100;
+    if (cashPrice !== null && !(cashPrice >= 0)) { toast("The cash price should be a number (or empty).", "warn"); return; }
+    const barcode = d.barcode.trim();
+    const clash = barcode && canteenFind(barcode, canteenItems().filter((x) => x.id !== cnEdit));
+    if (clash && !window.confirm(clash.name + " already has this barcode. Use it for both anyway?")) return;
+    const id = cnEdit === "new" ? uid("ci") : cnEdit;
+    const fields = { name, emoji: d.emoji.trim(), price, cashPrice, stock, lowAt, barcode };
+    const res = await saveEdit((ns) => {
+      ns.canteen = ns.canteen || {}; ns.canteen.items = ns.canteen.items || [];
+      const it = ns.canteen.items.find((x) => x.id === id);
+      if (it) Object.assign(it, fields);
+      else ns.canteen.items.push(Object.assign({ id, active: true, createdAt: todayISO() }, fields));
+      return ns;
+    });
+    if (res.ok || res.local) { toast((cnEdit === "new" ? "Added " : "Saved ") + name + ".", "good"); cnEdit = null; cnDraft = null; renderAll(); }
+  });
+  if ($("cn-delete")) $("cn-delete").addEventListener("click", async () => {
+    const id = cnEdit, it = canteenItems().find((x) => x.id === id);
+    if (!it || !window.confirm("Delete " + it.name + "? Past sales stay in everyone’s history. (To stop selling it for now, use Hide instead.)")) return;
+    const res = await saveEdit((ns) => { ns.canteen.items = (ns.canteen.items || []).filter((x) => x.id !== id); return ns; });
+    if (res.ok || res.local) { cnEdit = null; cnDraft = null; toast("Deleted.", "good"); renderAll(); }
+  });
+  on("[data-cn-restock]", (b) => { cnRestock = b.getAttribute("data-cn-restock") || null; renderAll(); setTimeout(() => { const n = $("cn-restock-n"); if (n) n.focus(); }, 0); });
+  on("[data-cn-restock-add]", async (b) => {
+    const id = b.getAttribute("data-cn-restock-add"), n = Math.floor(Number(($("cn-restock-n") || {}).value));
+    if (!(n > 0)) { toast("How many are you adding?", "warn"); return; }
+    const res = await saveEdit((ns) => { const it = ((ns.canteen || {}).items || []).find((x) => x.id === id); if (it) it.stock = (typeof it.stock === "number" ? Math.max(0, it.stock) : 0) + n; return ns; });
+    if (res.ok || res.local) { cnRestock = null; toast("Added " + n + " to the stock.", "good"); renderAll(); }
+  });
+  on("[data-cn-hide]", async (b) => {
+    const id = b.getAttribute("data-cn-hide");
+    await saveEdit((ns) => { const it = ((ns.canteen || {}).items || []).find((x) => x.id === id); if (it) it.active = it.active === false; return ns; });
+    renderAll();
+  });
+  on("[data-cn-labels]", (b) => { const w = b.getAttribute("data-cn-labels"); printCanteenLabels(canteenItems().filter((x) => x.active !== false && (w === "all" || x.id === w))); });
+  on("[data-cn-refund]", async (b) => {
+    const id = b.getAttribute("data-cn-refund"), x = canteenSales().find((s) => s.id === id);
+    if (!x) return;
+    const st = x.studentId ? studentById(x.studentId) : null, sf = x.staffId ? staffById(x.staffId) : null;
+    const q = x.kind === "tag" ? "Refund " + num2(x.amount) + " TAG coins to " + (st ? st.first + " " + st.last : sf ? sf.name : "them") + " for " + x.what + "?"
+      : "Undo this sale (" + x.what + ", " + x.paid + ")? Give the " + (x.kind === "cash" ? "cash" : "coins") + " back from the box yourself.";
+    if (!window.confirm(q + " Counted stock goes back up.")) return;
+    const res = await saveEdit((ns) => {
+      const t = x.kind === "tag" ? ((x.staff ? ns.staffLedger : ns.ledger) || []).find((y) => y.id === id) : (((ns.canteen || {}).sales) || []).find((y) => y.id === id);
+      if (!t || t.refunded) return ns;
+      t.refunded = { amount: Number(x.kind === "tag" ? t.amount : t.total) || 0, by: session.record.name, at: Date.now() };
+      if (x.kind === "tag") t.amount = 0;
+      (t.items || []).forEach((l) => { const it = ((ns.canteen || {}).items || []).find((y) => y.id === l.id); if (it && typeof it.stock === "number") it.stock += l.qty; });
+      return ns;
+    });
+    if (res.ok || res.local) { toast(x.kind === "tag" ? "Refunded." : "Undone.", "good"); renderAll(); }
+  });
+  if ($("cn-tablet-make")) $("cn-tablet-make").addEventListener("click", async () => {
+    if (!window.confirm("Make a new canteen tablet link? A tablet using an older link will need the new one.")) return;
+    const r = await callApi("admin", { action: "canteenKey" });
+    if (!r.ok) { toast(r.error, "warn"); return; }
+    cnTabletLink = location.origin + location.pathname + "?canteen=1&key=" + encodeURIComponent(r.key);
+    renderAll();
+  });
+  if ($("cn-tablet-copy")) $("cn-tablet-copy").addEventListener("click", () => {
+    const inp = $("cn-tablet-link"); inp.select();
+    try { navigator.clipboard.writeText(inp.value).then(() => toast("Link copied.", "good")); } catch (e) { document.execCommand("copy"); }
+  });
+}
+// A printable sheet of QR labels: point a phone's camera at one and the app opens on that item.
+function printCanteenLabels(items) {
+  if (!items.length) { toast("No items to print.", "warn"); return; }
+  const w = window.open("", "_blank");
+  if (!w) { toast("Allow pop-ups to print the labels.", "warn"); return; }
+  const data = items.map((it) => ({ name: it.name, emoji: it.emoji || "", price: num2(it.price), link: canteenLink(it.id) }));
+  w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Canteen labels</title><style>' +
+    "body{font-family:Arial,sans-serif;margin:16px;color:#111}.bar{margin-bottom:14px}.grid{display:flex;flex-wrap:wrap;gap:10px}" +
+    ".lab{width:2.4in;border:1px dashed #999;border-radius:8px;padding:10px;text-align:center;break-inside:avoid;page-break-inside:avoid}" +
+    ".lab .q svg{width:1.5in;height:1.5in}.lab .n{font-weight:700;font-size:15px;margin-top:4px}.lab .p{font-size:13px}.lab .h{font-size:10px;color:#555;margin-top:3px}" +
+    "@media print{.bar{display:none}body{margin:0}}</style></head><body><div class=\"bar\"><button onclick=\"print()\">Print</button> Cut along the dashed lines and stick each one by its item.</div><div class=\"grid\" id=\"g\">Loading…</div>" +
+    "<script>var D=" + JSON.stringify(data).replace(/</g, "\\u003c") + ";function esc(s){return String(s).replace(/[&<>\"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]})}" +
+    "function go(){document.getElementById('g').innerHTML=D.map(function(d){var q=qrcode(0,'M');q.addData(d.link);q.make();return '<div class=\"lab\"><div class=\"q\">'+q.createSvgTag({cellSize:4,margin:2})+'</div><div class=\"n\">'+esc(d.emoji+' '+d.name)+'</div><div class=\"p\">'+esc(d.price)+' TAG coins</div><div class=\"h\">Scan with your phone camera to buy</div></div>'}).join('')}" +
+    "</scr" + "ipt><script src=\"" + QRGEN_URL + "\" onload=\"go()\" onerror=\"document.getElementById('g').textContent='Couldn\\u2019t load the QR maker — check the internet connection.'\"></scr" + "ipt></body></html>");
+  w.document.close();
+}
+
+/* ---------- the canteen tablet (?canteen=1&key=...) ---------- */
+// Entered with ?canteen=1 (and remembered on that device, like TV mode); ?canteen=0 leaves it.
+const CANTEEN_MODE = (function detectCanteenMode() {
+  if (TV_MODE) return false;
+  let on = false, off = false;
+  try { const q = new URLSearchParams(location.search).get("canteen"); if (q === "1") on = true; if (q === "0") off = true; } catch (e) {}
+  try {
+    if (off) { localStorage.removeItem(CANTEEN_FLAG_KEY); return false; }
+    if (on) { localStorage.setItem(CANTEEN_FLAG_KEY, "1"); return true; }
+    return localStorage.getItem(CANTEEN_FLAG_KEY) === "1";
+  } catch (e) { return on; }
+})();
+if (CANTEEN_MODE) document.documentElement.classList.add("kiosk-mode");
+const KIOSK = { key: null, items: [], cart: new Map(), stage: "shop", msg: null, result: null, offline: false, lastAct: Date.now(), busy: false };
+function kioskApi(payload) { return callApi("canteen", Object.assign({ key: KIOSK.key }, payload)); }
+async function kioskLoadItems() {
+  const r = await kioskApi({ action: "items" });
+  if (r.ok) { KIOSK.items = r.items; KIOSK.offline = false; KIOSK.cart.forEach((q, id) => { if (!r.items.some((x) => x.id === id)) KIOSK.cart.delete(id); }); }
+  else if (/isn’t connected/.test(r.error || "")) { try { localStorage.removeItem(CANTEEN_KEY_KEY); } catch (e) {} KIOSK.key = null; }
+  else KIOSK.offline = true;
+  return r;
+}
+function kioskSay(msg, warn) { KIOSK.msg = { msg, warn: !!warn, at: Date.now() }; kioskRender(); setTimeout(() => { if (KIOSK.msg && Date.now() - KIOSK.msg.at >= 2900) { KIOSK.msg = null; kioskRender(); } }, 3000); }
+function kioskReset() { KIOSK.cart.clear(); KIOSK.stage = "shop"; KIOSK.result = null; KIOSK.msg = null; closeScanner(); kioskRender(); }
+function kioskScanned(code) {
+  KIOSK.lastAct = Date.now();
+  if (KIOSK.stage !== "shop") return;
+  const r = cartAdd(KIOSK.cart, canteenFind(code, KIOSK.items));
+  kioskSay(r.msg, r.warn);
+}
+function kioskRender() {
+  const root = document.getElementById("kiosk-root");
+  if (!root) return;
+  if (!KIOSK.key) {
+    root.innerHTML = '<div class="kiosk"><div class="kiosk-center"><h1>TAG Canteen</h1><p>This tablet isn’t connected yet.</p><p class="help-text">On a phone: Canteen › Canteen tablet › Make a tablet link, then open that link on this tablet.</p></div></div>';
+    return;
+  }
+  const items = KIOSK.items, total = cartTotal(KIOSK.cart, items);
+  let html = '<div class="kiosk"><div class="kiosk-top"><div class="kiosk-title">TAG Canteen</div><button type="button" class="btn btn-primary" id="k-scan">📷 Scan</button></div>';
+  if (KIOSK.offline) html += '<div class="kiosk-banner">Can’t reach the server — check the Wi-Fi.</div>';
+  if (KIOSK.msg) html += '<div class="kiosk-toast' + (KIOSK.msg.warn ? " warn" : "") + '">' + escapeHtml(KIOSK.msg.msg) + "</div>";
+  html += '<div class="kiosk-body"><div class="kiosk-items">' + canteenGridHtml(items, KIOSK.cart) + "</div>" +
+    '<div class="kiosk-side">' + (KIOSK.cart.size ? canteenCartHtml(items, KIOSK.cart, "Pay " + num2(total) + " from my TAG coins", KIOSK.busy) : '<div class="cn-cart kiosk-empty">Scan an item, or tap it, to start.</div>') + "</div></div>";
+  if (KIOSK.stage === "pay") {
+    html += '<div class="modal-backdrop"><div class="modal"><h2>Pay ' + num2(total) + ' TAG coins</h2><p class="sub">Type your own username and password.</p>' +
+      '<form id="k-pay-form" autocomplete="off"><div class="field"><label for="k-user">Username</label><input id="k-user" type="text" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="off"></div>' +
+      '<div class="field"><label for="k-pass">Password</label><input id="k-pass" type="password" autocomplete="off"></div>' +
+      (KIOSK.payError ? '<p class="login-error" style="color:var(--warn);font-weight:600;">' + escapeHtml(KIOSK.payError) + "</p>" : "") +
+      '<div class="pool-row"><button type="submit" class="btn btn-primary"' + (KIOSK.busy ? " disabled" : "") + ">" + (KIOSK.busy ? "Paying…" : "Pay") + '</button><button type="button" class="btn btn-ghost" id="k-pay-cancel">Back</button></div></form></div></div>';
+  }
+  if (KIOSK.stage === "box") {
+    const cash = KIOSK.method === "cash", amt = cash ? money(cartCash(KIOSK.cart, items)) : num2(total) + " physical TAG coin" + (total === 1 ? "" : "s");
+    html += '<div class="modal-backdrop"><div class="modal kiosk-done"><div class="kiosk-check kiosk-box">' + (cash ? "💵" : "🪙") + "</div><h2>Put " + escapeHtml(amt) + " in the canteen box</h2>" +
+      '<p class="sub">Then tap “I paid”.</p>' + (KIOSK.payError ? '<p class="login-error" style="color:var(--warn);font-weight:600;">' + escapeHtml(KIOSK.payError) + "</p>" : "") +
+      '<div class="pool-row" style="justify-content:center;"><button type="button" class="btn btn-primary" id="k-box-paid"' + (KIOSK.busy ? " disabled" : "") + ">" + (KIOSK.busy ? "Saving…" : "I paid") + '</button><button type="button" class="btn btn-ghost" id="k-pay-cancel">Back</button></div></div></div>';
+  }
+  if (KIOSK.stage === "done" && KIOSK.result) {
+    html += '<div class="modal-backdrop"><div class="modal kiosk-done"><div class="kiosk-check">✓</div><h2>Thanks' + (KIOSK.result.first ? ", " + escapeHtml(KIOSK.result.first) : "") + "!</h2>" +
+      (KIOSK.result.first ? "<p>Paid <b>" + num2(KIOSK.result.total) + "</b> TAG coins. You have <b>" + num2(KIOSK.result.balance) + "</b> left.</p>" : "<p>Enjoy!</p>") +
+      '<button type="button" class="btn btn-primary" id="k-done" style="width:100%;">Done</button></div></div>';
+  }
+  html += '<button type="button" class="kiosk-exit" id="k-exit">Exit canteen mode</button></div>';
+  // Keep what's typed in the pay form across a re-draw.
+  const u = document.getElementById("k-user"), p = document.getElementById("k-pass");
+  const keep = u ? { u: u.value, p: p.value, focus: document.activeElement && document.activeElement.id } : null;
+  root.innerHTML = html;
+  if (keep && document.getElementById("k-user")) { document.getElementById("k-user").value = keep.u; document.getElementById("k-pass").value = keep.p; if (keep.focus && document.getElementById(keep.focus)) document.getElementById(keep.focus).focus(); }
+  wireCart(root, KIOSK.cart, items, () => { KIOSK.lastAct = Date.now(); kioskRender(); }, kioskSay);
+  document.getElementById("k-scan").addEventListener("click", () => openScanner(kioskScanned, "Scan an item"));
+  root.querySelectorAll("[data-cn-buy]").forEach((buy) => buy.addEventListener("click", () => {
+    KIOSK.method = buy.getAttribute("data-cn-buy"); KIOSK.payError = null; KIOSK.lastAct = Date.now();
+    KIOSK.stage = KIOSK.method === "tag" ? "pay" : "box";
+    kioskRender();
+    if (KIOSK.stage === "pay") setTimeout(() => { const el = document.getElementById("k-user"); if (el) el.focus(); }, 0);
+  }));
+  const boxPaid = document.getElementById("k-box-paid");
+  if (boxPaid) boxPaid.addEventListener("click", async () => {
+    if (KIOSK.busy) return;
+    KIOSK.busy = true; KIOSK.payError = null; kioskRender();
+    const r = await kioskApi({ action: "payOther", method: KIOSK.method, cart: cartList(KIOSK.cart), date: todayISO() });
+    KIOSK.busy = false;
+    if (!r.ok) { KIOSK.payError = r.error; kioskRender(); return; }
+    KIOSK.cart.clear(); KIOSK.stage = "done"; KIOSK.result = r; KIOSK.lastAct = Date.now();
+    kioskRender();
+    kioskLoadItems().then(() => kioskRender());
+    setTimeout(() => { if (KIOSK.stage === "done" && KIOSK.result === r) kioskReset(); }, 8000);
+  });
+  const cancel = document.getElementById("k-pay-cancel");
+  if (cancel) cancel.addEventListener("click", () => { KIOSK.stage = "shop"; KIOSK.payError = null; kioskRender(); });
+  const form = document.getElementById("k-pay-form");
+  if (form) form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (KIOSK.busy) return;
+    const username = document.getElementById("k-user").value.trim(), password = document.getElementById("k-pass").value;
+    if (!username || !password) { KIOSK.payError = "Type your username and password."; kioskRender(); return; }
+    KIOSK.busy = true; KIOSK.payError = null; kioskRender();
+    const r = await kioskApi({ action: "buy", username, password, cart: cartList(KIOSK.cart), date: todayISO() });
+    KIOSK.busy = false;
+    if (!r.ok) { KIOSK.payError = r.error; kioskRender(); const pp = document.getElementById("k-pass"); if (pp) { pp.value = ""; pp.focus(); } return; }
+    KIOSK.cart.clear(); KIOSK.stage = "done"; KIOSK.result = r; KIOSK.lastAct = Date.now();
+    kioskRender();
+    kioskLoadItems().then(() => kioskRender());
+    setTimeout(() => { if (KIOSK.stage === "done" && KIOSK.result === r) kioskReset(); }, 8000);
+  });
+  const done = document.getElementById("k-done");
+  if (done) done.addEventListener("click", kioskReset);
+  document.getElementById("k-exit").addEventListener("click", () => {
+    if (!window.confirm("Leave canteen mode on this tablet?")) return;
+    try { localStorage.removeItem(CANTEEN_FLAG_KEY); } catch (e) {}
+    location.replace(location.pathname + "?canteen=0");
+  });
+}
+async function initKiosk() {
+  document.title = "TAG Canteen";
+  try { KIOSK.key = new URLSearchParams(location.search).get("key") || localStorage.getItem(CANTEEN_KEY_KEY); } catch (e) {}
+  if (KIOSK.key) {
+    const r = await kioskLoadItems();
+    if (r.ok) {
+      try { localStorage.setItem(CANTEEN_KEY_KEY, KIOSK.key); } catch (e) {}
+      if (/[?&]key=/.test(location.search)) history.replaceState(null, "", location.pathname + "?canteen=1"); // don't leave the key on screen
+    }
+  }
+  kioskRender();
+  // Fresh prices and stock every minute; a cart or pay screen left alone for 90 seconds clears.
+  setInterval(async () => {
+    if (KIOSK.key && KIOSK.stage === "shop") { await kioskLoadItems(); if (!document.getElementById("scan-backdrop")) kioskRender(); }
+    if ((KIOSK.cart.size || KIOSK.stage !== "shop") && Date.now() - KIOSK.lastAct > 90000 && !KIOSK.busy) kioskReset();
+  }, 60000);
+  document.addEventListener("pointerdown", () => { KIOSK.lastAct = Date.now(); }, true);
+  // A USB/Bluetooth barcode scanner types the code fast and presses Enter.
+  let buf = "", last = 0;
+  document.addEventListener("keydown", (e) => {
+    const t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
+    const now = Date.now();
+    if (now - last > 80) buf = "";
+    last = now;
+    if (e.key === "Enter") { if (buf.length >= 4) { kioskScanned(buf); e.preventDefault(); } buf = ""; return; }
+    if (e.key.length === 1) buf += e.key;
+  });
 }
 
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
