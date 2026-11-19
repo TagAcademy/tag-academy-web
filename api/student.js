@@ -5,13 +5,9 @@
 //   avatar  { url }                       their own avatar ("gallery:<n>", or null for the default)
 //   pool    { poolId, amount }            chip into an open pool, never more than their balance
 //   chazzan { date, period, studentIds }  (TAs only) record who led davening, granting the coins
-//   buy     { cart: [{id, qty}], date, method }  buy from the canteen: method "tag" (default) takes it
-//                                         from their own balance; "cash" / "coins" (physical TAG
-//                                         coins) just records the sale and the stock (see _canteen.js)
 // Balances and Chazzan amounts are worked out with the app's own code (lib/appcode.js).
 const S = require("./_server");
 const { withState } = require("../lib/appcode");
-const canteen = require("./_canteen");
 
 const r2 = (n) => Math.round(Number(n) * 100) / 100;
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -48,17 +44,6 @@ module.exports = async (req, res) => {
       });
       await S.audit(who, "pool", { poolId: b.poolId, title, amount });
       return S.send(res, 200, { ok: true });
-    }
-
-    if (b.action === "buy") {
-      let out = null;
-      const method = b.method === "cash" || b.method === "coins" ? b.method : "tag";
-      await S.changeState((st) => {
-        out = method === "tag" ? canteen.buy(st, me.id, b.cart, me.name, "phone", b.date) : canteen.sellOther(st, b.cart, method, { studentId: me.id, by: me.name }, "phone", b.date);
-        return st;
-      });
-      await S.audit(who, "canteenBuy", { total: out.total, items: out.lines, method });
-      return S.send(res, 200, { ok: true, total: out.total, balance: out.balance, method });
     }
 
     if (b.action === "chazzan") {

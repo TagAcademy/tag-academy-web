@@ -4252,8 +4252,9 @@ const ROUTES = [
   // Remote control for the hallway TV (see TV DISPLAY). Admin only. Its id is deliberately NOT "tv" -- "#tv" is the URL that puts a screen into TV mode.
   { id: "tvdisplay", label: "TV Display", icon: "tv", roles: ["admin"] },
   { id: "balance", label: "My Balance", icon: "search", roles: ["student"] },
-  // Students buy with their own coins here; admins set up the items, stock, labels and tablet (see CANTEEN).
-  { id: "canteen", label: "Canteen", icon: "cart", roles: ["admin", "student"] },
+  // Students and staff buy with their own coins here; admins also set up the items, stock, labels
+  // and tablet (see CANTEEN).
+  { id: "canteen", label: "Canteen", icon: "cart", roles: ["admin", "teacher", "student"] },
   // Only ever shown to the one student(s) admin has granted isTA permission to (see
   // renderChazzanTab/Admin > Students) -- `visible` is an extra per-session check beyond the
   // role list above, since "student" alone isn't narrow enough here.
@@ -5292,7 +5293,7 @@ function renderLogin(root) {
       try {
         await firebaseAuth.signInWithCustomToken(r.token);
         setSession(r.ptype === "staff" ? "staff" : "student", r.id);
-        goToRoute(r.ptype === "student" ? (canteenPendingId() ? "canteen" : "balance") : "today");
+        goToRoute(canteenPendingId() && r.role !== "limited" && r.role !== "family" ? "canteen" : r.ptype === "student" ? "balance" : "today");
         authNeeded = false;
         if (state) renderAll(); else startApp();
         return;
@@ -13396,7 +13397,8 @@ function tvcWire(root) {
 
 /* ================================================================
    CANTEEN
-   Students buy snacks with their own TAG coins -- on their own phone (the Canteen tab) or on a
+   Students and staff buy snacks with their own TAG coins (a student's balance, or a staff member's
+   staff coins -- see computeStaffStats) -- on their own phone (the Canteen tab) or on a
    shared canteen tablet (?canteen=1, see initKiosk). Every purchase goes through the server
    (api/student.js "buy", api/canteen.js), which checks the price, the stock and their balance, so
    nobody can buy with someone else's coins or change a price. Admins manage items here.
@@ -13429,7 +13431,7 @@ catchBuyLink();
 window.addEventListener("hashchange", () => {
   if (!catchBuyLink() || CANTEEN_MODE || TV_MODE) return;
   const ses = state && currentSession();
-  if (ses && ses.type === "student") { goToRoute("canteen"); renderAll(); }
+  if (ses && routesFor(ses).some((r) => r.id === "canteen")) { goToRoute("canteen"); renderAll(); }
 });
 function canteenPendingId() { try { return sessionStorage.getItem(CANTEEN_PENDING_KEY); } catch (e) { return null; } }
 function canteenItems() { return ((state.canteen || {}).items) || []; }
@@ -13570,9 +13572,13 @@ async function openScanner(onCode, title) {
 /* ---------- the Canteen tab ---------- */
 const canteenCart = new Map(); // a student's cart on their own phone: item id -> how many
 let canteenBusy = false;
+let cnAdminShop = false; // an admin buying for themselves instead of managing
+function myCanteenCoins(session) { return session.type === "student" ? studentStats(session.record.id).balance : staffStats(session.record.id).balance; }
 function renderCanteen(root, session) {
-  if (session.type === "student") renderCanteenShop(root, session);
-  else renderCanteenAdmin(root, session);
+  // A QR label scanned by an admin opens their own shop, not the setup page.
+  if (isAdmin(session) && canteenPendingId()) cnAdminShop = true;
+  if (isAdmin(session) && !cnAdminShop) renderCanteenAdmin(root, session);
+  else renderCanteenShop(root, session);
 }
 function renderCanteenShop(root, session) {
   const items = canteenItems().filter((x) => x.active !== false);
@@ -13583,13 +13589,14 @@ function renderCanteenShop(root, session) {
     setTimeout(() => toast(r.msg, r.warn ? "warn" : "good"), 0);
   }
   canteenCart.forEach((q, id) => { if (!items.some((x) => x.id === id)) canteenCart.delete(id); });
-  const bal = studentStats(session.record.id).balance;
-  let html = '<div class="page-head"><div style="display:flex;gap:14px;align-items:center;">' + coinBadge("lg") +
+  const bal = myCanteenCoins(session);
+  let html = (isAdmin(session) ? '<button type="button" class="btn btn-ghost btn-sm" id="cn-back-manage" style="margin-bottom:12px;">← Back to managing the canteen</button>' : "") +
+    '<div class="page-head"><div style="display:flex;gap:14px;align-items:center;">' + coinBadge("lg") +
     '<div><span class="eyebrow">You have ' + num2(bal) + ' TAG coins</span><h1>Canteen</h1><p>Scan an item’s label or barcode, or tap it below — then buy it with your TAG coins.</p></div></div></div>';
   html += '<button type="button" class="btn btn-primary cn-scan-btn" id="cn-scan">📷 Scan an item</button>';
   html += canteenCartHtml(items, canteenCart, canteenBusy ? "Buying…" : "Pay " + num2(cartTotal(canteenCart, items)) + " from my TAG coins", canteenBusy);
   html += '<div class="card card-pad" style="margin-top:16px;"><div class="section-title">For sale</div>' + canteenGridHtml(items, canteenCart) + "</div>";
-  const mine = canteenSales().filter((x) => x.studentId === session.record.id).slice(0, 10);
+  const mine = canteenSales().filter((x) => session.type === "student" ? x.studentId === session.record.id : x.staffId === session.record.id).slice(0, 10);
   if (mine.length) {
     html += '<div class="card card-pad" style="margin-top:16px;"><div class="section-title">What you bought</div>' + mine.map((x) =>
       '<div class="cn-sale"><span>' + escapeHtml(fmtDateShort(x.date)) + "</span><span>" + escapeHtml(x.what) + "</span><b>" + (x.refunded ? "Refunded" : escapeHtml(x.paid)) + "</b></div>").join("") + "</div>";
@@ -13597,6 +13604,8 @@ function renderCanteenShop(root, session) {
   root.innerHTML = html;
   const say = (m, warn) => toast(m, warn ? "warn" : "good");
   wireCart(root, canteenCart, items, () => renderAll(), say);
+  const back = document.getElementById("cn-back-manage");
+  if (back) back.addEventListener("click", () => { cnAdminShop = false; renderAll(); });
   document.getElementById("cn-scan").addEventListener("click", () => openScanner((code) => {
     const r = cartAdd(canteenCart, canteenFind(code, items));
     say(r.msg, r.warn); renderAll();
@@ -13606,11 +13615,11 @@ function renderCanteenShop(root, session) {
     const method = buy.getAttribute("data-cn-buy");
     const total = cartTotal(canteenCart, items), n = cartCount(canteenCart), what = n + " item" + (n === 1 ? "" : "s");
     if (method === "tag") {
-      if (total > studentStats(session.record.id).balance + 1e-9) { say("That’s " + num2(total) + " TAG coins, and you have " + num2(studentStats(session.record.id).balance) + ".", true); return; }
+      if (total > myCanteenCoins(session) + 1e-9) { say("That’s " + num2(total) + " TAG coins, and you have " + num2(myCanteenCoins(session)) + ".", true); return; }
       if (!window.confirm("Buy " + what + " for " + num2(total) + " TAG coins from your balance?")) return;
     } else if (!window.confirm("Put " + (method === "cash" ? money(cartCash(canteenCart, items)) + " cash" : num2(total) + " physical TAG coin" + (total === 1 ? "" : "s")) + " in the canteen box for " + what + ". Your balance doesn’t change.\n\nDone?")) return;
     canteenBusy = true; renderAll();
-    const r = await callApi("student", { action: "buy", method, cart: cartList(canteenCart), date: todayISO() });
+    const r = await callApi("me", { action: "buy", method, cart: cartList(canteenCart), date: todayISO() });
     canteenBusy = false;
     if (!r.ok) { say(r.error, true); renderAll(); return; }
     canteenCart.clear();
@@ -13621,9 +13630,11 @@ function renderCanteenShop(root, session) {
 
 // Every canteen sale, newest first, in one shape: from balances (ledger) and into the box (canteen.sales).
 function canteenSales() {
-  const a = (state.ledger || []).filter((tx) => tx.canteen).map((tx) => ({ kind: "tag", id: tx.id, at: tx.enteredAt || 0, date: tx.date, studentId: tx.studentId, via: tx.via, refunded: tx.refunded,
-    what: String(tx.note || "").replace(/^Canteen: /, ""), amount: Number(tx.amount) || 0, paid: tx.refunded ? "" : num2(tx.amount) + " TAG coins" }));
-  const b = (((state.canteen || {}).sales) || []).map((x) => ({ kind: x.method, id: x.id, at: x.at || 0, date: x.date, studentId: x.studentId || null, via: x.via, refunded: x.refunded,
+  const fromCoins = (tx, staff) => ({ kind: "tag", staff, id: tx.id, at: tx.enteredAt || 0, date: tx.date, studentId: tx.studentId || null, staffId: tx.staffId || null, via: tx.via, refunded: tx.refunded,
+    what: String(tx.note || "").replace(/^Canteen: /, ""), amount: Number(tx.amount) || 0, paid: tx.refunded ? "" : num2(tx.amount) + " TAG coins" });
+  const a = (state.ledger || []).filter((tx) => tx.canteen).map((tx) => fromCoins(tx, false))
+    .concat((state.staffLedger || []).filter((tx) => tx.canteen).map((tx) => fromCoins(tx, true)));
+  const b = (((state.canteen || {}).sales) || []).map((x) => ({ kind: x.method, id: x.id, at: x.at || 0, date: x.date, studentId: x.studentId || null, staffId: x.staffId || null, via: x.via, refunded: x.refunded,
     what: x.note || "", amount: Number(x.total) || 0, paid: x.method === "cash" ? money(x.total) + " cash" : num2(x.total) + " physical coin" + (Number(x.total) === 1 ? "" : "s") }));
   return a.concat(b).sort((x, y) => y.at - x.at);
 }
@@ -13665,6 +13676,7 @@ function renderCanteenAdmin(root, session) {
 
   html += '<div class="card card-pad" style="margin-top:16px;"><div class="section-title">Items</div>';
   html += cnEdit === "new" ? cnFormHtml() : '<div class="pool-row" style="margin-bottom:12px;"><button type="button" class="btn btn-primary btn-sm" id="cn-new">+ Add item</button>' +
+    '<button type="button" class="btn btn-ghost btn-sm" id="cn-shop">🛒 Buy something myself</button>' +
     (items.some((x) => x.active !== false) ? '<button type="button" class="btn btn-ghost btn-sm" data-cn-labels="all">🖨 Print QR labels</button>' : "") + "</div>";
   if (!items.length && cnEdit !== "new") html += '<p class="help-text">No items yet — add the first one.</p>';
   html += '<div class="cn-items">' + items.map((it) => {
@@ -13682,14 +13694,14 @@ function renderCanteenAdmin(root, session) {
   }).join("") + "</div></div>";
 
   html += '<div class="card card-pad" style="margin-top:16px;"><div class="section-title">Canteen tablet</div>' +
-    '<p class="help-text" style="margin-top:-6px;">A tablet left at the canteen: students scan or tap what they’re buying, then type their own username and password to pay. Open this link once on the tablet (it remembers it). A USB barcode scanner plugged into the tablet works too.</p>' +
+    '<p class="help-text" style="margin-top:-6px;">A tablet left at the canteen: students (and staff) scan or tap what they’re buying, then type their own username and password to pay from their own TAG coins. Open this link once on the tablet (it remembers it). A USB barcode scanner plugged into the tablet works too.</p>' +
     (cnTabletLink ? '<div class="pool-row"><input type="text" readonly id="cn-tablet-link" value="' + escapeHtml(cnTabletLink) + '" style="flex:1;min-width:200px;"><button type="button" class="btn btn-ghost btn-sm" id="cn-tablet-copy">Copy</button></div><p class="help-text">Treat this link like a password — anyone with it can open the canteen screen. Making a new one disconnects the old tablet.</p>'
       : '<button type="button" class="btn btn-ghost btn-sm" id="cn-tablet-make">Make a tablet link</button>') + "</div>";
 
   html += '<div class="card card-pad" style="margin-top:16px;"><div class="section-title">Recent sales</div>' +
     (sales.length ? sales.slice(0, 40).map((x) => {
-      const st = x.studentId ? studentById(x.studentId) : null;
-      const who = x.studentId ? (st ? st.first + " " + st.last : "(removed)") : "Someone";
+      const st = x.studentId ? studentById(x.studentId) : null, sf = x.staffId ? staffById(x.staffId) : null;
+      const who = x.studentId ? (st ? st.first + " " + st.last : "(removed)") : x.staffId ? (sf ? sf.name : "(removed)") + " (staff)" : "Someone";
       return '<div class="cn-sale"><span>' + escapeHtml(fmtDateShort(x.date)) + "</span><span><b>" + escapeHtml(who) + "</b> " + escapeHtml(x.what) + (x.via === "tablet" ? ' <span class="help-text">· tablet</span>' : "") + "</span>" +
         (x.refunded ? '<b class="help-text">' + (x.kind === "tag" ? "Refunded" : "Undone") + "</b>"
           : "<b>" + escapeHtml(x.paid) + '</b><button type="button" class="btn btn-ghost btn-sm" data-cn-refund="' + x.id + '">' + (x.kind === "tag" ? "Refund" : "Undo") + "</button>") + "</div>";
@@ -13701,6 +13713,7 @@ function wireCanteenAdmin(root, session) {
   const $ = (id) => document.getElementById(id);
   const on = (sel, fn) => root.querySelectorAll(sel).forEach((b) => b.addEventListener("click", () => fn(b)));
   if ($("cn-new")) $("cn-new").addEventListener("click", () => { cnEdit = "new"; cnDraft = cnDraftFor("new"); renderAll(); });
+  if ($("cn-shop")) $("cn-shop").addEventListener("click", () => { cnAdminShop = true; renderAll(); });
   on("[data-cn-edit]", (b) => { cnEdit = b.getAttribute("data-cn-edit"); cnDraft = cnDraftFor(cnEdit); renderAll(); });
   root.querySelectorAll("[data-cn-field]").forEach((el) => el.addEventListener("input", () => { if (cnDraft) cnDraft[el.getAttribute("data-cn-field")] = el.value; }));
   if ($("cn-cancel")) $("cn-cancel").addEventListener("click", () => { cnEdit = null; cnDraft = null; renderAll(); });
@@ -13756,12 +13769,12 @@ function wireCanteenAdmin(root, session) {
   on("[data-cn-refund]", async (b) => {
     const id = b.getAttribute("data-cn-refund"), x = canteenSales().find((s) => s.id === id);
     if (!x) return;
-    const st = x.studentId ? studentById(x.studentId) : null;
-    const q = x.kind === "tag" ? "Refund " + num2(x.amount) + " TAG coins to " + (st ? st.first + " " + st.last : "this student") + " for " + x.what + "?"
+    const st = x.studentId ? studentById(x.studentId) : null, sf = x.staffId ? staffById(x.staffId) : null;
+    const q = x.kind === "tag" ? "Refund " + num2(x.amount) + " TAG coins to " + (st ? st.first + " " + st.last : sf ? sf.name : "them") + " for " + x.what + "?"
       : "Undo this sale (" + x.what + ", " + x.paid + ")? Give the " + (x.kind === "cash" ? "cash" : "coins") + " back from the box yourself.";
     if (!window.confirm(q + " Counted stock goes back up.")) return;
     const res = await saveEdit((ns) => {
-      const t = x.kind === "tag" ? (ns.ledger || []).find((y) => y.id === id) : (((ns.canteen || {}).sales) || []).find((y) => y.id === id);
+      const t = x.kind === "tag" ? ((x.staff ? ns.staffLedger : ns.ledger) || []).find((y) => y.id === id) : (((ns.canteen || {}).sales) || []).find((y) => y.id === id);
       if (!t || t.refunded) return ns;
       t.refunded = { amount: Number(x.kind === "tag" ? t.amount : t.total) || 0, by: session.record.name, at: Date.now() };
       if (x.kind === "tag") t.amount = 0;

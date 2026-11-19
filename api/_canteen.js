@@ -1,8 +1,9 @@
-// The canteen's one rule for a purchase, shared by a student's own phone (api/student.js "buy")
-// and the canteen tablet (api/canteen.js). Items live in state.canteen.items:
+// The canteen's one rule for a purchase, shared by someone's own phone (api/me.js "buy") and the
+// canteen tablet (api/canteen.js). Students and staff both buy; each pays from their own coins. Items live in state.canteen.items:
 //   { id, name, emoji, price, cashPrice (dollars, or none = not sold for cash), stock (a number, or null = not counted), lowAt, barcode, active }
-// A purchase is one ordinary "Spent/Redeemed" ledger entry (so balances, coin history and reports
-// need nothing new) marked canteen: true, listing what was bought; stock goes down by what was sold.
+// A student's purchase is one ordinary "Spent/Redeemed" ledger entry, a staff member's one "Charge"
+// in staffLedger (so balances, coin history and reports need nothing new), marked canteen: true and
+// listing what was bought; stock goes down by what was sold.
 // Paying in cash or with physical TAG coins is kept in state.canteen.sales instead (see sellOther).
 const { withState } = require("../lib/appcode");
 
@@ -41,20 +42,22 @@ function takeStock(st, lines) {
 const lineNote = (lines) => lines.map((l) => (l.qty > 1 ? l.qty + "× " : "") + l.name).join(", ");
 const newId = () => "cn_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
-// Paying from a student's TAG coin balance. `date` is the buyer's own calendar date (their
-// device's), used if it's within a day of now.
-function buy(st, studentId, cart, enteredBy, via, date) {
+// Paying from the buyer's own TAG coin balance. `buyer` is { ptype: "student"|"staff", id }.
+// `date` is the buyer's own calendar date (their device's), used if it's within a day of now.
+function buy(st, buyer, cart, enteredBy, via, date) {
   const lines = checkCart(st, cart);
   const total = r2(lines.reduce((s, l) => s + l.price * l.qty, 0));
-  const bal = withState(st).computeStats(studentId, {}).balance;
+  const staff = buyer.ptype === "staff";
+  const app = withState(st);
+  const bal = staff ? app.computeStaffStats(buyer.id, {}).balance : app.computeStats(buyer.id, {}).balance;
   if (total > bal + 1e-9) refuse("That’s " + total + " TAG coins, and you have " + r2(bal) + ".");
   takeStock(st, lines);
-  st.ledger = st.ledger || [];
-  st.ledger.push({
-    id: newId(), date: dayOf(date),
-    studentId, type: "Spent/Redeemed", amount: total, canteen: true, items: lines.map(({ cashPrice, ...l }) => l), via: via || "phone",
+  const entry = {
+    id: newId(), date: dayOf(date), amount: total, canteen: true, items: lines.map(({ cashPrice, ...l }) => l), via: via || "phone",
     note: "Canteen: " + lineNote(lines), enteredBy, enteredAt: Date.now(),
-  });
+  };
+  if (staff) { st.staffLedger = st.staffLedger || []; st.staffLedger.push(Object.assign({ staffId: buyer.id, type: "Charge" }, entry)); }
+  else { st.ledger = st.ledger || []; st.ledger.push(Object.assign({ studentId: buyer.id, type: "Spent/Redeemed" }, entry)); }
   return { total, lines, balance: r2(bal - total) };
 }
 
