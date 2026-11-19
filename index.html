@@ -1750,14 +1750,6 @@ const DEFAULT_STUDENT_AVATAR = AVATAR_GALLERY[0];
 const DEFAULT_STAFF_AVATAR = AVATAR_GALLERY[14];
 
 const FIREBASE_CONFIG = {"apiKey": "AIzaSyCIdZHVdpRrgg-1eaGFL2LZ_1gX5Da5f9o", "authDomain": "tag-academy-presence.firebaseapp.com", "projectId": "tag-academy-presence", "storageBucket": "tag-academy-presence.firebasestorage.app", "messagingSenderId": "957172925842", "appId": "1:957172925842:web:b2eaada94bb69c29336d4b"};
-/* A single technical account the app signs in as, purely so Firestore's security
-   rules can require "someone is signed in" -- unrelated to, and never seen by, any
-   real person's username/password below (that's the app's own AUTH section). This
-   is not a meaningful secret (same trust level as the app's own admin password,
-   which is already visible in the Admin panel), so it's fine to keep it in the
-   client code. */
-const APP_SERVICE_EMAIL = "app-service@tagacademy.local";
-const APP_SERVICE_PASSWORD = "Tg9!kQx2vLp7mZw4";
 
 /* Vendored @hebcal/core + @hebcal/hdate (HDate + Sedra/getSedra only), bundled to a
    single IIFE with esbuild and embedded here base64-encoded so the page stays fully
@@ -1868,7 +1860,14 @@ async function poolContribute(session, poolId, studentId, amountRaw) {
   // Students can't put themselves below zero; staff adding for a student can, after a warning.
   if (amount > bal && session.type === "student") { toast("You only have " + num2(bal) + " TAG coins.", "warn"); return; }
   if (amount > bal) { const st = studentById(studentId); if (!window.confirm("Warning: " + (st ? st.first + " " + st.last : "This student") + " only has " + num2(bal) + " TAG coins — this puts them at " + num2(bal - amount) + ".\n\nAdd anyway?")) return; }
-  if (session.type === "student" && !window.confirm("Put " + num2(amount) + " TAG coins toward " + p.title + "? This comes out of your balance now.")) return;
+  if (session.type === "student") {
+    if (!window.confirm("Put " + num2(amount) + " TAG coins toward " + p.title + "? This comes out of your balance now.")) return;
+    // The server checks the pool and their balance, then records it.
+    const r = await callApi("student", { action: "pool", poolId, amount });
+    if (!r.ok) { toast(r.error, "warn"); return; }
+    toast("Chipped in " + num2(amount) + " toward " + p.title + ".", "good"); renderAll();
+    return;
+  }
   const txId = uid("l"), today = todayISO(), now = Date.now();
   const res = await saveEdit((ns) => {
     if ((ns.ledger || []).some((t) => t.id === txId)) return ns;
@@ -2508,14 +2507,10 @@ function wirePasswordToggles(root) {
     btn.textContent = showing ? "Show" : "Hide";
   }));
 }
+// Passwords live only on the server, scrambled -- nobody can look one up. "Reset password" makes a
+// new one and shows it once.
 function passwordCellHtml(password, revealKey) {
-  const pw = password || "";
-  const shown = revealedPasswords.has(revealKey);
-  const display = shown ? (pw || "—") : "•".repeat(Math.max(4, Math.min(10, pw.length || 6)));
-  return '<span class="pw-cell">' +
-    '<span class="pw-value">' + escapeHtml(display) + "</span>" +
-    (pw ? '<button type="button" class="pw-toggle" data-pw-toggle="' + escapeHtml(revealKey) + '">' + (shown ? "Hide" : "Show") + "</button>" : "") +
-    "</span>";
+  return '<span class="pw-cell"><span class="pw-value" title="Hidden — use Reset password to make a new one">••••••</span></span>';
 }
 /* One name per line — "Last, First" (comma) or "First Last" (no comma, last
    word taken as the surname). Returns {first, last} or null if unparseable. */
@@ -2621,10 +2616,11 @@ function seedState() {
 }
 
 /* ---------- Firebase (Firestore) ---------- */
-/* Signing in as APP_SERVICE_EMAIL is invisible to the user — it's not a login
-   screen, just how the page proves to Firestore's security rules that it's
-   allowed to read/write at all. The app's own username/password login (below,
-   under AUTH) is the real sign-in a person sees and uses; it's unrelated to this. */
+/* Signing in: the page never holds a Firebase password. The username and password someone types
+   are checked by the app's own server (api/login.js, on Vercel), which hands back a Firebase pass
+   for that one person, marked with who they are and their role -- and Firebase's rules use that to
+   decide what each person may read and change (students can't change the shared data directly; the
+   few things they may do go through api/student.js). See callApi / renderLogin / startApp. */
 // Keep Firebase's sign-in away from the browser's IndexedDB storage. On iPhones that storage can
 // freeze for one site (a WebKit bug) -- opening it then never answers, and Firebase's sign-in
 // waits on it forever, leaving "Loading TAG Academy…" up for good, through every refresh, until
@@ -2639,15 +2635,29 @@ const STATE_DOC = db.collection("app").doc("state");
 let state = null; // set once loadState() resolves
 
 async function loadState() {
-  await firebaseAuth.signInWithEmailAndPassword(APP_SERVICE_EMAIL, APP_SERVICE_PASSWORD);
   const snap = await STATE_DOC.get();
-  if (snap.exists) {
-    state = snap.data();
-  } else {
-    // First run for this Firebase project — create the starting document.
-    state = seedState();
-    await STATE_DOC.set(state);
-  }
+  if (!snap.exists) throw new Error("No school data found.");
+  state = snap.data();
+}
+// A call to the app's server (api/<name>.js), signed with this person's Firebase pass.
+// Resolves to the server's answer, or { ok: false, error } -- never throws.
+async function callApi(name, payload) {
+  try {
+    const u = firebaseAuth.currentUser;
+    const tok = u ? await u.getIdToken() : null;
+    const r = await fetch("/api/" + name, { method: "POST", headers: Object.assign({ "Content-Type": "application/json" }, tok ? { Authorization: "Bearer " + tok } : {}), body: JSON.stringify(payload || {}) });
+    let d = null;
+    try { d = await r.json(); } catch (e) {}
+    if (!d) return { ok: false, error: "The server didn’t answer (" + r.status + "). Check the internet connection." };
+    return d;
+  } catch (e) { return { ok: false, error: "Couldn’t reach the server — check the internet connection." }; }
+}
+// Set a password on the server (passwords are never kept in the shared data). Used when adding an
+// account and for "Reset password". Shows a warning and returns false if it didn't work.
+async function setPasswordOnServer(ptype, id, password, label) {
+  const r = await callApi("admin", { action: "setPassword", ptype, id, password });
+  if (!r.ok) toast("Couldn’t set " + (label || "the") + " password: " + r.error + " Use Reset password to try again.", "warn");
+  return !!r.ok;
 }
 
 /* ---------- derived helpers ---------- */
@@ -2858,6 +2868,13 @@ function periodFromChazzanLedgerId(id) {
 // any other coin transaction.
 async function applyChazzanChoice(dateStr, period, studentIds, enteredByName) {
   const ids = (studentIds || []).filter(Boolean).slice(0, 2);
+  // A TA (a student) records it through the server, which checks they're allowed.
+  const me = currentSession();
+  if (me && me.type === "student") {
+    const r = await callApi("student", { action: "chazzan", date: dateStr, period, studentIds: ids });
+    if (!r.ok) toast(r.error, "warn");
+    return { ok: !!r.ok };
+  }
   const realIds = ids.filter((id) => id !== CHAZZAN_OTHER);
   const enteredAt = Date.now();
   // Written as a function of "the current data" so that if someone else saves at the same moment
@@ -4086,15 +4103,6 @@ function isGraduatedStudent(s) { return !!s && s.active === false; }
 function isGraduatedStaff(s) { return !!s && s.graduated === true; }
 function currentStaff() { return (state.staff || []).filter((s) => !isGraduatedStaff(s)); }
 function graduatedSince(rec) { return rec && rec.graduatedAt ? " " + fmtDateShort(rec.graduatedAt) : ""; }
-function findByCreds(username, password) {
-  const u = String(username || "").trim().toLowerCase();
-  if (!u || !password) return null;
-  const staffMatch = state.staff.find((s) => (s.username || "").toLowerCase() === u && s.password === password);
-  if (staffMatch) return isGraduatedStaff(staffMatch) ? { graduated: true } : { type: "staff", id: staffMatch.id };
-  const studentMatch = state.roster.find((s) => (s.username || "").toLowerCase() === u && s.password === password);
-  if (studentMatch) return isGraduatedStudent(studentMatch) ? { graduated: true } : { type: "student", id: studentMatch.id };
-  return null;
-}
 function currentSession() {
   try {
     const raw = localStorage.getItem(SESSION_KEY);
@@ -4121,7 +4129,8 @@ function logout() {
   currentRouteId = null;
   try { sessionStorage.removeItem(ROUTE_STORAGE_KEY); } catch (e) {}
   location.hash = "";
-  renderAll();
+  // Sign out of Firebase too, then start clean -- the next person signs in fresh.
+  firebaseAuth.signOut().catch(() => {}).then(() => location.reload());
 }
 function isAdmin(session) { return session && session.type === "staff" && session.record.role === "admin"; }
 function isStaff(session) { return session && session.type === "staff"; }
@@ -4454,6 +4463,14 @@ function closeAvatarPicker(session) {
   renderAvatarPickerModal(session);
 }
 async function setMyAvatar(session, url) {
+  if (session.type === "student") { // students can't change the shared data themselves -- the server does it
+    const r = await callApi("student", { action: "avatar", url: url || null });
+    if (!r.ok) { toast(r.error, "warn"); return; }
+    avatarPickerOpen = false;
+    toast(url ? "Avatar updated." : "Avatar reset to the default.", "good");
+    renderAll();
+    return;
+  }
   const newState = JSON.parse(JSON.stringify(state));
   const list = session.type === "staff" ? newState.staff : newState.roster;
   const rec = list.find((r) => r.id === session.record.id);
@@ -5146,55 +5163,42 @@ async function logTimeClockDayOff(session, { type, date, note }) {
    LOGIN SCREEN (the app's main page when signed out)
    ================================================================ */
 function renderLogin(root) {
-  const isFirstRun = state.staff.length === 0;
   root.innerHTML =
     '<div class="login-wrap"><div class="login-card">' +
     '<img src="' + LOGO_DATA_URI + '" alt="" style="width:56px;margin:0 auto 14px;display:block;">' +
     '<h1 style="text-align:center;font-size:1.5rem;">TAG Academy</h1>' +
-    (isFirstRun
-      ? '<p class="sub" style="text-align:center;">No accounts exist yet. Create the first admin account to set everything up.</p>' +
-        '<div class="field"><label for="fr-name">Your name</label><input type="text" id="fr-name" placeholder="e.g. Rabbi Katz"></div>' +
-        '<div class="field"><label for="fr-username">Username</label><input type="text" id="fr-username" placeholder="e.g. rkatz"></div>' +
-        '<div class="field"><label for="fr-password">Password</label>' + passwordFieldHtml("fr-password", { placeholder: "Choose a password" }) + "</div>" +
-        '<button class="btn btn-primary" id="fr-submit" style="width:100%;">Create admin account &amp; sign in</button>'
-      : '<p class="sub" style="text-align:center;">Sign in with your username and password.</p>' +
-        '<div class="field"><label for="lg-username">Username</label><input type="text" id="lg-username" autocomplete="username"></div>' +
-        '<div class="field"><label for="lg-password">Password</label>' + passwordFieldHtml("lg-password", { autocomplete: "current-password" }) + "</div>" +
-        '<div id="login-error" style="color:var(--warn);font-size:0.82rem;margin-bottom:10px;display:none;">Username or password not recognized.</div>' +
-        '<button class="btn btn-primary" id="lg-submit" style="width:100%;">Log in</button>' +
-        '<p class="help-text" style="text-align:center;margin-top:14px;">Forgot your password? Ask your teacher or admin to reset it.</p>') +
+    '<p class="sub" style="text-align:center;">Sign in with your username and password.</p>' +
+    '<div class="field"><label for="lg-username">Username</label><input type="text" id="lg-username" autocomplete="username" autocapitalize="none"></div>' +
+    '<div class="field"><label for="lg-password">Password</label>' + passwordFieldHtml("lg-password", { autocomplete: "current-password" }) + "</div>" +
+    '<div id="login-error" style="color:var(--warn);font-size:0.82rem;margin-bottom:10px;display:none;"></div>' +
+    '<button class="btn btn-primary" id="lg-submit" style="width:100%;">Log in</button>' +
+    '<p class="help-text" style="text-align:center;margin-top:14px;">Forgot your password? Ask your teacher or admin to reset it.</p>' +
     "</div></div>";
-
   wirePasswordToggles(root);
-  if (isFirstRun) {
-    document.getElementById("fr-submit").addEventListener("click", async () => {
-      const name = document.getElementById("fr-name").value.trim();
-      const username = document.getElementById("fr-username").value.trim();
-      const password = document.getElementById("fr-password").value;
-      if (!name || !username || password.length < 4) { toast("Fill in your name, a username, and a password of at least 4 characters.", "warn"); return; }
-      const newState = JSON.parse(JSON.stringify(state));
-      const id = uid("st");
-      newState.staff.push({ id, username, name, password, role: "admin" });
-      const res = await saveState(newState);
-      if (res.ok || res.local) { setSession("staff", id); goToRoute("today"); renderAll(); }
-    });
-  } else {
-    const submit = async () => {
-      const username = document.getElementById("lg-username").value;
-      const password = document.getElementById("lg-password").value;
-      const match = findByCreds(username, password);
-      const errEl = document.getElementById("login-error");
-      if (!match || match.graduated) {
-        errEl.textContent = match ? "This account has graduated, so it can’t sign in. An admin can re-enroll it." : "Username or password not recognized.";
-        errEl.style.display = "block"; return;
-      }
-      setSession(match.type, match.id);
-      goToRoute(match.type === "student" ? "balance" : "today");
-      renderAll();
-    };
-    document.getElementById("lg-submit").addEventListener("click", submit);
-    document.getElementById("lg-password").addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
-  }
+  const btn = document.getElementById("lg-submit");
+  const submit = async () => {
+    const username = document.getElementById("lg-username").value;
+    const password = document.getElementById("lg-password").value;
+    const errEl = document.getElementById("login-error");
+    if (!username.trim() || !password) { errEl.textContent = "Enter your username and password."; errEl.style.display = "block"; return; }
+    btn.disabled = true; btn.textContent = "Signing in…";
+    const r = await callApi("login", { username, password });
+    if (r.ok) {
+      try {
+        await firebaseAuth.signInWithCustomToken(r.token);
+        setSession(r.ptype === "staff" ? "staff" : "student", r.id);
+        goToRoute(r.ptype === "student" ? "balance" : "today");
+        authNeeded = false;
+        if (state) renderAll(); else startApp();
+        return;
+      } catch (e) { r.error = "Couldn’t finish signing in — try again."; }
+    }
+    btn.disabled = false; btn.textContent = "Log in";
+    errEl.textContent = r.error || "Username or password not recognized.";
+    errEl.style.display = "block";
+  };
+  btn.addEventListener("click", submit);
+  document.getElementById("lg-password").addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
 }
 
 /* ================================================================
@@ -8228,8 +8232,58 @@ function renderLeaderboard(root, session) {
    VIEW: ADMIN (Schedule · Staff · Students · Coins & Privileges)
    ================================================================ */
 let adminTab = "students";
+/* Admin > Security: moving the last plain passwords out of the shared data (once), downloading a
+   full backup, and the server's change log (who changed coins, passwords, pools, Chazzan...). */
+let securityLog = null; // null = not loaded; [] = loaded
+let securityBusy = false;
+function renderAdminSecurity(root) {
+  const plain = (state.staff || []).concat(state.roster || []).filter((r) => typeof r.password === "string" && r.password !== "").length;
+  let html = '<div class="card card-pad"><div class="section-title">Passwords</div>' +
+    (plain
+      ? '<p class="help-text" style="margin-top:-6px;"><b>' + plain + " password" + (plain === 1 ? " is" : "s are") + " still stored in the shared data</b>, where they could be read. Move them to the server, where they’re kept scrambled and nobody can read them — everyone keeps the same password. A full backup of all the data is saved on the server first.</p>" +
+        '<button type="button" class="btn btn-primary" id="sec-move"' + (securityBusy ? " disabled" : "") + ">" + (securityBusy ? "Moving…" : "Move passwords to the server") + "</button>"
+      : '<p class="help-text" style="margin-top:-6px;color:var(--good);font-weight:700;">✓ No passwords are stored in the shared data. They’re kept scrambled on the server; use Reset password to give someone a new one.</p>') +
+    "</div>";
+  html += '<div class="card card-pad"><div class="section-title">Backup</div>' +
+    '<p class="help-text" style="margin-top:-6px;">Download a copy of all the app’s data — students, staff, attendance, TAG coins, Time Clock, Lists, Family — as one file to keep somewhere safe.</p>' +
+    '<button type="button" class="btn btn-ghost" id="sec-backup">Download backup</button></div>';
+  html += '<div class="card card-pad"><div class="section-title">Change log</div>' +
+    '<p class="help-text" style="margin-top:-6px;">What went through the server: passwords set, people signed out, students chipping into pools, TAs granting Chazzan coins.</p>' +
+    (securityLog === null ? '<button type="button" class="btn btn-ghost" id="sec-log">Show the change log</button>'
+      : securityLog.length ? '<div class="table-wrap"><table><thead><tr><th>When</th><th>Who</th><th>What</th></tr></thead><tbody>' + securityLog.map((e) =>
+          "<tr><td>" + escapeHtml(new Date(e.at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })) + "</td><td>" + escapeHtml((e.who && e.who.name) || "—") + "</td><td>" +
+          escapeHtml({ setPassword: "Set a password", signOut: "Signed someone out", movePasswords: "Moved passwords to the server", tvKey: "Connected a TV", pool: "Chipped into a pool", chazzan: "Recorded the chazzan" }[e.action] || e.action) +
+          (e.details && (e.details.name || e.details.title) ? " — " + escapeHtml(e.details.name || e.details.title) : "") + (e.details && e.details.amount ? " (" + num2(e.details.amount) + ")" : "") + "</td></tr>").join("") + "</tbody></table></div>"
+      : '<p class="help-text">Nothing yet.</p>') + "</div>";
+  root.innerHTML = html;
+  const move = document.getElementById("sec-move");
+  if (move) move.addEventListener("click", async () => {
+    if (!window.confirm("Move all " + plain + " passwords to the server? Everyone keeps the same password. A full backup is saved first.")) return;
+    securityBusy = true; renderAdminSecurity(root);
+    const r = await callApi("admin", { action: "movePasswords" });
+    securityBusy = false;
+    if (r.ok) toast("Done — " + r.moved + " passwords moved. A backup was saved first.", "good"); else toast("Didn’t work: " + r.error, "warn");
+    renderAll();
+  });
+  document.getElementById("sec-backup").addEventListener("click", async () => {
+    let family = null;
+    try { const f = await FAMILY_DOC.get(); family = f.exists ? f.data() : null; } catch (e) {}
+    const blob = new Blob([JSON.stringify({ savedAt: new Date().toISOString(), state, family }, null, 1)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = "tag-academy-backup-" + todayISO() + ".json";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  });
+  const logBtn = document.getElementById("sec-log");
+  if (logBtn) logBtn.addEventListener("click", async () => {
+    logBtn.disabled = true;
+    const r = await callApi("admin", { action: "log" });
+    if (!r.ok) { toast(r.error, "warn"); logBtn.disabled = false; return; }
+    securityLog = r.entries || []; renderAdminSecurity(root);
+  });
+}
 function renderAdmin(root) {
-  const tabs = [["students", "Students"], ["staff", "Staff Accounts"], ["privileges", "Coins & Privileges"], ["schedule", "Schedule"], ["sheet", "Google Sheet"]];
+  const tabs = [["students", "Students"], ["staff", "Staff Accounts"], ["privileges", "Coins & Privileges"], ["schedule", "Schedule"], ["sheet", "Google Sheet"], ["security", "Security"]];
   let html = '<div class="page-head"><div><span class="eyebrow">Set everything up</span><h1>Admin</h1>' +
     '<p>The weekly schedule, the coin rule, and every login — staff and student. Everything else in the app reads from here.</p></div></div>';
   html += '<div class="admin-tabs">' + tabs.map((t) => '<button class="admin-tab' + (adminTab === t[0] ? " active" : "") + '" data-admintab="' + t[0] + '">' + t[1] + "</button>").join("") + "</div>";
@@ -8241,6 +8295,7 @@ function renderAdmin(root) {
   else if (adminTab === "staff") renderAdminStaff(content);
   else if (adminTab === "students") renderAdminStudents(content);
   else if (adminTab === "sheet") renderAdminSheet(content);
+  else if (adminTab === "security") renderAdminSecurity(content);
   else renderAdminPrivileges(content);
 }
 
@@ -8678,7 +8733,10 @@ function renderAdminStaff(root) {
       r.enrollmentLog = (r.enrollmentLog || []).concat([{ [graduate ? "graduated" : "reenrolled"]: today }]);
       return ns;
     });
-    if (res.ok || res.local) { toast(graduate ? rec.name + " graduated." : rec.name + " re-enrolled.", "good"); renderAll(); }
+    if (res.ok || res.local) {
+      if (graduate) callApi("admin", { action: "signOut", ptype: "staff", id }); // signed out on every device too
+      toast(graduate ? rec.name + " graduated." : rec.name + " re-enrolled.", "good"); renderAll();
+    }
   }));
   const roleSelect = document.getElementById("st-role");
   const restrictedPeriodWrap = document.getElementById("st-restricted-period-wrap");
@@ -8696,11 +8754,14 @@ function renderAdminStaff(root) {
     if (taken.has(username.toLowerCase())) { toast("That username is already taken.", "warn"); return; }
     if (!password) password = randomPassword();
     const newState = JSON.parse(JSON.stringify(state));
-    const rec = { id: uid("st"), name, username, password, role };
+    const rec = { id: uid("st"), name, username, role };
     if (role === "limited") rec.restrictedPeriod = document.getElementById("st-restricted-period").value;
     newState.staff.push(rec);
     const res = await saveState(newState);
-    if (res.ok || res.local) { toast("Added " + name + " — password: " + password, "good"); renderAll(); }
+    if (res.ok || res.local) {
+      if (await setPasswordOnServer("staff", rec.id, password, name + "’s")) toast("Added " + name + " — username: " + username + ", password: " + password, "good");
+      renderAll();
+    }
   });
   root.querySelectorAll("[data-view-as-staff]").forEach((btn) => btn.addEventListener("click", () => {
     const id = btn.getAttribute("data-view-as-staff");
@@ -8711,13 +8772,10 @@ function renderAdminStaff(root) {
     renderAll();
   }));
   root.querySelectorAll("[data-reset-staff]").forEach((btn) => btn.addEventListener("click", async () => {
-    const id = btn.getAttribute("data-reset-staff");
-    const newState = JSON.parse(JSON.stringify(state));
-    const rec = newState.staff.find((s) => s.id === id);
+    const rec = staffById(btn.getAttribute("data-reset-staff"));
+    if (!rec) return;
     const np = randomPassword();
-    rec.password = np;
-    const res = await saveState(newState);
-    if (res.ok || res.local) { toast("New password for " + rec.name + ": " + np, "good"); renderAll(); }
+    if (await setPasswordOnServer("staff", rec.id, np, rec.name + "’s")) { toast("New password for " + rec.name + ": " + np + " (they’ve been signed out everywhere).", "good"); renderAll(); }
   }));
   root.querySelectorAll("[data-toggle-clock]").forEach((btn) => btn.addEventListener("click", async () => {
     const id = btn.getAttribute("data-toggle-clock");
@@ -8800,7 +8858,11 @@ function renderAdminStaff(root) {
     };
     editingStaffId = null;
     const res = await saveState(applyEdit(state), { retry: applyEdit });
-    if (res.ok || res.local) { toast("Updated " + name + ".", "good"); renderAll(); } else { renderAdminStaff(root); }
+    if (res.ok || res.local) {
+      // A new role takes effect at their next sign-in -- so sign them out now.
+      if (original.role !== role) callApi("admin", { action: "signOut", ptype: "staff", id });
+      toast("Updated " + name + ".", "good"); renderAll();
+    } else { renderAdminStaff(root); }
   }));
   root.querySelectorAll("[data-cancel-delete-staff]").forEach((btn) => btn.addEventListener("click", () => {
     confirmDeleteStaffId = null;
@@ -8852,14 +8914,16 @@ function renderAdminStaff(root) {
       const username = uniqueUsername(slugUsername(first, last || first), taken);
       taken.add(username);
       const password = randomPassword();
-      newState.staff.push({ id: uid("st"), name: parsed.name, username, password, role: parsed.role });
-      added.push({ name: parsed.name, username, password });
+      const id = uid("st");
+      newState.staff.push({ id, name: parsed.name, username, role: parsed.role });
+      added.push({ id, name: parsed.name, username, password });
     });
     if (!added.length) { toast("Couldn't read any of those lines — one name per line, optionally \"Name, role\".", "warn"); return; }
     bulkStaffResult = { added, skipped };
     showBulkStaffForm = false;
     const res = await saveState(newState);
     if (res.ok || res.local) {
+      for (const a of added) await setPasswordOnServer("staff", a.id, a.password, a.name + "’s");
       toast("Added " + added.length + " staff account" + (added.length === 1 ? "" : "s") + (skipped.length ? " — " + skipped.length + " line(s) skipped" : ""), "good");
       renderAll();
     } else {
@@ -9421,9 +9485,13 @@ function renderAdminStudents(root) {
     if (!password) password = randomPassword();
     const yearOfBirth = yobRaw ? Number(yobRaw) : null;
     const newState = JSON.parse(JSON.stringify(state));
-    newState.roster.push({ id: uid("s"), last, first, username, password, active: true, yearOfBirth });
+    const sid = uid("s");
+    newState.roster.push({ id: sid, last, first, username, active: true, yearOfBirth });
     const res = await saveState(newState);
-    if (res.ok || res.local) { toast("Added " + first + " " + last + " — username: " + username + ", password: " + password, "good"); renderAll(); }
+    if (res.ok || res.local) {
+      if (await setPasswordOnServer("student", sid, password, first + "’s")) toast("Added " + first + " " + last + " — username: " + username + ", password: " + password, "good");
+      renderAll();
+    }
   });
   // "Open record" (Actions menu) -- this view redraws itself when the menu opens, so wire it here.
   root.querySelectorAll(".sticky-col-r [data-student-link]").forEach((btn) => btn.addEventListener("click", () => {
@@ -9454,7 +9522,10 @@ function renderAdminStudents(root) {
       s.enrollmentLog = (s.enrollmentLog || []).concat([{ [graduate ? "graduated" : "reenrolled"]: today }]);
       return ns;
     });
-    if (res.ok || res.local) { openStudentActionMenu = null; toast(rec.first + " " + rec.last + (graduate ? " graduated." : " re-enrolled."), "good"); renderAll(); }
+    if (res.ok || res.local) {
+      if (graduate) callApi("admin", { action: "signOut", ptype: "student", id }); // signed out on every device too
+      openStudentActionMenu = null; toast(rec.first + " " + rec.last + (graduate ? " graduated." : " re-enrolled."), "good"); renderAll();
+    }
   }));
   root.querySelectorAll("[data-toggle-ta]").forEach((btn) => btn.addEventListener("click", async () => {
     const id = btn.getAttribute("data-toggle-ta");
@@ -9465,13 +9536,10 @@ function renderAdminStudents(root) {
     if (res.ok || res.local) { toast(s.isTA ? s.first + " " + s.last + " can now grant Chazzan bonus coins from their own My Balance page." : s.first + " " + s.last + " can no longer grant Chazzan coins.", "good"); renderAll(); }
   }));
   root.querySelectorAll("[data-reset-student]").forEach((btn) => btn.addEventListener("click", async () => {
-    const id = btn.getAttribute("data-reset-student");
-    const newState = JSON.parse(JSON.stringify(state));
-    const rec = newState.roster.find((s) => s.id === id);
+    const rec = studentById(btn.getAttribute("data-reset-student"));
+    if (!rec) return;
     const np = randomPassword();
-    rec.password = np;
-    const res = await saveState(newState);
-    if (res.ok || res.local) { toast("New password for " + rec.first + " " + rec.last + ": " + np, "good"); renderAll(); }
+    if (await setPasswordOnServer("student", rec.id, np, rec.first + "’s")) { toast("New password for " + rec.first + " " + rec.last + ": " + np + " (signed out everywhere).", "good"); renderAll(); }
   }));
   root.querySelectorAll("[data-student-menu-toggle]").forEach((btn) => btn.addEventListener("click", () => {
     const id = btn.getAttribute("data-student-menu-toggle");
@@ -9550,14 +9618,16 @@ function renderAdminStudents(root) {
       const username = uniqueUsername(slugUsername(pair.first, pair.last), taken);
       taken.add(username);
       const password = randomPassword();
-      newState.roster.push({ id: uid("s"), last: pair.last, first: pair.first, username, password, active: true });
-      added.push({ first: pair.first, last: pair.last, username, password });
+      const id = uid("s");
+      newState.roster.push({ id, last: pair.last, first: pair.first, username, active: true });
+      added.push({ id, first: pair.first, last: pair.last, username, password });
     });
     if (!added.length) { toast("Couldn't read any of those lines — use \"Last, First\" or \"First Last\", one per line.", "warn"); return; }
     bulkStudentResult = { added, skipped };
     showBulkStudentForm = false;
     const res = await saveState(newState);
     if (res.ok || res.local) {
+      for (const a of added) await setPasswordOnServer("student", a.id, a.password, a.first + "’s");
       toast("Added " + added.length + " student" + (added.length === 1 ? "" : "s") + (skipped.length ? " — " + skipped.length + " line(s) skipped" : ""), "good");
       renderAll();
     } else {
@@ -11682,6 +11752,11 @@ function famOpenItem(id) {
 function renderAll() {
   const shellEl = document.getElementById("shell");
   const loginEl = document.getElementById("login-root");
+  if (authNeeded) {
+    if (shellEl) shellEl.style.display = "none";
+    if (loginEl && !loginEl.querySelector("#lg-submit")) { loginEl.style.display = ""; renderLogin(loginEl); }
+    return;
+  }
   if (!state) {
     stopLbRotation();
     stopLiveSchedule();
@@ -11788,9 +11863,33 @@ async function migrateShabbosShacharisChazzan() {
     return draft;
   });
 }
+// The Firebase sign-in this device already has (it's remembered between visits), or null. Only a
+// pass from the app's own server counts (it carries ptype/pid) -- anything else, like the old
+// shared account from before sign-in moved to the server, is signed out.
+async function existingSignIn() {
+  const user = await new Promise((resolve) => { const off = firebaseAuth.onAuthStateChanged((u) => { off(); resolve(u); }); });
+  if (!user) return null;
+  try {
+    const c = (await user.getIdTokenResult()).claims;
+    if (c && c.ptype && c.pid && c.role !== "tv") return { type: c.ptype === "staff" ? "staff" : "student", id: c.pid };
+  } catch (e) { /* offline: fall through to signing in again */ }
+  await firebaseAuth.signOut().catch(() => {});
+  return null;
+}
+let authNeeded = false; // no one signed in on this device: show the sign-in screen (see renderAll)
 async function init() {
   if (TV_MODE) { initTv(); return; } // hallway TV: read-only, no login, no migrations, no sheet timers (see TV DISPLAY below)
   renderAll(); // shows the "Loading..." screen (state is still null at this point)
+  const who = await existingSignIn();
+  if (!who) { localStorage.removeItem(SESSION_KEY); authNeeded = true; renderAll(); return; }
+  setSession(who.type, who.id);
+  startApp();
+}
+let appStarted = false;
+async function startApp() {
+  if (appStarted) return;
+  appStarted = true;
+  renderAll();
   // If loading ever stalls anyway, say so and offer a reload instead of a silent wait.
   const stallTimer = setTimeout(() => {
     const loginEl = document.getElementById("login-root");
@@ -11814,9 +11913,13 @@ async function init() {
     if (loginEl) loginEl.innerHTML = '<div class="login-wrap"><div class="login-card"><p class="sub" style="text-align:center;color:var(--warn);">Couldn’t connect — check your internet connection and reload the page.</p></div></div>';
     return;
   }
-  try { await migrateGcBonusLedgerEntries(); } catch (e) { console.error("GC Bonus migration failed:", e); }
-  try { await migrateInlineAvatars(); } catch (e) { console.error("Avatar migration failed:", e); }
-  try { await migrateShabbosShacharisChazzan(); } catch (e) { console.error("Chazzan migration failed:", e); }
+  // One-time data fixes only ever run from a staff device (students can't change the shared data).
+  const me = currentSession();
+  if (me && me.type === "staff") {
+    try { await migrateGcBonusLedgerEntries(); } catch (e) { console.error("GC Bonus migration failed:", e); }
+    try { await migrateInlineAvatars(); } catch (e) { console.error("Avatar migration failed:", e); }
+    try { await migrateShabbosShacharisChazzan(); } catch (e) { console.error("Chazzan migration failed:", e); }
+  }
   renderAll();
   listenForLiveUpdates();
 }
@@ -11920,6 +12023,7 @@ function syncNow() {
       announcements. Never notes, passwords, per-student scores, ledger or staff data.
    ================================================================ */
 const TV_FLAG_KEY = "tag_tv_mode_v1";
+const TV_KEY_KEY = "tag_tv_key_v1"; // this TV's connection key (see initTv)
 const TV_EXIT_SEEN_KEY = "tag_tv_exit_seen_v1";
 const TV_RELOAD_KEY = "tag_tv_last_reload_v1";
 const TV_MAX_PHOTOS = 40;
@@ -12060,9 +12164,27 @@ async function initTv() {
   document.title = "TAG Academy TV";
   const root = document.getElementById("tv-root");
   root.innerHTML = '<div class="tv-shift"><div class="tv-root" id="tv-canvas"><div class="tv-boot">Loading TAG Academy…</div></div></div>';
+  // The TV signs in with its own key (Admin > TV Display > Connect a TV gives a link with ?key=...,
+  // remembered here after the first visit) and gets a read-only "tv" pass from the server.
+  let key = null;
+  try { key = new URLSearchParams(location.search).get("key") || localStorage.getItem(TV_KEY_KEY); } catch (e) {}
+  if (!key) {
+    root.querySelector("#tv-canvas").innerHTML = '<div class="tv-boot">This TV isn’t connected yet.<br><small>On a phone: Admin › TV Display › Connect a TV, then open the link it gives on this TV.</small></div>';
+    return;
+  }
   try {
-    await firebaseAuth.signInWithEmailAndPassword(APP_SERVICE_EMAIL, APP_SERVICE_PASSWORD);
-    // Plain read -- unlike loadState(), never creates the document if it's missing.
+    const r = await callApi("tv", { key });
+    if (!r.ok) {
+      if (/connect it again|isn’t connected/.test(r.error || "")) {
+        try { localStorage.removeItem(TV_KEY_KEY); } catch (e) {}
+        root.querySelector("#tv-canvas").innerHTML = '<div class="tv-boot">' + escapeHtml(r.error) + "</div>";
+        return;
+      }
+      throw new Error(r.error);
+    }
+    try { localStorage.setItem(TV_KEY_KEY, key); } catch (e) {}
+    if (/[?&]key=/.test(location.search)) history.replaceState(null, "", location.pathname + "?tv=1"); // don't leave the key on screen
+    await firebaseAuth.signInWithCustomToken(r.token);
     const snap = await STATE_DOC.get();
     if (!snap.exists) throw new Error("No school data found yet.");
     state = snap.data();
@@ -12819,6 +12941,13 @@ function renderTvControl(root, session) {
   // Leaderboard settings
   html += collapsibleSectionHtml("tvLb", "Leaderboard settings", cfg.leaderboard.categories.length + " categories · " + ({ week: "this week", hmonth: "Hebrew month", all: "all time" }[cfg.leaderboard.scope] || ""), tvcLeaderboardHtml());
   // Exit
+  // Connect a TV: the TV signs in with its own key (see initTv), made here and shown once.
+  html += collapsibleSectionHtml("tvConnect", "Connect a TV", "Give a TV its own read-only sign-in",
+    '<p class="help-text">Makes a link that signs a TV in — it can show the slideshow, leaderboard and schedule, and nothing else. Open the link once on the TV computer; it’s remembered after that. Making a new link disconnects any TV using the old one.</p>' +
+    (TVC.tvLink ? '<input type="text" class="tvc-text" readonly id="tvc-tvlink" value="' + escapeHtml(TVC.tvLink) + '" onclick="this.select()">' +
+      '<div class="tvc-row"><button type="button" class="btn btn-ghost" data-tvc-act="tv-copy">Copy link</button></div>' +
+      '<p class="help-text">Keep this link private — anyone with it can open the TV screen.</p>'
+      : '<button type="button" class="btn btn-primary" data-tvc-act="tv-link">Make a TV link</button>'));
   html += collapsibleSectionHtml("tvExit", "Exit TV mode", "Return the screen to the normal app",
     '<p class="help-text">Sends the TV back to the normal app login. To put it back in TV mode, open the TV link again.</p><button type="button" class="btn btn-ghost" data-tvc-act="exit-tv">Exit TV mode on screen</button>');
   // Re-rendering replaces the whole tab (a saved setting echoing back, a photo list update...);
@@ -13047,6 +13176,16 @@ function tvcWire(root) {
     } else if (act === "album-clear") {
       if (await tvcWrite({ photos: { albumUrl: "" } }, "Album disconnected.")) { TVC.albumInput = null; TVC.albumCheck = null; }
     } else if (act === "clear-ann") { TVC.annText = null; tvcWrite({ announcement: null }, "Announcement cleared."); }
+    else if (act === "tv-link") {
+      if (!window.confirm("Make a new TV link? Any TV using the old one will need the new link.")) return;
+      const r = await callApi("admin", { action: "tvKey" });
+      if (!r.ok) { toast(r.error, "warn"); return; }
+      TVC.tvLink = location.origin + location.pathname + "?tv=1&key=" + encodeURIComponent(r.key);
+      refreshViewOrDefer();
+    } else if (act === "tv-copy") {
+      const inp = document.getElementById("tvc-tvlink");
+      if (inp) { inp.select(); try { navigator.clipboard.writeText(inp.value).then(() => toast("Link copied.", "good")); } catch (e) { document.execCommand("copy"); } }
+    }
     else if (act === "refresh-tv") tvcWrite({ refreshTvNonce: String(Date.now()) + "-" + Math.random().toString(36).slice(2, 6) }, "Told the TV to refresh — it takes a few seconds.");
     else if (act === "exit-tv") tvcWrite({ exitTvNonce: String(Date.now()) + "-" + Math.random().toString(36).slice(2, 6) }, "Told the TV to exit TV mode.");
     else if (act === "rot-add") tvcWrite({ rotate: cfg.rotate.concat([{ layout: "all", secs: 30 }]) });
