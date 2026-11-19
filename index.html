@@ -2478,8 +2478,10 @@ function uniqueUsername(base, takenSet) {
   while (takenSet.has(candidate)) { candidate = base + i; i++; }
   return candidate;
 }
+// Six digits: easy to type, and with sign-in locking a username after 10 wrong tries, far too many
+// to guess.
 function randomPassword() {
-  return String(Math.floor(1000 + Math.random() * 9000));
+  return String(Math.floor(100000 + Math.random() * 900000));
 }
 /* Passwords in the Admin > Staff/Students tables default to masked (dots) rather than plain
    text, since those tables are often up on a shared screen or projector -- revealedPasswords
@@ -4437,7 +4439,7 @@ function renderAvatarPickerModal(session) {
     '<div class="modal modal-wide">' +
     "<h2>Choose your avatar</h2>" +
     '<p class="sub">Pick a face from the gallery. <button type="button" class="diag-link" id="avatar-diagnostics-top" style="display:inline;font-size:0.8rem;">Open Diagnostics</button></p>' +
-    body +
+    body + (viewAsSession ? "" : myPasswordHtml()) +
     '<div style="display:flex;justify-content:space-between;gap:10px;">' +
     '<button type="button" class="btn btn-ghost btn-sm" id="avatar-clear-btn"' + (session.record.photoUrl ? "" : " disabled") + ">Reset to default</button>" +
     '<button type="button" class="btn btn-ghost btn-sm" id="avatar-diagnostics-btn" title="Data size, speed, and recent problems on this device">Diagnostics</button>' +
@@ -4448,6 +4450,7 @@ function renderAvatarPickerModal(session) {
     if (evt.target.id === "avatar-picker-backdrop") { closeAvatarPicker(session); }
   });
   document.getElementById("avatar-cancel-btn").addEventListener("click", () => closeAvatarPicker(session));
+  wireMyPassword(session);
   const clearBtn = document.getElementById("avatar-clear-btn");
   if (clearBtn) clearBtn.addEventListener("click", () => setMyAvatar(session, null));
   const avatarDiagBtn = document.getElementById("avatar-diagnostics-btn");
@@ -4458,7 +4461,38 @@ function renderAvatarPickerModal(session) {
     setMyAvatar(session, "gallery:" + Number(btn.getAttribute("data-avatar-choice")));
   }));
 }
+// "Change my password", in the window that opens from your own picture (see renderAvatarPickerModal).
+let myPasswordOpen = false;
+function myPasswordHtml() {
+  if (!myPasswordOpen) return '<div style="margin:4px 0 14px;"><button type="button" class="btn btn-ghost btn-sm" id="mypw-open">🔑 Change my password</button></div>';
+  return '<div class="card card-pad" style="margin:4px 0 14px;"><div class="section-title" style="font-size:0.95rem;">Change my password</div>' +
+    '<div class="field"><label for="mypw-cur">Current password</label>' + passwordFieldHtml("mypw-cur", { autocomplete: "current-password" }) + "</div>" +
+    '<div class="field"><label for="mypw-new">New password (at least 6 characters)</label>' + passwordFieldHtml("mypw-new", { autocomplete: "new-password" }) + "</div>" +
+    '<div class="field"><label for="mypw-new2">New password again</label>' + passwordFieldHtml("mypw-new2", { autocomplete: "new-password" }) + "</div>" +
+    '<div style="display:flex;gap:8px;"><button type="button" class="btn btn-primary btn-sm" id="mypw-save">Save new password</button><button type="button" class="btn btn-ghost btn-sm" id="mypw-cancel">Cancel</button></div></div>';
+}
+function wireMyPassword(session) {
+  const open = document.getElementById("mypw-open");
+  if (open) open.addEventListener("click", () => { myPasswordOpen = true; renderAvatarPickerModal(session); const f = document.getElementById("mypw-cur"); if (f) f.focus(); });
+  const cancel = document.getElementById("mypw-cancel");
+  if (cancel) cancel.addEventListener("click", () => { myPasswordOpen = false; renderAvatarPickerModal(session); });
+  const save = document.getElementById("mypw-save");
+  if (save) save.addEventListener("click", async () => {
+    const cur = document.getElementById("mypw-cur").value, nw = document.getElementById("mypw-new").value, nw2 = document.getElementById("mypw-new2").value;
+    if (!cur) { toast("Enter your current password.", "warn"); return; }
+    if (nw.length < 6) { toast("Choose a new password with at least 6 characters.", "warn"); return; }
+    if (nw !== nw2) { toast("The two new passwords don’t match.", "warn"); return; }
+    save.disabled = true;
+    const r = await callApi("me", { action: "changePassword", current: cur, next: nw });
+    save.disabled = false;
+    if (!r.ok) { toast(r.error, "warn"); return; }
+    myPasswordOpen = false; avatarPickerOpen = false; renderAvatarPickerModal(session);
+    toast("Your password is changed. Use the new one next time you sign in.", "good");
+  });
+  wirePasswordToggles(document.getElementById("avatar-picker-root"));
+}
 function closeAvatarPicker(session) {
+  myPasswordOpen = false;
   avatarPickerOpen = false;
   renderAvatarPickerModal(session);
 }
@@ -8252,7 +8286,7 @@ function renderAdminSecurity(root) {
     (securityLog === null ? '<button type="button" class="btn btn-ghost" id="sec-log">Show the change log</button>'
       : securityLog.length ? '<div class="table-wrap"><table><thead><tr><th>When</th><th>Who</th><th>What</th></tr></thead><tbody>' + securityLog.map((e) =>
           "<tr><td>" + escapeHtml(new Date(e.at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })) + "</td><td>" + escapeHtml((e.who && e.who.name) || "—") + "</td><td>" +
-          escapeHtml({ setPassword: "Set a password", signOut: "Signed someone out", movePasswords: "Moved passwords to the server", tvKey: "Connected a TV", pool: "Chipped into a pool", chazzan: "Recorded the chazzan" }[e.action] || e.action) +
+          escapeHtml({ setPassword: "Set a password", changeOwnPassword: "Changed their own password", resetAllStudents: "Reset all students’ passwords", signOut: "Signed someone out", movePasswords: "Moved passwords to the server", tvKey: "Connected a TV", pool: "Chipped into a pool", chazzan: "Recorded the chazzan" }[e.action] || e.action) +
           (e.details && (e.details.name || e.details.title) ? " — " + escapeHtml(e.details.name || e.details.title) : "") + (e.details && e.details.amount ? " (" + num2(e.details.amount) + ")" : "") + "</td></tr>").join("") + "</tbody></table></div>"
       : '<p class="help-text">Nothing yet.</p>') + "</div>";
   root.innerHTML = html;
@@ -9369,6 +9403,7 @@ function renderAdminTimeClock(root, session) {
 let bulkStudentResult = null;
 let showBulkStudentForm = false;
 let showArchivedStudents = false;
+let resetAllResult = null; // the one-time list from "Reset all students' passwords"
 let confirmDeleteStudentId = null;
 let editingStudentId = null;
 // Which student's row-action menu is expanded (only one at a time) -- collapsing the five
@@ -9433,6 +9468,14 @@ function renderAdminStudents(root) {
       '<button class="btn btn-ghost btn-sm" id="r-bulk-cancel">Cancel</button></div></div>';
   }
 
+  // Reset all students' passwords: new ones for every current student, shown once to print.
+  html += '<div class="card card-pad"><div class="section-title">New passwords for everyone</div>' +
+    (resetAllResult
+      ? '<p class="help-text" style="margin-top:-6px;">New passwords for ' + resetAllResult.length + " students — print or copy this now; it won’t be shown again. Everyone was signed out.</p>" +
+        '<textarea readonly rows="' + Math.min(14, Math.max(4, resetAllResult.length)) + '" style="font-family:var(--font-mono);font-size:0.85rem;" onclick="this.select()">' + escapeHtml(credentialsList(resetAllResult)) + "</textarea>" +
+        '<div style="display:flex;gap:8px;margin-top:10px;"><button class="btn btn-primary btn-sm" id="reset-all-print">Print slips</button><button class="btn btn-ghost btn-sm" id="reset-all-dismiss">Done</button></div>'
+      : '<p class="help-text" style="margin-top:-6px;">Gives every current student a new 6-digit password and signs them out. You get a list to print and hand out.</p>' +
+        '<button class="btn btn-ghost btn-sm" id="reset-all-btn">Reset all students’ passwords…</button>') + "</div>";
   if (bulkStudentResult) {
     const r = bulkStudentResult;
     html += '<div class="card card-pad"><div class="section-title">Added ' + r.added.length + " student" + (r.added.length === 1 ? "" : "s") + '</div>' +
@@ -9633,6 +9676,27 @@ function renderAdminStudents(root) {
     } else {
       bulkStudentResult = null;
     }
+  });
+  const resetAllBtn = document.getElementById("reset-all-btn");
+  if (resetAllBtn) resetAllBtn.addEventListener("click", async () => {
+    if (!window.confirm("Give every current student a new password? Their old passwords stop working right away, and they’re signed out on every device.")) return;
+    resetAllBtn.disabled = true; resetAllBtn.textContent = "Making new passwords…";
+    const r = await callApi("admin", { action: "resetAllStudents" });
+    if (!r.ok) { toast(r.error, "warn"); resetAllBtn.disabled = false; resetAllBtn.textContent = "Reset all students’ passwords…"; return; }
+    resetAllResult = r.students.sort((a, b) => (a.last + a.first).localeCompare(b.last + b.first));
+    renderAdminStudents(root);
+  });
+  const resetAllDismiss = document.getElementById("reset-all-dismiss");
+  if (resetAllDismiss) resetAllDismiss.addEventListener("click", () => { if (window.confirm("Close the list? It can’t be shown again.")) { resetAllResult = null; renderAdminStudents(root); } });
+  const resetAllPrint = document.getElementById("reset-all-print");
+  if (resetAllPrint) resetAllPrint.addEventListener("click", () => {
+    // One cut-out slip per student.
+    const w = window.open("", "_blank");
+    if (!w) { toast("Allow pop-ups to print, or copy the list instead.", "warn"); return; }
+    w.document.write("<!doctype html><meta charset=utf-8><title>TAG Academy passwords</title><style>body{font-family:Arial,sans-serif;margin:16px}.s{display:inline-block;width:46%;margin:6px 1%;padding:12px;border:1px dashed #888;border-radius:6px;box-sizing:border-box;break-inside:avoid}b{font-size:1.1em}.m{font-family:monospace;font-size:1.25em}</style>" +
+      resetAllResult.map((x) => '<div class="s"><b>' + escapeHtml(x.first + " " + x.last) + '</b><br>TAG Academy — ' + escapeHtml((location.host + location.pathname).replace(/\/$/, "")) + '<br>Username: <span class="m">' + escapeHtml(x.username) + '</span><br>Password: <span class="m">' + escapeHtml(x.password) + "</span></div>").join("") +
+      "<script>window.onload=function(){window.print();}<\/script>");
+    w.document.close();
   });
   const bulkStudentDismiss = document.getElementById("r-bulk-dismiss");
   if (bulkStudentDismiss) bulkStudentDismiss.addEventListener("click", () => { bulkStudentResult = null; renderAdminStudents(root); });
