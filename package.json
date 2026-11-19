@@ -1,0 +1,9 @@
+{
+  "name": "tag-academy-web",
+  "private": true,
+  "description": "TAG Academy app (index.html) plus its small server functions in api/ (run by Vercel).",
+  "dependencies": {
+    "bcryptjs": "2.4.3",
+    "firebase-admin": "12.7.0"
+  }
+}
