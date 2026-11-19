@@ -1,0 +1,28 @@
+rules_version = '2';
+// Firestore rules for TAG Academy. Paste these into Firebase console > Firestore Database > Rules
+// (they aren't deployed from GitHub). Everyone signs in through the app's own server
+// (api/login.js, api/tv.js), which gives each pass a role:
+//   admin, teacher, limited, family  -> staff
+//   student                          -> a student
+//   tv                               -> the hallway TV
+// The old shared "app-service" account has no role, so it gets nothing.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function role() { return request.auth != null ? request.auth.token.role : null; }
+    function isStaff() { return role() in ['admin', 'teacher', 'limited', 'family']; }
+    function signedIn() { return isStaff() || role() in ['student', 'tv']; }
+
+    // The shared data: anyone signed in can read it; only staff can change it. Students' few
+    // changes (avatar, pools, Chazzan) go through the server, which checks them.
+    match /app/state { allow read: if signedIn(); allow write: if isStaff(); }
+    match /app/family { allow read, write: if isStaff(); }
+    // The TV's settings and photos: staff change them, the TV (and everyone signed in) reads them.
+    match /app/display { allow read: if signedIn(); allow write: if isStaff(); }
+    match /app/displayStatus { allow read: if isStaff(); allow write: if isStaff() || role() == 'tv'; }
+    match /displayPhotos/{photo} { allow read: if signedIn(); allow write: if isStaff(); }
+
+    // Everything else -- creds (scrambled passwords), backups, the change log, the TV key,
+    // sign-in lockouts -- is for the server only.
+    match /{document=**} { allow read, write: if false; }
+  }
+}
