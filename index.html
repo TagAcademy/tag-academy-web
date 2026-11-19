@@ -1637,6 +1637,8 @@ html.tv-mode #tv-root { display: block; }
 .staff-coins-hist { display: flex; flex-direction: column; gap: 4px; font-size: .85rem; border-top: 1px solid var(--line); padding-top: 8px; }
 .staff-coins-hist div { display: grid; grid-template-columns: 5.5em 4em 1fr auto; gap: 8px; align-items: center; }
 .staff-coins-hist .pos { color: var(--gold); } .staff-coins-hist .neg { color: var(--warn); }
+/* A balance below zero (allowed, after a warning) shows in red on the TAG Coins page. */
+.coin-card-balance-value.neg { color: var(--warn); }
 /* Pools (TAG Coins page / a student's My Balance) */
 .pool-list { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
 .pool-card { border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: var(--surface); display: flex; flex-direction: column; gap: 8px; }
@@ -1863,7 +1865,9 @@ async function poolContribute(session, poolId, studentId, amountRaw) {
   if (!(amount > 0)) { toast("Enter how many coins.", "warn"); return; }
   // Any amount they like -- even past the goal -- as long as they have the coins.
   const bal = studentStats(studentId).balance;
-  if (amount > bal) { toast((session.type === "student" ? "You only have " : "They only have ") + num2(bal) + " TAG coins.", "warn"); return; }
+  // Students can't put themselves below zero; staff adding for a student can, after a warning.
+  if (amount > bal && session.type === "student") { toast("You only have " + num2(bal) + " TAG coins.", "warn"); return; }
+  if (amount > bal) { const st = studentById(studentId); if (!window.confirm("Warning: " + (st ? st.first + " " + st.last : "This student") + " only has " + num2(bal) + " TAG coins — this puts them at " + num2(bal - amount) + ".\n\nAdd anyway?")) return; }
   if (session.type === "student" && !window.confirm("Put " + num2(amount) + " TAG coins toward " + p.title + "? This comes out of your balance now.")) return;
   const txId = uid("l"), today = todayISO(), now = Date.now();
   const res = await saveEdit((ns) => {
@@ -6899,7 +6903,7 @@ function renderLedger(root, session) {
         '<span class="coin-card-check">' + icon("check") + "</span>" +
         avatarHtml(s, "lb-avatar-md") +
         '<span class="coin-card-name">' + fullName(s) + "</span>" +
-        '<span class="coin-card-balance">' + coinBadge("sm") + '<span class="coin-card-balance-value">' + num2(bal) + "</span></span>" +
+        '<span class="coin-card-balance">' + coinBadge("sm") + '<span class="coin-card-balance-value' + (bal < 0 ? " neg" : "") + '">' + num2(bal) + "</span></span>" +
         "</button>";
     }).join("") + "</div>";
   }
@@ -6915,7 +6919,7 @@ function renderLedger(root, session) {
       '<div class="coin-card-grid">' + staffList.map((s) => '<button type="button" class="coin-card' + (staffCoinsOpen === s.id ? " selected" : "") + '"' + (canWrite ? "" : " disabled") + ' data-staff-coins="' + s.id + '">' +
         '<span class="coin-card-check">' + icon("check") + "</span>" + avatarHtml(s, "lb-avatar-md") +
         '<span class="coin-card-name">' + escapeHtml(s.name) + "</span>" +
-        '<span class="coin-card-balance">' + coinBadge("sm") + '<span class="coin-card-balance-value">' + num2(staffStats(s.id).balance) + "</span></span></button>").join("") + "</div>" +
+        '<span class="coin-card-balance">' + coinBadge("sm") + '<span class="coin-card-balance-value' + (staffStats(s.id).balance < 0 ? " neg" : "") + '">' + num2(staffStats(s.id).balance) + "</span></span></button>").join("") + "</div>" +
       (staffCoinsOpen && staffList.some((s) => s.id === staffCoinsOpen) ? '<div style="margin-top:14px;">' + staffCoinsFormHtml(staffById(staffCoinsOpen)) + "</div>" : "") + "</div>";
   } else if (session.type === "staff") {
     const me = session.record, st = staffStats(me.id);
@@ -7054,19 +7058,11 @@ function renderLedger(root, session) {
     const note = document.getElementById("coin-note").value.trim();
     if (!date || !amount || amount <= 0) { toast("Pick a date and a positive amount.", "warn"); return; }
     const type = coinActionMode === "purchase" ? "Spent/Redeemed" : "Manual Grant";
-    // A charge can't push anyone's balance negative -- rather than blocking the whole batch
-    // over one student who's short, apply it to everyone who can afford it and report who got
-    // skipped, so e.g. charging the whole roster for a trip still works for the 28 kids who can
-    // cover it even if 2 can't.
-    const applied = [], skipped = [];
-    ids.forEach((id) => {
-      if (type === "Spent/Redeemed") {
-        const bal = studentStats(id).balance;
-        if (amount > bal) { const s = studentById(id); skipped.push(s ? s.last + ", " + s.first : id); return; }
-      }
-      applied.push(id);
-    });
-    if (applied.length === 0) { toast("No one selected has enough balance for that charge.", "warn"); return; }
+    // A charge may take a balance below zero, but only after a warning that names who and by how much.
+    const applied = ids.slice();
+    const short = type === "Spent/Redeemed" ? ids.map((id) => ({ id, after: studentStats(id).balance - amount })).filter((x) => x.after < 0) : [];
+    if (short.length && !window.confirm("Warning: this charge puts " + (short.length === 1 ? "this student" : "these students") + " below zero:\n\n" +
+      short.map((x) => { const st = studentById(x.id); return "• " + (st ? st.first + " " + st.last : x.id) + " → " + num2(x.after); }).join("\n") + "\n\nCharge anyway?")) return;
     coinSubmitBtn.disabled = true;
     const newState = JSON.parse(JSON.stringify(state));
     const enteredAt = Date.now();
@@ -7078,8 +7074,8 @@ function renderLedger(root, session) {
       ledgerCart = [];
       toast(
         (type === "Manual Grant" ? "Granted to " : "Charged ") + applied.length + " student" + (applied.length === 1 ? "" : "s") + "." +
-        (skipped.length ? " Skipped " + skipped.length + " with insufficient balance: " + skipped.join(", ") + "." : ""),
-        skipped.length ? "warn" : "good"
+        (short.length ? " " + short.length + " now below zero." : ""),
+        short.length ? "warn" : "good"
       );
       renderAll();
     } else {
@@ -7099,8 +7095,7 @@ function renderLedger(root, session) {
     const bal = studentStats(fromId).balance;
     if (amount > bal) {
       const s = studentById(fromId);
-      toast((s ? s.last + ", " + s.first : "That student") + "’s balance is only " + num2(bal) + " — can’t transfer out " + num2(amount) + ".", "warn");
-      return;
+      if (!window.confirm("Warning: " + (s ? s.first + " " + s.last : "That student") + " only has " + num2(bal) + " TAG coins — this transfer puts them at " + num2(bal - amount) + ".\n\nTransfer anyway?")) return;
     }
     trSubmitBtn.disabled = true;
     const newState = JSON.parse(JSON.stringify(state));
@@ -8532,7 +8527,7 @@ function wireStaffCoins(root, rerender) {
     const note = document.getElementById("sc-note").value.trim();
     if (!rec) return;
     if (!(amount > 0)) { toast("Enter how many coins.", "warn"); return; }
-    if (type === "Charge" && amount > staffStats(id).balance) { toast(rec.name + " only has " + num2(staffStats(id).balance) + " TAG coins.", "warn"); return; }
+    if (type === "Charge" && amount > staffStats(id).balance && !window.confirm("Warning: " + rec.name + " only has " + num2(staffStats(id).balance) + " TAG coins — this charge puts them at " + num2(staffStats(id).balance - amount) + ".\n\nCharge anyway?")) return;
     const txId = uid("sl"), today = todayISO(), now = Date.now(), by = (currentSession() || { record: {} }).record.name || "";
     const res = await saveEdit((ns) => {
       ns.staffLedger = ns.staffLedger || [];
@@ -8545,10 +8540,8 @@ function wireStaffCoins(root, rerender) {
     const txId = btn.getAttribute("data-staff-coins-undo");
     const tx = (state.staffLedger || []).find((t) => t.id === txId);
     if (!tx) return;
-    // Undoing a grant can't leave them below zero -- undo the charge that spent it first.
     const after = staffStats(tx.staffId).balance - (tx.type === "Charge" ? -1 : 1) * (Number(tx.amount) || 0);
-    if (after < 0) { toast("That would leave them at " + num2(after) + " coins — undo the charge first.", "warn"); return; }
-    if (!window.confirm("Undo this coin entry?")) return;
+    if (!window.confirm(after < 0 ? "Warning: undoing this leaves them at " + num2(after) + " TAG coins.\n\nUndo anyway?" : "Undo this coin entry?")) return;
     const res = await saveEdit((ns) => { ns.staffLedger = (ns.staffLedger || []).filter((t) => t.id !== txId); return ns; });
     if (res.ok || res.local) { toast("Undone.", "good"); renderAll(); }
   }));
