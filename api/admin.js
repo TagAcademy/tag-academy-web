@@ -5,6 +5,7 @@
 //   signOut     { ptype, id }   sign someone out everywhere (graduated, role changed)
 //   movePasswords {}            one time: copy the whole shared data to backups/, then move every
 //               plain password still in it into creds/ (scrambled) and remove it from the data
+//   resetAllStudents {}         a new password for every current student (returned once, to print)
 //   tvKey       {}              make a new key for the hallway TV (replaces the old one)
 //   log         {}              the last 100 entries of the change log
 const crypto = require("crypto");
@@ -50,6 +51,21 @@ module.exports = async (req, res) => {
       await S.changeState((st) => { (st.staff || []).concat(st.roster || []).forEach((r) => { delete r.password; }); return st; });
       await S.audit(who, "movePasswords", { moved, backupId });
       return S.send(res, 200, { ok: true, moved, backupId });
+    }
+
+    if (b.action === "resetAllStudents") {
+      // A new random 6-digit password for every current student (graduated ones are left alone),
+      // each signed out everywhere; the list comes back once, for printing.
+      const state = await S.readState();
+      const out = [];
+      for (const rec of (state.roster || []).filter((r) => r.active !== false)) {
+        const pw = String(crypto.randomInt(100000, 1000000));
+        await S.credRef("student", rec.id).set({ hash: await S.hashPassword(pw), setAt: Date.now(), setBy: me.name + " (reset all)" });
+        try { await fb.auth().revokeRefreshTokens(S.uidFor("student", rec.id)); } catch (e) { /* never signed in */ }
+        out.push({ id: rec.id, first: rec.first, last: rec.last, username: rec.username, password: pw });
+      }
+      await S.audit(who, "resetAllStudents", { count: out.length });
+      return S.send(res, 200, { ok: true, students: out });
     }
 
     if (b.action === "tvKey") {
