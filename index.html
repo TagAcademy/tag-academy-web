@@ -1449,6 +1449,31 @@ html.tv-mode #tv-root { display: block; }
 .tv-layout-photos .tv-bottom, .tv-layout-leaderboard .tv-bottom, .tv-layout-calendar .tv-bottom, .tv-layout-split .tv-bottom { flex: none; height: 7.2rem; }
 /* clock */
 .tv-zone-clock { flex: none; justify-content: center; }
+/* weather, beside the clock (see weatherHtml) */
+.tv-layout-all .tv-zone-clock.has-wx { width: 41%; }
+.tv-zone-clock.has-wx .tv-clock-time, .tv-zone-clock.has-wx .tv-clock-date { white-space: nowrap; }
+.tv-clock-wrap { display: flex; align-items: center; justify-content: flex-end; gap: 1.6rem; width: 100%; }
+.tv-clock-main { display: flex; flex-direction: column; align-items: flex-end; min-width: 0; }
+.tv-wx { display: flex; flex-direction: column; align-items: center; text-align: center; line-height: 1.15; flex: none; max-width: 15rem; }
+.tv-wx-now { display: flex; align-items: center; gap: .4rem; }
+.tv-wx-icon { font-size: 2.6rem; }
+.tv-wx-temp { font-family: var(--font-display, Arial, sans-serif); font-size: 3.2rem; font-weight: 800; }
+.tv-wx-desc { display: flex; flex-direction: column; font-size: 1.2rem; color: var(--tv-muted); font-weight: 600; margin-top: .2rem; }
+.tv-wx-cond { color: var(--tv-ink); }
+/* The one-line strip: the clock's pieces stay in their row, the weather goes last, short. */
+.tv-clock-small .tv-clock-wrap, .tv-clock-small .tv-clock-main { display: contents; }
+.tv-clock-small .tv-wx { order: 9; margin-left: auto; max-width: none; }
+.tv-clock-small .tv-wx-temp { font-size: 2.8rem; }
+.tv-clock-small .tv-wx-icon { font-size: 2.2rem; }
+.tv-clock-small .tv-wx-cond { display: none; }
+.tv-clock-small .tv-wx-desc { font-size: 1.15rem; margin: 0; white-space: nowrap; }
+.tv-clock-small > .tv-clock-wrap > .tv-clock-main > div, .tv-clock-small > div { white-space: nowrap; }
+.tvc-wx { display: flex; align-items: center; gap: 12px; margin: 8px 0 4px; }
+.tvc-wx-now { display: flex; align-items: center; gap: 6px; }
+.tvc-wx-icon { font-size: 1.6rem; }
+.tvc-wx-temp { font-size: 1.5rem; font-weight: 800; }
+.tvc-wx-desc { color: var(--muted); font-size: 0.85rem; display: flex; flex-direction: column; }
+.tvc-wx-results { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .tv-layout-all .tv-zone-clock { width: 31%; align-items: flex-end; text-align: right; padding: .8rem 1.6rem; }
 .tv-layout-all .tv-clock-time { font-size: 4.4rem; line-height: 1.05; }
 .tv-layout-all .tv-clock-date { font-size: 1.8rem; margin-top: .2rem; line-height: 1.15; }
@@ -12213,13 +12238,15 @@ function tvDefaults() {
     // No photos while one of these classes is on the calendar (see tvQuietNow): the TV shows
     // `layout` instead of any layout that has the photo slideshow.
     quiet: { enabled: true, classes: ["Shacharis", "Mincha", "Maariv", "Musaf", "Selichos", "Eagle"], layout: "calendar" },
+    // Local weather beside the clock (see tvRefreshWeather): a place picked in the TV Display tab.
+    weather: { enabled: false, name: "", lat: null, lon: null, units: "F" },
   };
 }
 function tvMergeCfg(raw) {
   const d = tvDefaults();
   if (!raw || typeof raw !== "object") return d;
   const out = Object.assign({}, d, raw);
-  ["photos", "leaderboard", "quiet"].forEach((k) => { out[k] = Object.assign({}, d[k], raw[k] || {}); });
+  ["photos", "leaderboard", "quiet", "weather"].forEach((k) => { out[k] = Object.assign({}, d[k], raw[k] || {}); });
   if (!Array.isArray(out.rotate)) out.rotate = d.rotate;
   if (!Array.isArray(out.schedule)) out.schedule = [];
   if (!Array.isArray(out.leaderboard.categories) || !out.leaderboard.categories.length) out.leaderboard.categories = d.leaderboard.categories;
@@ -12292,7 +12319,8 @@ const TV = {
   videoKnown: new Map(), videoUntil: 0, // album videos (see tvIsVideo / tvNextPhoto)
   photoIdx: -1, photoSlide: 0, lbIdx: 0, lbStamp: 0, shuffleKeys: new Map(),
   cal: { events: [], fetchedAt: 0, ok: null },
-  stamps: { photo: 0, lb: 0, cal: 0, album: 0, hb: 0, shift: 0, nightly: 0 },
+  stamps: { photo: 0, lb: 0, cal: 0, album: 0, hb: 0, shift: 0, nightly: 0, wx: 0 },
+  weather: { key: "", data: null }, // the latest local weather (see tvRefreshWeather)
   exitHandled: false, started: false, dirty: true,
   refreshSeen: null, pageHash: null, loadedAt: Date.now(),
 };
@@ -12416,8 +12444,11 @@ function tvTick() {
   const eff = tvEffectiveLayout(TV.cfg, now, TV.cal.events);
   TV.eff = eff;
   if (eff.layout !== TV.layout) tvBuildLayout(eff.layout);
-  tvUpdateClock();
   const S = TV.stamps;
+  const wx = TV.cfg.weather || {}, wxKey = wx.enabled && wx.lat != null ? wx.lat + "," + wx.lon + "," + wx.units : "";
+  if (wxKey !== TV.weather.key) { TV.weather = { key: wxKey, data: null }; S.wx = 0; }
+  if (wxKey && now - S.wx >= 15 * 60000) { S.wx = now; tvRefreshWeather(wx, wxKey); }
+  tvUpdateClock();
   if (TV.zones.photos) {
     const album = albumLinkOk(TV.cfg.photos.albumUrl) ? TV.cfg.photos.albumUrl.trim() : "";
     if (album !== TV.album.url || (album && now - S.album >= 300000)) { S.album = now; tvRefreshAlbum(album); }
@@ -12506,6 +12537,53 @@ function tvBuildLayout(layout) {
   if (TV.zones.announce) { TV.zones.announce.key = null; tvUpdateAnnouncePanel(Date.now()); }
 }
 
+/* ---------- local weather ----------
+   From Open-Meteo (open-meteo.com: free, no account or key), fetched by the TV itself every 15
+   minutes for the place picked in the TV Display tab. If it can't be reached the TV just keeps the
+   last reading (for up to 3 hours), then leaves the weather off -- nothing else is affected. */
+// WMO weather codes -> [day icon, night icon, words]
+const WX_CODES = {
+  0: ["☀️", "🌙", "Clear"], 1: ["🌤️", "🌙", "Mostly clear"], 2: ["⛅", "☁️", "Partly cloudy"], 3: ["☁️", "☁️", "Cloudy"],
+  45: ["🌫️", "🌫️", "Fog"], 48: ["🌫️", "🌫️", "Freezing fog"],
+  51: ["🌦️", "🌧️", "Light drizzle"], 53: ["🌦️", "🌧️", "Drizzle"], 55: ["🌧️", "🌧️", "Heavy drizzle"], 56: ["🌧️", "🌧️", "Freezing drizzle"], 57: ["🌧️", "🌧️", "Freezing drizzle"],
+  61: ["🌦️", "🌧️", "Light rain"], 63: ["🌧️", "🌧️", "Rain"], 65: ["🌧️", "🌧️", "Heavy rain"], 66: ["🌧️", "🌧️", "Freezing rain"], 67: ["🌧️", "🌧️", "Freezing rain"],
+  71: ["🌨️", "🌨️", "Light snow"], 73: ["🌨️", "🌨️", "Snow"], 75: ["❄️", "❄️", "Heavy snow"], 77: ["🌨️", "🌨️", "Snow grains"],
+  80: ["🌦️", "🌧️", "Showers"], 81: ["🌧️", "🌧️", "Showers"], 82: ["⛈️", "⛈️", "Heavy showers"], 85: ["🌨️", "🌨️", "Snow showers"], 86: ["❄️", "❄️", "Snow showers"],
+  95: ["⛈️", "⛈️", "Thunderstorms"], 96: ["⛈️", "⛈️", "Thunderstorms, hail"], 99: ["⛈️", "⛈️", "Thunderstorms, hail"],
+};
+function weatherUrl(lat, lon, units) {
+  return "https://api.open-meteo.com/v1/forecast?latitude=" + encodeURIComponent(lat) + "&longitude=" + encodeURIComponent(lon) +
+    "&current=temperature_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&forecast_days=1&timezone=auto" +
+    (units === "C" ? "" : "&temperature_unit=fahrenheit");
+}
+// -> { temp, code, isDay, hi, lo, rain, at } or throws
+async function fetchWeather(lat, lon, units) {
+  const r = await fetch(weatherUrl(lat, lon, units));
+  if (!r.ok) throw new Error("weather " + r.status);
+  const d = await r.json(), c = d.current || {}, day = d.daily || {};
+  if (typeof c.temperature_2m !== "number") throw new Error("weather: no reading");
+  const first = (a) => (Array.isArray(a) && typeof a[0] === "number" ? a[0] : null);
+  return { temp: Math.round(c.temperature_2m), code: Number(c.weather_code) || 0, isDay: c.is_day !== 0, hi: first(day.temperature_2m_max), lo: first(day.temperature_2m_min), rain: first(day.precipitation_probability_max), at: Date.now() };
+}
+function weatherHtml(w, cls) {
+  const c = WX_CODES[w.code] || ["🌡️", "🌡️", ""];
+  const deg = (n) => Math.round(n) + "°";
+  const hl = [];
+  if (w.hi !== null && w.lo !== null) hl.push("H " + deg(w.hi) + " · L " + deg(w.lo));
+  if (w.rain !== null && w.rain >= 20) hl.push(Math.round(w.rain) + "% rain");
+  return '<div class="' + cls + '"><span class="' + cls + '-now"><span class="' + cls + '-icon">' + (w.isDay ? c[0] : c[1]) + '</span><span class="' + cls + '-temp">' + deg(w.temp) + "</span></span>" +
+    '<span class="' + cls + '-desc"><span class="' + cls + '-cond">' + escapeHtml(c[2]) + '</span><span class="' + cls + '-hl">' + escapeHtml(hl.join(" · ")) + "</span></span></div>";
+}
+async function tvRefreshWeather(wx, key) {
+  try {
+    const data = await fetchWeather(wx.lat, wx.lon, wx.units);
+    if (TV.weather.key === key) TV.weather.data = data;
+  } catch (e) {
+    console.warn("TV weather:", e);
+    if (TV.weather.key === key && TV.weather.data && Date.now() - TV.weather.data.at > 3 * 3600000) TV.weather.data = null;
+  }
+}
+
 /* ---------- clock ---------- */
 function tvUpdateClock() {
   const zone = TV.zones.clock; if (!zone) return;
@@ -12514,13 +12592,17 @@ function tvUpdateClock() {
   const date = now.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
   const iso = todayISO();
   const heb = hebrewDateFor(iso), parsha = parshaFor(iso);
-  const key = time + "|" + date + "|" + heb;
+  const w = TV.weather.key ? TV.weather.data : null;
+  const key = time + "|" + date + "|" + heb + "|" + (w ? JSON.stringify(w) : "");
   if (zone.key === key) return;
   zone.key = key;
-  zone.el.innerHTML = '<div class="tv-clock-time">' + escapeHtml(time) + "</div>" +
+  const clock = '<div class="tv-clock-time">' + escapeHtml(time) + "</div>" +
     '<div class="tv-clock-date">' + escapeHtml(date) + "</div>" +
     (heb ? '<div class="tv-clock-heb" dir="rtl">' + escapeHtml(heb) + "</div>" : "") +
     (parsha ? '<div class="tv-clock-parsha">' + escapeHtml(parsha) + "</div>" : "");
+  // With the weather: its own column beside the clock (on the one-line strip, just the last item).
+  zone.el.classList.toggle("has-wx", !!w);
+  zone.el.innerHTML = w ? '<div class="tv-clock-wrap">' + weatherHtml(w, "tv-wx") + '<div class="tv-clock-main">' + clock + "</div></div>" : clock;
 }
 
 /* ---------- photos from a Google Photos shared album ----------
@@ -13075,6 +13157,9 @@ function renderTvControl(root, session) {
   // No photos during davening / Eagle
   const q = cfg.quiet || {};
   html += collapsibleSectionHtml("tvQuiet", "No photos during davening", q.enabled ? (q.classes || []).length + " classes · shows " + tvLayoutLabel(q.layout || "calendar") : "Off", tvcQuietHtml());
+  // Local weather
+  const wxc = cfg.weather || {};
+  html += collapsibleSectionHtml("tvWeather", "Weather", wxc.enabled && wxc.name ? "Showing " + wxc.name : "Off", tvcWeatherHtml());
   // Leaderboard settings
   html += collapsibleSectionHtml("tvLb", "Leaderboard settings", cfg.leaderboard.categories.length + " categories · " + ({ week: "this week", hmonth: "Hebrew month", all: "all time" }[cfg.leaderboard.scope] || ""), tvcLeaderboardHtml());
   // Exit
@@ -13114,6 +13199,48 @@ function tvcPostersHtml() {
     '<div class="tvc-poster' + (p.until && Number(p.until) <= now ? " ended" : "") + '"><div class="tvc-poster-img"><img loading="lazy" decoding="async" alt="" src="' + escapeHtml(p.thumb || p.dataUrl) + '"></div>' +
     '<div class="tvc-poster-when">' + escapeHtml(tvcPosterWhen(p, now)) + "</div>" +
     (TVC.deleteConfirm === p.id ? '<button type="button" class="btn btn-sm tvc-del" data-tvc-del="' + p.id + '">Really remove?</button>' : '<button type="button" class="btn btn-ghost btn-sm" data-tvc-askdel="' + p.id + '">Remove</button>') + "</div>").join("") + "</div>";
+}
+// The Weather section: search for the town (Open-Meteo's free place search), pick it, °F or °C.
+function tvcWeatherHtml() {
+  const wx = TVC.cfg.weather || {};
+  let h = '<p class="help-text">Shows the local weather next to the clock on the TV: the temperature now, today’s high and low, and the chance of rain. Updated every 15 minutes.</p>';
+  if (wx.name) {
+    h += '<div class="tvc-row" style="align-items:center;"><span><b>' + escapeHtml(wx.name) + "</b></span>" +
+      (wx.enabled ? '<button type="button" class="btn btn-ghost btn-sm" data-tvc-act="wx-off">Hide the weather</button>' : '<button type="button" class="btn btn-primary btn-sm" data-tvc-act="wx-on">Show the weather</button>') + "</div>";
+    if (TVC.wxNow && TVC.wxNow.key === wx.lat + "," + wx.lon + "," + wx.units) h += TVC.wxNow.error ? '<p class="help-text">' + escapeHtml(TVC.wxNow.error) + "</p>" : weatherHtml(TVC.wxNow.data, "tvc-wx");
+    h += '<div class="tvc-sub">Units</div><div class="tvc-chips">' + [["F", "°F"], ["C", "°C"]].map(([u, l]) => '<button type="button" class="tvc-chip sm' + ((wx.units || "F") === u ? " active" : "") + '" data-tvc-wxunits="' + u + '">' + l + "</button>").join("") + "</div>";
+  }
+  h += '<div class="tvc-sub">' + (wx.name ? "Change the place" : "Where’s the school?") + '</div><div class="tvc-row"><input type="text" class="tvc-text" id="tvc-wx-q" placeholder="Town or city, e.g. Crown Heights" value="' + escapeHtml(TVC.wxQuery || "") + '" style="flex:1;min-width:180px;"><button type="button" class="btn btn-ghost" data-tvc-act="wx-find">' + (TVC.wxSearching ? "Looking…" : "Find") + "</button></div>";
+  if (TVC.wxResults) {
+    h += TVC.wxResults.length ? '<div class="tvc-wx-results">' + TVC.wxResults.map((p, i) => '<button type="button" class="btn btn-ghost btn-sm" data-tvc-wxpick="' + i + '">' + escapeHtml(p.label) + "</button>").join("") + "</div>"
+      : '<p class="help-text">' + escapeHtml(TVC.wxError || "No places found — try the nearest town’s name.") + "</p>";
+  }
+  return h;
+}
+async function tvcWeatherSearch() {
+  const inp = document.getElementById("tvc-wx-q"), q = inp ? inp.value.trim() : "";
+  TVC.wxQuery = q;
+  if (q.length < 2) { toast("Type the town or city first.", "warn"); return; }
+  TVC.wxSearching = true; TVC.wxError = null; refreshViewOrDefer();
+  try {
+    const r = await fetch("https://geocoding-api.open-meteo.com/v1/search?count=6&language=en&format=json&name=" + encodeURIComponent(q));
+    const d = await r.json();
+    TVC.wxResults = (d.results || []).map((p) => ({ label: [p.name, p.admin1, p.country_code === "US" ? "" : p.country].filter(Boolean).join(", "), name: [p.name, p.admin1].filter(Boolean).join(", "), lat: p.latitude, lon: p.longitude }));
+  } catch (e) { TVC.wxResults = []; TVC.wxError = "Couldn’t reach the weather service — check the internet connection."; }
+  TVC.wxSearching = false;
+  if (document.activeElement && document.activeElement.id === "tvc-wx-q") document.activeElement.blur();
+  refreshViewOrDefer();
+}
+// A reading for the Weather section, so you can see it works before looking at the TV.
+async function tvcWeatherPreview() {
+  const wx = TVC.cfg.weather || {};
+  if (wx.lat == null) return;
+  const key = wx.lat + "," + wx.lon + "," + wx.units;
+  if (TVC.wxNow && TVC.wxNow.key === key) return;
+  TVC.wxNow = { key, data: null };
+  try { TVC.wxNow = { key, data: await fetchWeather(wx.lat, wx.lon, wx.units) }; }
+  catch (e) { TVC.wxNow = { key, error: "Couldn’t get the weather just now — the TV will keep trying." }; }
+  refreshViewOrDefer();
 }
 function tvcQuietHtml() {
   const q = TVC.cfg.quiet || {};
@@ -13313,6 +13440,8 @@ function tvcWire(root) {
     } else if (act === "album-clear") {
       if (await tvcWrite({ photos: { albumUrl: "" } }, "Album disconnected.")) { TVC.albumInput = null; TVC.albumCheck = null; }
     } else if (act === "clear-ann") { TVC.annText = null; tvcWrite({ announcement: null }, "Announcement cleared."); }
+    else if (act === "wx-find") tvcWeatherSearch();
+    else if (act === "wx-on" || act === "wx-off") tvcWrite({ weather: { enabled: act === "wx-on" } }, act === "wx-on" ? "The weather is on the TV." : "Weather hidden.");
     else if (act === "tv-link") {
       if (!window.confirm("Make a new TV link? Any TV using the old one will need the new link.")) return;
       const r = await callApi("admin", { action: "tvKey" });
@@ -13366,6 +13495,15 @@ function tvcWire(root) {
   });
   on("[data-tvc-scope]", "click", (el) => tvcWrite({ leaderboard: { scope: el.getAttribute("data-tvc-scope") } }));
   on("[data-tvc-places]", "click", (el) => tvcWrite({ leaderboard: { places: Number(el.getAttribute("data-tvc-places")) } }));
+  on("[data-tvc-wxpick]", "click", async (el) => {
+    const p = (TVC.wxResults || [])[Number(el.getAttribute("data-tvc-wxpick"))];
+    if (!p) return;
+    if (await tvcWrite({ weather: { enabled: true, name: p.name, lat: p.lat, lon: p.lon } }, "The TV will show the weather for " + p.name + ".")) { TVC.wxResults = null; TVC.wxQuery = ""; }
+  });
+  on("[data-tvc-wxunits]", "click", (el) => tvcWrite({ weather: { units: el.getAttribute("data-tvc-wxunits") } }));
+  const wxq = document.getElementById("tvc-wx-q");
+  if (wxq) wxq.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); tvcWeatherSearch(); } });
+  if (openSections.has("tvWeather")) tvcWeatherPreview();
   on("[data-tvc-secs]", "click", (el) => tvcWrite({ leaderboard: { secsPerCategory: Number(el.getAttribute("data-tvc-secs")) } }));
   // photos
   on("[data-tvc-interval]", "click", (el) => tvcWrite({ photos: { intervalSecs: Number(el.getAttribute("data-tvc-interval")) } }));
