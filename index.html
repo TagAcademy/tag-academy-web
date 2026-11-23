@@ -1420,6 +1420,7 @@ html.tv-mode #tv-root { display: block; }
 .tv-eyebrow { font-size: 1.35rem; letter-spacing: .14em; text-transform: uppercase; color: var(--tv-muted); font-weight: 700; }
 .tv-root h2, .tv-root h3 { color: var(--tv-ink); letter-spacing: 0; text-transform: none; }
 .tv-zone-head h2 { margin: 0; font-family: var(--font-display, Arial, sans-serif); font-size: 3rem; line-height: 1.05; font-weight: 800; }
+.tv-exit-link { display: block; margin: 3rem auto 0; background: none; border: 1px solid rgba(255,255,255,.25); border-radius: 99px; color: inherit; font: inherit; font-size: 1.2rem; padding: .5rem 1.6rem; cursor: pointer; opacity: .75; }
 .tv-head-l { display: flex; flex-direction: column; gap: .3rem; }
 .tv-head-l .tv-eyebrow { font-size: 1.2rem; }
 .tv-scope { margin-left: auto; font-size: 1.6rem; color: var(--tv-gold); font-weight: 700; }
@@ -1597,6 +1598,9 @@ html.tv-mode #tv-root { display: block; }
 @keyframes tvScroll { to { transform: translateX(-100%); } }
 .tv-ticker:not(.scroll) { text-align: center; }
 .tv-boot { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 3rem; color: var(--tv-muted); }
+.tv-boot { flex-direction: column; text-align: center; padding: 0 8vw; line-height: 1.3; }
+.tv-boot small { display: block; font-size: 1.6rem; margin-top: 1.4rem; max-width: 60rem; }
+.tv-boot br { display: none; }
 
 /* TV Display control tab (admin) -- mobile first */
 .tvc { max-width: 720px; margin: 0 auto; padding-bottom: 80px; }
@@ -12327,6 +12331,7 @@ const TV = {
 
 async function initTv() {
   document.title = "TAG Academy TV";
+  tvWireHiddenExit();
   const root = document.getElementById("tv-root");
   root.innerHTML = '<div class="tv-shift"><div class="tv-root" id="tv-canvas"><div class="tv-boot">Loading TAG Academy…</div></div></div>';
   // The TV signs in with its own key (Admin > TV Display > Connect a TV gives a link with ?key=...,
@@ -12334,7 +12339,8 @@ async function initTv() {
   let key = null;
   try { key = new URLSearchParams(location.search).get("key") || localStorage.getItem(TV_KEY_KEY); } catch (e) {}
   if (!key) {
-    root.querySelector("#tv-canvas").innerHTML = '<div class="tv-boot">This TV isn’t connected yet.<br><small>On a phone: Admin › TV Display › Connect a TV, then open the link it gives on this TV.</small></div>';
+    root.querySelector("#tv-canvas").innerHTML = '<div class="tv-boot">This TV isn’t connected yet.<br><small>On a phone: Admin › TV Display › Connect a TV, then open the link it gives on this TV.</small>' +
+      '<button type="button" class="tv-exit-link" onclick="tvExitToApp()">Exit TV mode</button></div>';
     return;
   }
   try {
@@ -12425,8 +12431,16 @@ async function tvCheckForUpdate() {
   if (TV.pageHash === null) { TV.pageHash = h; return; }
   if (h !== TV.pageHash) { console.log("TV: new version published -- reloading"); location.reload(); }
 }
-// Hidden escape hatch on the device itself: press and hold the top-left corner for 4 seconds.
+// Ways out on the device itself, on every TV screen (connected or not): press and hold the
+// top-left corner for 4 seconds, or press Escape on a keyboard (it asks first).
+let tvExitWired = false;
 function tvWireHiddenExit() {
+  if (tvExitWired) return;
+  tvExitWired = true;
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || document.fullscreenElement) return; // the first Escape just leaves full screen
+    if (window.confirm("Exit TV mode on this screen?")) tvExitToApp();
+  });
   const hot = document.createElement("div");
   hot.style.cssText = "position:fixed;left:0;top:0;width:8vw;height:8vh;z-index:9999;";
   let timer = null;
