@@ -1441,15 +1441,28 @@ html.tv-mode #tv-root { display: block; }
 .tv-ann-label { font-size: 1.5rem; letter-spacing: .14em; text-transform: uppercase; font-weight: 800; color: rgba(255,255,255,.75); }
 .tv-ann-text { flex: 1; min-height: 0; display: flex; align-items: center; font-family: var(--font-display, Arial, sans-serif); font-weight: 800; line-height: 1.15; color: #fff; overflow: hidden; overflow-wrap: anywhere; }
 .tv-layout-split .tv-main { grid-template-columns: 1fr 1fr; }
-.tv-layout-photos .tv-main, .tv-layout-leaderboard .tv-main, .tv-layout-calendar .tv-main { grid-template-columns: 1fr; }
+.tv-layout-photos .tv-main, .tv-layout-leaderboard .tv-main, .tv-layout-calendar .tv-main, .tv-layout-weather .tv-main { grid-template-columns: 1fr; }
 /* Posters screen: just the poster, filling the whole screen. */
 .tv-root.tv-layout-posters { inset: 0; gap: 0; }
 .tv-layout-posters .tv-main { grid-template-columns: 1fr; gap: 0; }
 .tv-layout-posters .tv-bottom, .tv-layout-posters .tv-ticker { display: none; }
 .tv-layout-posters .tv-zone-photos { border: none; border-radius: 0; }
-.tv-layout-photos .tv-bottom, .tv-layout-leaderboard .tv-bottom, .tv-layout-calendar .tv-bottom, .tv-layout-split .tv-bottom { flex: none; height: 7.2rem; }
+.tv-layout-photos .tv-bottom, .tv-layout-leaderboard .tv-bottom, .tv-layout-calendar .tv-bottom, .tv-layout-split .tv-bottom, .tv-layout-weather .tv-bottom { flex: none; height: 7.2rem; }
 /* clock */
 .tv-zone-clock { flex: none; justify-content: center; }
+/* the Weather screen (see tvUpdateWeatherZone) */
+.tv-zone-weather { position: relative; padding: 2rem 2.6rem; }
+.tv-wxs-now { display: flex; align-items: center; gap: 2.4rem; margin: 1.5rem 0 2.5rem; }
+.tv-wxs-icon { font-size: 9rem; line-height: 1; }
+.tv-wxs-temp { font-family: var(--font-display, Arial, sans-serif); font-size: 10rem; font-weight: 800; line-height: 1; }
+.tv-wxs-cond { font-size: 3.2rem; font-weight: 700; }
+.tv-wxs-hl { font-size: 2.2rem; color: var(--tv-muted); margin-top: .4rem; }
+.tv-wxs-hours { display: grid; grid-template-columns: repeat(12, 1fr); gap: .8rem; margin-top: auto; }
+.tv-wxs-hour { display: flex; flex-direction: column; align-items: center; gap: .5rem; padding: 1.2rem .3rem; border-radius: 1rem; background: rgba(255,255,255,.05); }
+.tv-wxs-h-time { font-size: 1.5rem; color: var(--tv-muted); font-weight: 700; white-space: nowrap; }
+.tv-wxs-h-icon { font-size: 3rem; line-height: 1.1; }
+.tv-wxs-h-temp { font-family: var(--font-display, Arial, sans-serif); font-size: 2.6rem; font-weight: 800; }
+.tv-wxs-h-rain { font-size: 1.3rem; color: #7cc4ff; font-weight: 700; white-space: nowrap; }
 /* weather, beside the clock (see weatherHtml) */
 .tv-layout-all .tv-zone-clock.has-wx { width: 41%; }
 .tv-zone-clock.has-wx .tv-clock-time, .tv-zone-clock.has-wx .tv-clock-date { white-space: nowrap; }
@@ -1615,7 +1628,7 @@ html.tv-mode #tv-root { display: block; }
 .tvc-preview { width: 132px; flex: none; aspect-ratio: 16/9; background: #0b1020; border-radius: 6px; padding: 4px; }
 .mp { display: grid; gap: 3px; height: 100%; }
 .mp i { font-style: normal; font-size: 7px; color: #fff; display: flex; align-items: center; justify-content: center; border-radius: 2px; background: #26335c; overflow: hidden; }
-.mp i.p { background: #8a5a2b; } .mp i.l { background: #2b4fb8; } .mp i.a { background: #1f7a55; } .mp i.c { background: #6b3fa0; } .mp i.k { background: #4a5575; }
+.mp i.p { background: #8a5a2b; } .mp i.l { background: #2b4fb8; } .mp i.a { background: #1f7a55; } .mp i.c { background: #6b3fa0; } .mp i.k { background: #4a5575; } .mp i.w { background: #2a7fa8; }
 .mp-all { grid-template-columns: 1.45fr 1fr; grid-template-rows: 1fr 1fr .6fr; } .mp-all .p { grid-row: 1 / 3; } .mp-all .l { grid-column: 2; grid-row: 1; } .mp-all .a { grid-column: 2; grid-row: 2; } .mp-all .c { grid-column: 1; grid-row: 3; } .mp-all .k { grid-column: 2; grid-row: 3; }
 .mp-one { grid-template-rows: 1fr .25fr; } .mp-one .s { font-size: 6px; }
 .mp-split { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr .25fr; } .mp-split .k { grid-column: 1 / 3; }
@@ -12203,6 +12216,7 @@ const TV_LAYOUTS = [
   { id: "calendar", label: "Calendar", hint: "Today's schedule with a countdown" },
   { id: "split", label: "Photos + Leaderboard", hint: "Half and half" },
   { id: "posters", label: "Posters", hint: "Just the posters, full screen" },
+  { id: "weather", label: "Weather", hint: "Now and the next 12 hours" },
 ];
 const TV_LAYOUT_IDS = TV_LAYOUTS.map((l) => l.id);
 
@@ -12459,10 +12473,12 @@ function tvTick() {
   TV.eff = eff;
   if (eff.layout !== TV.layout) tvBuildLayout(eff.layout);
   const S = TV.stamps;
-  const wx = TV.cfg.weather || {}, wxKey = wx.enabled && wx.lat != null ? wx.lat + "," + wx.lon + "," + wx.units : "";
+  // The weather is fetched while it's shown: beside the clock (switched on) or on the Weather screen.
+  const wx = TV.cfg.weather || {}, wxKey = wx.lat != null ? wx.lat + "," + wx.lon + "," + wx.units : "";
   if (wxKey !== TV.weather.key) { TV.weather = { key: wxKey, data: null }; S.wx = 0; }
-  if (wxKey && now - S.wx >= 15 * 60000) { S.wx = now; tvRefreshWeather(wx, wxKey); }
+  if (wxKey && (wx.enabled || TV.zones.weather) && now - S.wx >= 15 * 60000) { S.wx = now; tvRefreshWeather(wx, wxKey); }
   tvUpdateClock();
+  tvUpdateWeatherZone();
   if (TV.zones.photos) {
     const album = albumLinkOk(TV.cfg.photos.albumUrl) ? TV.cfg.photos.albumUrl.trim() : "";
     if (album !== TV.album.url || (album && now - S.album >= 300000)) { S.album = now; tvRefreshAlbum(album); }
@@ -12567,17 +12583,28 @@ const WX_CODES = {
 };
 function weatherUrl(lat, lon, units) {
   return "https://api.open-meteo.com/v1/forecast?latitude=" + encodeURIComponent(lat) + "&longitude=" + encodeURIComponent(lon) +
-    "&current=temperature_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&forecast_days=1&timezone=auto" +
+    "&current=temperature_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max" +
+    "&hourly=temperature_2m,weather_code,precipitation_probability,is_day&forecast_days=2&timezone=auto" +
     (units === "C" ? "" : "&temperature_unit=fahrenheit");
 }
-// -> { temp, code, isDay, hi, lo, rain, at } or throws
+// -> { temp, code, isDay, hi, lo, rain, hours: [{ label, temp, code, isDay, rain }] (the next 12), at } or throws
 async function fetchWeather(lat, lon, units) {
   const r = await fetch(weatherUrl(lat, lon, units));
   if (!r.ok) throw new Error("weather " + r.status);
   const d = await r.json(), c = d.current || {}, day = d.daily || {};
   if (typeof c.temperature_2m !== "number") throw new Error("weather: no reading");
   const first = (a) => (Array.isArray(a) && typeof a[0] === "number" ? a[0] : null);
-  return { temp: Math.round(c.temperature_2m), code: Number(c.weather_code) || 0, isDay: c.is_day !== 0, hi: first(day.temperature_2m_max), lo: first(day.temperature_2m_min), rain: first(day.precipitation_probability_max), at: Date.now() };
+  // Hourly times are the place's own local time ("2026-11-24T16:00"); start from the hour after now.
+  const h = d.hourly || {}, times = Array.isArray(h.time) ? h.time : [];
+  const nowHour = String(c.time || "").slice(0, 13);
+  let start = times.findIndex((t) => String(t).slice(0, 13) > nowHour);
+  if (start < 0) start = 0;
+  const hours = times.slice(start, start + 12).map((t, i) => {
+    const k = start + i, hr = Number(String(t).slice(11, 13));
+    const rain = (h.precipitation_probability || [])[k];
+    return { label: (hr % 12 || 12) + (hr < 12 ? " AM" : " PM"), temp: Math.round((h.temperature_2m || [])[k]), code: Number((h.weather_code || [])[k]) || 0, isDay: (h.is_day || [])[k] !== 0, rain: typeof rain === "number" ? rain : null };
+  }).filter((x) => !isNaN(x.temp));
+  return { temp: Math.round(c.temperature_2m), code: Number(c.weather_code) || 0, isDay: c.is_day !== 0, hi: first(day.temperature_2m_max), lo: first(day.temperature_2m_min), rain: first(day.precipitation_probability_max), hours, at: Date.now() };
 }
 function weatherHtml(w, cls) {
   const c = WX_CODES[w.code] || ["🌡️", "🌡️", ""];
@@ -12598,6 +12625,27 @@ async function tvRefreshWeather(wx, key) {
   }
 }
 
+// The Weather screen: right now, big, then the next 12 hours.
+function tvUpdateWeatherZone() {
+  const zone = TV.zones.weather; if (!zone) return;
+  const wx = TV.cfg.weather || {}, w = TV.weather.data;
+  const key = wx.lat == null ? "none" : w ? JSON.stringify(w) + wx.name : "wait";
+  if (zone.key === key) return;
+  zone.key = key;
+  if (wx.lat == null) { zone.el.innerHTML = '<div class="tv-boot">No place set for the weather.<small>On a phone: Admin › TV Display › Weather, then find the town.</small></div>'; return; }
+  if (!w) { zone.el.innerHTML = '<div class="tv-boot">Getting the weather…</div>'; return; }
+  const c = WX_CODES[w.code] || ["🌡️", "🌡️", ""];
+  const deg = (n) => Math.round(n) + "°";
+  zone.el.innerHTML = '<div class="tv-zone-head"><div class="tv-head-l"><span class="tv-eyebrow">Weather</span><h2>' + escapeHtml(wx.name || "") + "</h2></div></div>" +
+    '<div class="tv-wxs-now"><span class="tv-wxs-icon">' + (w.isDay ? c[0] : c[1]) + '</span><span class="tv-wxs-temp">' + deg(w.temp) + "</span>" +
+    '<div class="tv-wxs-info"><div class="tv-wxs-cond">' + escapeHtml(c[2]) + "</div>" +
+    (w.hi !== null && w.lo !== null ? '<div class="tv-wxs-hl">High ' + deg(w.hi) + " · Low " + deg(w.lo) + "</div>" : "") +
+    (w.rain !== null ? '<div class="tv-wxs-hl">' + Math.round(w.rain) + "% chance of rain today</div>" : "") + "</div></div>" +
+    '<div class="tv-wxs-hours">' + (w.hours || []).map((x) => { const hc = WX_CODES[x.code] || ["🌡️", "🌡️", ""];
+      return '<div class="tv-wxs-hour"><div class="tv-wxs-h-time">' + escapeHtml(x.label) + '</div><div class="tv-wxs-h-icon">' + (x.isDay ? hc[0] : hc[1]) + '</div><div class="tv-wxs-h-temp">' + deg(x.temp) + "</div>" +
+        '<div class="tv-wxs-h-rain">' + (x.rain !== null && x.rain >= 10 ? "💧 " + Math.round(x.rain) + "%" : "&nbsp;") + "</div></div>"; }).join("") + "</div>";
+}
+
 /* ---------- clock ---------- */
 function tvUpdateClock() {
   const zone = TV.zones.clock; if (!zone) return;
@@ -12606,7 +12654,8 @@ function tvUpdateClock() {
   const date = now.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
   const iso = todayISO();
   const heb = hebrewDateFor(iso), parsha = parshaFor(iso);
-  const w = TV.weather.key ? TV.weather.data : null;
+  // Beside the clock only when it's switched on -- and not under the Weather screen, which shows it already.
+  const w = TV.weather.key && (TV.cfg.weather || {}).enabled && !TV.zones.weather ? TV.weather.data : null;
   const key = time + "|" + date + "|" + heb + "|" + (w ? JSON.stringify(w) : "");
   if (zone.key === key) return;
   zone.key = key;
@@ -13110,6 +13159,7 @@ function tvcMiniPreview(layout) {
     calendar: '<div class="mp mp-one">' + b("c", "Calendar") + b("k s", "Clock") + "</div>",
     split: '<div class="mp mp-split">' + b("p", "Photos") + b("l", "Leaderboard") + b("k s", "Clock") + "</div>",
     posters: '<div class="mp mp-one">' + b("a", "Posters") + b("k s", "Clock") + "</div>",
+    weather: '<div class="mp mp-one">' + b("w", "Weather") + b("k s", "Clock") + "</div>",
   };
   return '<div class="tvc-preview">' + (bodies[layout] || bodies.all) + "</div>";
 }
@@ -13217,7 +13267,7 @@ function tvcPostersHtml() {
 // The Weather section: search for the town (Open-Meteo's free place search), pick it, °F or °C.
 function tvcWeatherHtml() {
   const wx = TVC.cfg.weather || {};
-  let h = '<p class="help-text">Shows the local weather next to the clock on the TV: the temperature now, today’s high and low, and the chance of rain. Updated every 15 minutes.</p>';
+  let h = '<p class="help-text">Shows the local weather next to the clock on the TV: the temperature now, today’s high and low, and the chance of rain. Updated every 15 minutes. For the hour-by-hour forecast, pick the <b>Weather</b> screen above (on its own, in the rotation, or on the schedule).</p>';
   if (wx.name) {
     h += '<div class="tvc-row" style="align-items:center;"><span><b>' + escapeHtml(wx.name) + "</b></span>" +
       (wx.enabled ? '<button type="button" class="btn btn-ghost btn-sm" data-tvc-act="wx-off">Hide the weather</button>' : '<button type="button" class="btn btn-primary btn-sm" data-tvc-act="wx-on">Show the weather</button>') + "</div>";
